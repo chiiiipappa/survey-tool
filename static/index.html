@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>調査票レイアウト確認ツール</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<!-- ===== ヘッダー ===== -->
+<header class="app-header">
+  <h1>📋 調査票レイアウト確認ツール</h1>
+  <span class="version">v1.0 (STEP1)</span>
+</header>
+
+<!-- ===== ステップナビ ===== -->
+<nav class="step-nav">
+  <button id="btn-step-upload"    class="step-btn active">① レイアウトCSV読込</button>
+  <button id="btn-step-questions" class="step-btn" disabled>② 設問構造確認</button>
+  <button id="btn-step-charts"    class="step-btn" disabled title="STEP2以降で実装">③ 集計・グラフ作成（今後実装予定）</button>
+</nav>
+
+<!-- ===== メインコンテンツ ===== -->
+<main class="main-content">
+
+  <!-- ========== PANEL 1: アップロード ========== -->
+  <section id="panel-upload" class="panel active">
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">レイアウト CSV を読み込む</span>
+      </div>
+      <div class="card-body">
+        <div id="drop-zone" class="drop-zone">
+          <div class="drop-icon">📂</div>
+          <p>
+            <strong>クリックしてファイルを選択</strong>、またはここにドラッグ&ドロップ<br>
+            <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8 自動判定）</span>
+          </p>
+        </div>
+        <input type="file" id="file-input" accept=".csv" class="hidden">
+
+        <!-- ファイル情報バー -->
+        <div id="file-info-bar" class="file-info-bar hidden"></div>
+
+        <!-- パース警告 -->
+        <div id="parse-warnings-box" class="warning-box hidden"></div>
+
+        <!-- 次へボタン -->
+        <div style="margin-top: 20px; display: flex; gap: 12px; align-items: center;">
+          <button id="btn-to-questions" class="btn btn-primary" disabled>
+            設問確認へ →
+          </button>
+          <span class="text-sm text-muted">または</span>
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+            プロジェクトを復元
+            <input type="file" id="project-input" accept=".json" class="hidden">
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 使い方カード -->
+    <div class="card">
+      <div class="card-header"><span class="card-title">使い方</span></div>
+      <div class="card-body text-sm" style="line-height:1.8;">
+        <p><strong>① レイアウトCSVを読み込む</strong></p>
+        <p style="color:var(--color-text-muted); margin-bottom:12px">
+          コード・種別・質問文・表側・選択肢の列を持つ CSV ファイルをアップロードしてください。<br>
+          文字コード（Shift-JIS / UTF-8）は自動で判定します。
+        </p>
+        <p><strong>② 設問構造を確認する</strong></p>
+        <p style="color:var(--color-text-muted); margin-bottom:12px">
+          親子設問の自動検出・種別の表示名変換・選択肢の抽出を行い、一覧テーブルに表示します。<br>
+          設問コードや質問文での検索、種別フィルタが使えます。
+        </p>
+        <p><strong>③ プロジェクトとして保存</strong>（STEP2 準備）</p>
+        <p style="color:var(--color-text-muted)">
+          設問構造を JSON プロジェクトファイルとして保存・再読込できます。
+        </p>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ========== PANEL 2: 設問構造確認 ========== -->
+  <section id="panel-questions" class="panel">
+
+    <!-- 検索・フィルタカード -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">検索・フィルタ</span>
+        <div style="margin-left:auto; display:flex; gap:8px;">
+          <button id="btn-save-project" class="btn btn-secondary btn-sm">💾 プロジェクト保存</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="filter-bar">
+          <input
+            type="text"
+            id="q-search"
+            placeholder="設問コード・質問文で検索…"
+          >
+          <select id="q-type-filter">
+            <option value="">すべての種別</option>
+          </select>
+          <label>
+            <input type="checkbox" id="q-include-children" checked>
+            子設問を含む
+          </label>
+          <button id="q-apply-btn" class="btn btn-primary btn-sm">適用</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 設問一覧テーブルカード -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">設問一覧</span>
+      </div>
+      <div class="table-wrap">
+        <table id="questions-table">
+          <thead>
+            <tr>
+              <th style="width:52px">No.</th>
+              <th style="width:140px">コード</th>
+              <th style="width:140px">種別</th>
+              <th>質問文</th>
+              <th style="width:220px">表側</th>
+              <th style="min-width:180px">選択肢</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="6" style="text-align:center; padding:32px; color:var(--color-text-muted)">
+                CSV をアップロードすると設問一覧が表示されます。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="questions-count-bar" class="count-bar">–</div>
+
+      <!-- JSON ビューア -->
+      <div id="json-viewer-toggle" class="json-viewer-toggle">
+        ▼ JSON ビューアを開く（内部データ確認）
+      </div>
+      <div id="json-viewer-body" class="json-viewer-body">
+        <div class="json-viewer-actions">
+          <button id="json-load-btn"  class="btn btn-secondary btn-sm">🔄 データ取得</button>
+          <button id="json-copy-btn"  class="btn btn-secondary btn-sm">📋 JSONをコピー</button>
+        </div>
+        <pre id="json-pre" class="json-pre">（「データ取得」ボタンを押すと内部 JSON が表示されます）</pre>
+      </div>
+    </div>
+
+    <!-- STEP2+ プレースホルダー -->
+    <div class="card placeholder-card">
+      <div class="card-header">
+        <span class="card-title">STEP2: 集計・グラフ設定</span>
+        <span class="badge badge-step" style="margin-left:8px">今後実装予定</span>
+      </div>
+      <div class="card-body">
+        <div class="placeholder-icon">🔧</div>
+        <div class="placeholder-title">STEP2: 集計・グラフ設定</div>
+        <div class="placeholder-desc">
+          設問の選択・クロス集計の軸設定・グラフ種別の選択・フィルタ条件の設定を行います。
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ========== PANEL 3: グラフ（プレースホルダー） ========== -->
+  <section id="panel-charts" class="panel">
+    <div class="card">
+      <div class="card-body" style="text-align:center; padding:64px; color:var(--color-text-muted);">
+        <div style="font-size:3rem; margin-bottom:16px">🔧</div>
+        <div style="font-size:1.1rem; font-weight:600; margin-bottom:8px">STEP2 以降で実装予定</div>
+        <div class="text-sm">集計設定・グラフ作成・エクスポート機能を今後追加します。</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===== スピナー ===== -->
+<div id="spinner-overlay" class="spinner-overlay">
+  <div class="spinner"></div>
+  <span id="spinner-msg">処理中…</span>
+</div>
+
+<!-- ===== Toast ===== -->
+<div id="toast-container"></div>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
