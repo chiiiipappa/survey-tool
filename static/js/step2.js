@@ -12,17 +12,15 @@ import { showSpinner, hideSpinner, showToast, showError } from "./app.js";
 export function initStep2Panel() {
   _initDropZone();
   _initTabSwitcher();
-  _initAxisButtons();
+  _initAxisSaveButton();
+  _initAxisControls();
   _initExportButton();
   _initFaCard();
+  _initCollapsible();
 
-  // ②側のチェックボックス変更を③の軸リスト・FA属性プルダウンへ同期
+  // 集計軸保存後に付与属性列・ソート属性を同期
   document.addEventListener("survey:statechange", () => {
-    const axisSelected = new Set(AppState.step2SelectedAxisColumns);
-    document.querySelectorAll('#step2-axis-list input[name="axis"]').forEach(cb => {
-      cb.checked = axisSelected.has(cb.value);
-    });
-    _updateAttrSelect();
+    _updateAttrMultiSelect();
     _updateSortAttrSelect();
   });
 }
@@ -87,11 +85,11 @@ async function _handleFile(file) {
 
 function _renderAll(resp) {
   renderFileInfoBar(resp);
-  renderMatchCard(resp);
+  renderAdvancedCard(resp);  // ② 折りたたみ（collapsed 状態で表示）
   renderPreviewCard(resp);
-  renderAxisCard(resp);
-  renderExportCard();
-  renderFaCard(resp);
+  renderAxisCard(resp);      // ③ 集計軸チェックボックス
+  _loadFaMeta();             // ④ 用マルチセレクト事前初期化
+  // ④⑤ は集計軸完了・表を更新 まで非表示
 }
 
 // ---------------------------------------------------------------------------
@@ -124,11 +122,119 @@ export function renderFileInfoBar(resp) {
 }
 
 // ---------------------------------------------------------------------------
-// 照合結果カード
+// ③ 集計軸選択カード
+// ---------------------------------------------------------------------------
+
+export function renderAxisCard(resp) {
+  const card = document.getElementById("step2-axis-card");
+  card.style.display = "";
+
+  const candidates = resp.axis_candidates ?? [];
+  const savedSet   = new Set(AppState.step2SelectedAxisColumns);
+  const listEl     = document.getElementById("step2-axis-cb-list");
+
+  // 再アップロード時にイベントが重複しないよう search input を作り直す
+  const oldSearch = document.getElementById("step2-axis-search");
+  const newSearch = oldSearch.cloneNode(true);
+  oldSearch.parentNode.replaceChild(newSearch, oldSearch);
+
+  const hasSaved = savedSet.size > 0;
+
+  listEl.innerHTML = candidates.map(c => {
+    const combinedText = c.question_code + " " + c.question_text;
+    const isDefault = !hasSaved && (
+      combinedText.includes("ファンラベル") || combinedText.includes("[属性]")
+    );
+    const checked     = (hasSaved ? savedSet.has(c.question_code) : isDefault) ? "checked" : "";
+    const searchLabel = combinedText.toLowerCase();
+    const badge       = c.type_label
+      ? `<span class="badge" style="margin-left:auto;font-size:10px">${_esc(c.type_label)}</span>`
+      : "";
+    return `<label class="step2-axis-cb-item" data-label="${_esc(searchLabel)}">
+      <input type="checkbox" value="${_esc(c.question_code)}" ${checked}>
+      <span><strong>${_esc(c.question_code)}</strong>　${_esc(c.question_text)}</span>
+      ${badge}
+    </label>`;
+  }).join("");
+
+  newSearch.addEventListener("input", () => {
+    const q = newSearch.value.toLowerCase();
+    listEl.querySelectorAll(".step2-axis-cb-item").forEach(item => {
+      item.classList.toggle("hidden", q.length > 0 && !item.dataset.label.includes(q));
+    });
+  });
+
+  // 以前に集計軸を保存済みの場合は ③ 保存済バッジ + ④ を表示
+  if (AppState.step2SelectedAxisColumns.length > 0) {
+    document.getElementById("step2-axis-saved-badge").style.display = "";
+    document.getElementById("step2-fa-form-card").style.display = "";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 集計軸 保存ボタン
+// ---------------------------------------------------------------------------
+
+function _initAxisSaveButton() {
+  document.getElementById("step2-save-axis-btn").addEventListener("click", handleAxisSave);
+}
+
+function _initAxisControls() {
+  document.getElementById("step2-axis-select-all").addEventListener("click", () => {
+    document.querySelectorAll('#step2-axis-cb-list input[type="checkbox"]')
+      .forEach(cb => { cb.checked = true; });
+  });
+  document.getElementById("step2-axis-deselect-all").addEventListener("click", () => {
+    document.querySelectorAll('#step2-axis-cb-list input[type="checkbox"]')
+      .forEach(cb => { cb.checked = false; });
+  });
+}
+
+export async function handleAxisSave() {
+  if (!AppState.sessionToken) return;
+  const selected = Array.from(
+    document.querySelectorAll('#step2-axis-cb-list input[type="checkbox"]:checked')
+  ).map(cb => cb.value);
+  showSpinner("集計軸を保存中…");
+  try {
+    await saveStep2Axis(AppState.sessionToken, selected);
+    setStep2AxisSelection(selected);
+    showToast(`集計軸を保存しました（${selected.length} 列）`);
+    document.getElementById("step2-axis-saved-badge").style.display = "";
+    document.getElementById("step2-fa-form-card").style.display = "";
+    _updateAttrMultiSelect();
+    _updateSortAttrSelect();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    hideSpinner();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 折りたたみカード（データ変換・出力）
+// ---------------------------------------------------------------------------
+
+export function renderAdvancedCard(resp) {
+  document.getElementById("step2-advanced-card").style.display = "";
+  renderMatchCard(resp);
+}
+
+function _initCollapsible() {
+  document.getElementById("step2-advanced-toggle").addEventListener("click", () => {
+    const body = document.getElementById("step2-advanced-body");
+    const chv  = document.getElementById("step2-adv-chevron");
+    const open = body.style.display === "none";
+    body.style.display = open ? "" : "none";
+    chv.textContent = open ? "▼" : "▶";
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 照合結果（要確認・未照合のみ表示）
 // ---------------------------------------------------------------------------
 
 export function renderMatchCard(resp) {
-  const card    = document.getElementById("step2-match-card");
   const summary = document.getElementById("step2-match-summary");
   const detail  = document.getElementById("step2-match-detail");
 
@@ -137,70 +243,48 @@ export function renderMatchCard(resp) {
   const bracketCols  = resp.bracket_columns ?? [];
   const missingDetails = resp.missing_column_details ?? [];
 
-  // ブラケット照合済みの親コード集合
   const bracketBaseCodes = new Set(bracketCols.map(bc => bc.base_code));
   const normalMatchedCount = matched.filter(c => !bracketBaseCodes.has(c)).length;
   const bracketMatchedCount = bracketBaseCodes.size;
 
-  // missing_column_details の verdict 別集計
-  const parentOk    = missingDetails.filter(d => d.verdict === "parent_matched" || d.verdict === "bracket_expanded");
-  const needCheck   = missingDetails.filter(d => d.verdict === "free_answer" || d.verdict === "need_check");
-  const unmatched   = missingDetails.filter(d => d.verdict === "unmatched");
+  const parentOk  = missingDetails.filter(d => d.verdict === "parent_matched" || d.verdict === "bracket_expanded");
+  const needCheck = missingDetails.filter(d => d.verdict === "free_answer" || d.verdict === "need_check");
+  const unmatched = missingDetails.filter(d => d.verdict === "unmatched");
 
-  // ---------- サマリーバッジ ----------
+  // サマリーバッジ（折りたたみヘッダーに表示）
   const badgeParts = [];
-  if (normalMatchedCount)    badgeParts.push(`<span class="badge badge-ok">正常に照合 ${normalMatchedCount}</span>`);
-  if (bracketMatchedCount)   badgeParts.push(`<span class="badge badge-ok">展開列として照合 ${bracketMatchedCount}</span>`);
-  if (parentOk.length)       badgeParts.push(`<span class="badge" style="background:var(--color-success-bg,#E8F9F7);color:var(--color-success-text,#1E8A7A)">回答不要の親設問 ${parentOk.length}</span>`);
-  if (needCheck.length)      badgeParts.push(`<span class="badge badge-warn">要確認 ${needCheck.length}</span>`);
-  if (unmatched.length)      badgeParts.push(`<span class="badge" style="background:var(--color-error-bg,#FDECEA);color:var(--color-error-text,#B8010F)">未照合 ${unmatched.length}</span>`);
-  if (extra.length)          badgeParts.push(`<span class="badge badge-info">余分 ${extra.length}</span>`);
-  summary.innerHTML = badgeParts.join("") || '<span class="badge">照合なし</span>';
+  const okTotal = normalMatchedCount + bracketMatchedCount + parentOk.length;
+  if (okTotal)          badgeParts.push(`<span class="badge badge-ok">照合済 ${okTotal}</span>`);
+  if (needCheck.length) badgeParts.push(`<span class="badge badge-warn">要確認 ${needCheck.length}</span>`);
+  if (unmatched.length) badgeParts.push(`<span class="badge" style="background:var(--color-error-bg,#FDECEA);color:var(--color-error-text,#B8010F)">未照合 ${unmatched.length}</span>`);
+  if (extra.length)     badgeParts.push(`<span class="badge badge-info">余分 ${extra.length}</span>`);
+  summary.innerHTML = badgeParts.join("") || "";
 
+  // 詳細: 要確認・未照合のみ
   const sections = [];
 
-  // ---------- 正常に照合 ----------
-  const normalMatched = matched.filter(c => !bracketBaseCodes.has(c));
-  if (normalMatched.length) {
+  if (needCheck.length) {
     sections.push(`
       <div class="match-section">
-        <div class="match-section-title text-sm" style="color:var(--color-success,#1E8A7A);font-weight:600;margin-bottom:6px">
-          ✅ 正常に照合（${normalMatched.length}）
+        <div class="match-section-title text-sm" style="color:var(--color-warning,#7A5200);font-weight:600;margin-bottom:6px">
+          ⚠ 要確認（${needCheck.length}）
         </div>
-        <div class="badge-list">${normalMatched.map(c => `<span class="badge badge-ok">${_esc(c)}</span>`).join("")}</div>
+        ${_missingTable(needCheck)}
       </div>
     `);
   }
 
-  // ---------- 展開列として照合 ----------
-  if (bracketCols.length) {
-    const groups = {};
-    bracketCols.forEach(bc => {
-      if (!groups[bc.base_code]) groups[bc.base_code] = [];
-      groups[bc.base_code].push(bc);
-    });
-    const groupHtml = Object.entries(groups).map(([base, items]) => {
-      const itemBadges = items.map(bc =>
-        `<span class="badge badge-ok" title="${_esc(bc.display_header)}">${_esc(bc.column_name)}</span>`
-      ).join("");
-      return `<div style="margin-bottom:4px"><span class="badge" style="font-weight:600">${_esc(base)}</span> → ${itemBadges}</div>`;
-    }).join("");
+  if (unmatched.length) {
     sections.push(`
       <div class="match-section" style="margin-top:12px">
-        <div class="match-section-title text-sm" style="color:var(--color-success,#1E8A7A);font-weight:600;margin-bottom:6px">
-          📋 展開列として照合（設問 ${bracketMatchedCount} 件、列 ${bracketCols.length} 件）
+        <div class="match-section-title text-sm" style="color:var(--color-error-text,#B8010F);font-weight:600;margin-bottom:6px">
+          ❌ 未照合（${unmatched.length}）
         </div>
-        ${groupHtml}
+        ${_missingTable(unmatched)}
       </div>
     `);
   }
 
-  // ---------- 不足列の詳細（分類別） ----------
-  if (missingDetails.length) {
-    sections.push(_renderMissingDetails(parentOk, needCheck, unmatched));
-  }
-
-  // ---------- 余分列 ----------
   if (extra.length) {
     sections.push(`
       <div class="match-section" style="margin-top:12px">
@@ -212,47 +296,8 @@ export function renderMatchCard(resp) {
     `);
   }
 
-  detail.innerHTML = sections.join("") || '<p class="text-sm text-muted">照合できた列はありません。</p>';
-  card.style.display = "";
-}
-
-function _renderMissingDetails(parentOk, needCheck, unmatched) {
-  const parts = [];
-
-  if (parentOk.length) {
-    parts.push(`
-      <div class="match-section" style="margin-top:12px">
-        <div class="match-section-title text-sm" style="color:var(--color-success,#1E8A7A);font-weight:600;margin-bottom:6px">
-          ✅ 回答不要の親設問（${parentOk.length}）
-        </div>
-        ${_missingTable(parentOk)}
-      </div>
-    `);
-  }
-
-  if (needCheck.length) {
-    parts.push(`
-      <div class="match-section" style="margin-top:12px">
-        <div class="match-section-title text-sm" style="color:var(--color-warning,#7A5200);font-weight:600;margin-bottom:6px">
-          ⚠ 要確認（${needCheck.length}）
-        </div>
-        ${_missingTable(needCheck)}
-      </div>
-    `);
-  }
-
-  if (unmatched.length) {
-    parts.push(`
-      <div class="match-section" style="margin-top:12px">
-        <div class="match-section-title text-sm" style="color:var(--color-error-text,#B8010F);font-weight:600;margin-bottom:6px">
-          ❌ 未照合（${unmatched.length}）
-        </div>
-        ${_missingTable(unmatched)}
-      </div>
-    `);
-  }
-
-  return parts.join("");
+  detail.innerHTML = sections.join("") ||
+    '<p class="text-sm" style="color:var(--color-success,#1E8A7A)">✅ すべての設問コードが正常に照合されました。</p>';
 }
 
 function _missingTable(items) {
@@ -298,13 +343,9 @@ function _missingTable(items) {
 // ---------------------------------------------------------------------------
 
 export function renderPreviewCard(resp) {
-  const card = document.getElementById("step2-preview-card");
-
   _renderPreviewTable("step2-preview-raw", resp.preview_rows ?? []);
   _renderPreviewTable("step2-preview-labeled", resp.labeled_preview_rows ?? []);
   _renderUnmatchedTable("step2-preview-unmatched", resp.unmatched_values ?? []);
-
-  card.style.display = "";
 }
 
 function _renderPreviewTable(containerId, rows) {
@@ -357,73 +398,8 @@ function _initTabSwitcher() {
 }
 
 // ---------------------------------------------------------------------------
-// 集計軸選択カード
+// ラベル変換済みデータ CSV エクスポート
 // ---------------------------------------------------------------------------
-
-export function renderAxisCard(resp) {
-  const card = document.getElementById("step2-axis-card");
-  const list = document.getElementById("step2-axis-list");
-  const candidates = resp.axis_candidates ?? [];
-
-  if (!candidates.length) {
-    list.innerHTML = '<p class="text-sm text-muted">集計軸候補がありません。</p>';
-    card.style.display = "";
-    return;
-  }
-
-  const selected = new Set(AppState.step2SelectedAxisColumns);
-  list.innerHTML = candidates.map(c => {
-    const isMulti = (resp.multi_select_columns ?? []).includes(c.question_code);
-    const badge = isMulti
-      ? `<span class="badge badge-warn" style="font-size:11px">後続対応</span>`
-      : `<span class="badge" style="font-size:11px">${_esc(c.type_label)}</span>`;
-    return `
-      <label class="axis-item">
-        <input type="checkbox" name="axis" value="${_esc(c.question_code)}"
-          ${selected.has(c.question_code) ? "checked" : ""}>
-        <span class="axis-code">${_esc(c.question_code)}</span>
-        ${badge}
-        <span class="axis-text text-sm text-muted">${_esc(c.question_text)}</span>
-      </label>
-    `;
-  }).join("");
-
-  card.style.display = "";
-}
-
-function _initAxisButtons() {
-  document.getElementById("step2-save-axis-btn").addEventListener("click", handleAxisSave);
-  document.getElementById("step2-select-all-btn").addEventListener("click", () => {
-    document.querySelectorAll('#step2-axis-list input[name="axis"]').forEach(cb => cb.checked = true);
-  });
-  document.getElementById("step2-clear-all-btn").addEventListener("click", () => {
-    document.querySelectorAll('#step2-axis-list input[name="axis"]').forEach(cb => cb.checked = false);
-  });
-}
-
-export async function handleAxisSave() {
-  if (!AppState.sessionToken) return;
-  const selected = [...document.querySelectorAll('#step2-axis-list input[name="axis"]:checked')]
-    .map(cb => cb.value);
-  showSpinner("集計軸を保存中…");
-  try {
-    await saveStep2Axis(AppState.sessionToken, selected);
-    setStep2AxisSelection(selected);
-    showToast(`集計軸を保存しました（${selected.length} 列）`);
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    hideSpinner();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// エクスポートカード
-// ---------------------------------------------------------------------------
-
-export function renderExportCard() {
-  document.getElementById("step2-export-card").style.display = "";
-}
 
 function _initExportButton() {
   document.getElementById("step2-export-btn").addEventListener("click", handleExport);
@@ -443,20 +419,14 @@ export async function handleExport() {
 }
 
 // ---------------------------------------------------------------------------
-// FA 閲覧カード
+// FA 一覧カード
 // ---------------------------------------------------------------------------
 
 const _faState = {
-  keyColumnName: "",
-  faColumns: [],
+  faColumns:   [],
   _msQuestion: null,
-  hasData: false,
+  hasData:     false,
 };
-
-export function renderFaCard(resp) {
-  document.getElementById("step2-fa-card").style.display = "";
-  _loadFaMeta();
-}
 
 function _initFaCard() {
   document.getElementById("fa-apply-btn").addEventListener("click", () => {
@@ -505,7 +475,6 @@ async function _loadFaMeta() {
   showSpinner("FA設問を読み込み中…");
   try {
     const meta = await getFaMeta(AppState.sessionToken);
-    _faState.keyColumnName = meta.key_column_name ?? "";
     _faState.faColumns = meta.fa_columns ?? [];
     setStep2FaMeta(meta);
     _initMultiSelects(meta);
@@ -517,7 +486,7 @@ async function _loadFaMeta() {
 }
 
 function _initMultiSelects(meta) {
-  // FA設問マルチセレクト
+  // FA設問 multi-select
   const faOptions = (meta.fa_columns ?? []).map(col => ({
     value: col.question_code,
     label: `${col.question_code}｜${col.question_text}`,
@@ -527,22 +496,46 @@ function _initMultiSelects(meta) {
     placeholder: "FA設問を検索・選択…",
   });
 
-  // 属性列・ソートプルダウンを集計軸選択から構築
-  _updateAttrSelect();
+  // 付与属性列 multi-select（集計軸保存後に選択肢が更新される）
+  const candidateMap = new Map(AppState.step2AxisCandidates.map(c => [c.question_code, c]));
+  const attrOptions = AppState.step2SelectedAxisColumns.map(code => {
+    const info = candidateMap.get(code);
+    return { value: code, label: info ? `${code}　${info.question_text}` : code };
+  });
+  _renderAttrCheckboxes(attrOptions);
+
   _updateSortAttrSelect();
 }
 
-function _updateAttrSelect() {
-  const sel = document.getElementById("fa-attr-select");
-  if (!sel) return;
-  const cur = sel.value;
+function _updateAttrMultiSelect() {
   const candidateMap = new Map(AppState.step2AxisCandidates.map(c => [c.question_code, c]));
-  sel.innerHTML = '<option value="">（属性なし）</option>' +
-    AppState.step2SelectedAxisColumns.map(code => {
-      const info = candidateMap.get(code);
-      const label = info ? `${code}　${info.question_text}` : code;
-      return `<option value="${_esc(code)}" ${code === cur ? "selected" : ""}>${_esc(label)}</option>`;
-    }).join("");
+  const options = AppState.step2SelectedAxisColumns.map(code => {
+    const info = candidateMap.get(code);
+    return { value: code, label: info ? `${code}　${info.question_text}` : code };
+  });
+  _renderAttrCheckboxes(options);
+}
+
+function _renderAttrCheckboxes(options) {
+  const container = document.getElementById("fa-attr-cb-list");
+  if (!container) return;
+  const prevSelected = new Set(_getAttrSelected());
+  if (!options.length) {
+    container.innerHTML = '<span class="text-sm text-muted">集計軸を保存すると選択肢が表示されます</span>';
+    return;
+  }
+  container.innerHTML = options.map(o => `
+    <label class="fa-attr-cb-item">
+      <input type="checkbox" value="${_esc(o.value)}" ${prevSelected.has(o.value) ? "checked" : ""}>
+      <span>${_esc(o.label)}</span>
+    </label>
+  `).join("");
+}
+
+function _getAttrSelected() {
+  return Array.from(
+    document.querySelectorAll('#fa-attr-cb-list input[type="checkbox"]:checked')
+  ).map(el => el.value);
 }
 
 function _updateSortAttrSelect() {
@@ -559,15 +552,14 @@ function _updateSortAttrSelect() {
 }
 
 function _collectFaParams() {
-  const attrVal = document.getElementById("fa-attr-select")?.value;
   return {
-    attrColumns: attrVal ? [attrVal] : [],
-    faCodes:     _faState._msQuestion?.getSelected() ?? [],
+    attrColumns:  _getAttrSelected(),
+    faCodes:      _faState._msQuestion?.getSelected() ?? [],
     excludeEmpty: document.getElementById("fa-exclude-empty").checked,
-    minChars:    parseInt(document.getElementById("fa-min-chars").value, 10) || 0,
-    sortBy:      document.getElementById("fa-sort-select").value,
-    sortAttr:    document.getElementById("fa-sort-attr-select").value || "",
-    keyword:     document.getElementById("fa-keyword").value.trim(),
+    minChars:     parseInt(document.getElementById("fa-min-chars").value, 10) || 0,
+    sortBy:       document.getElementById("fa-sort-select").value,
+    sortAttr:     document.getElementById("fa-sort-attr-select").value || "",
+    keyword:      document.getElementById("fa-keyword").value.trim(),
   };
 }
 
@@ -578,8 +570,7 @@ async function _loadFaData(params) {
     const data = await getFaData(AppState.sessionToken, params);
     _faState.hasData = true;
 
-    // 案内を非表示にして件数バーを表示
-    document.getElementById("fa-guidance").style.display = "none";
+    document.getElementById("step2-fa-card").style.display = "";
     const countBar = document.getElementById("fa-count-bar");
     countBar.style.display = "";
 
@@ -602,12 +593,10 @@ function _renderFaTable(data) {
     return;
   }
 
-  const showKey = !!_faState.keyColumnName;
   const attrCols = rows.length > 0 ? Object.keys(rows[0].attr_values) : [];
 
   const thead = `<tr>
-    <th style="width:52px; text-align:right">RowID</th>
-    ${showKey ? `<th style="white-space:nowrap">KEY</th>` : ""}
+    <th style="width:48px; text-align:right">RowID</th>
     ${attrCols.map(c => `<th style="white-space:nowrap">${_esc(c)}</th>`).join("")}
     <th style="width:90px; white-space:nowrap">設問コード</th>
     <th style="min-width:160px">質問文</th>
@@ -615,17 +604,22 @@ function _renderFaTable(data) {
     <th style="width:56px; text-align:right">文字数</th>
   </tr>`;
 
-  const tbody = rows.map((r, i) => `
-    <tr>
-      <td style="text-align:right; color:var(--color-text-muted)">${i + 1}</td>
-      ${showKey ? `<td class="text-sm">${_esc(r.key_value ?? "")}</td>` : ""}
+  const tbody = rows.map((r) => {
+    const rowStyle = r.is_empty ? ' style="opacity:0.45"' : '';
+    const answerCell = r.is_empty
+      ? `<td class="fa-answer-cell text-muted" style="font-style:italic">（空欄）</td>`
+      : `<td class="fa-answer-cell">${_esc(r.answer)}</td>`;
+    return `
+    <tr${rowStyle}>
+      <td style="text-align:right; color:var(--color-text-muted)">${r.row_index + 1}</td>
       ${attrCols.map(c => `<td class="text-sm">${_esc(r.attr_values[c] ?? "")}</td>`).join("")}
       <td class="text-sm"><strong>${_esc(r.question_code)}</strong></td>
       <td class="text-sm text-muted">${_esc(r.question_text)}</td>
-      <td class="fa-answer-cell">${_esc(r.answer)}</td>
+      ${answerCell}
       <td class="fa-chars-cell text-sm">${r.char_count}</td>
     </tr>
-  `).join("");
+  `;
+  }).join("");
 
   wrap.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
 }
@@ -633,7 +627,12 @@ function _renderFaTable(data) {
 function _updateFaCountBar(data) {
   const bar = document.getElementById("fa-count-bar");
   const fmt = n => n.toLocaleString("ja-JP");
-  if (data.total_fa_rows === data.filtered_row_count) {
+  const excludeEmpty = document.getElementById("fa-exclude-empty").checked;
+  const emptyCount = data.empty_row_count ?? 0;
+
+  if (excludeEmpty && emptyCount > 0) {
+    bar.textContent = `有効 ${fmt(data.filtered_row_count)} 件 / 全 ${fmt(data.total_fa_rows)} 件（空欄 ${fmt(emptyCount)} 件）`;
+  } else if (data.total_fa_rows === data.filtered_row_count + emptyCount) {
     bar.textContent = `全 ${fmt(data.total_fa_rows)} 件`;
   } else {
     bar.textContent = `${fmt(data.filtered_row_count)} 件 / 全 ${fmt(data.total_fa_rows)} 件（フィルタ適用中）`;
@@ -669,9 +668,17 @@ class FaMultiSelect {
   /** 選択中の value 配列を返す */
   getSelected() { return [...this._selected]; }
 
-  /** 外部から選択状態を一括更新する（② → ③ 同期用） */
+  /** 外部から選択状態を一括更新する */
   setSelected(codes) {
     this._selected = new Set(codes);
+    this._renderTags();
+    if (this._els) this._renderOptions(this._els.search?.value ?? "");
+  }
+
+  /** 選択肢を差し替える（現在の選択値のうち新選択肢にないものは除去） */
+  updateOptions(newOptions) {
+    this._allOptions = newOptions;
+    this._selected = new Set([...this._selected].filter(v => newOptions.some(o => o.value === v)));
     this._renderTags();
     if (this._els) this._renderOptions(this._els.search?.value ?? "");
   }

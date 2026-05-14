@@ -231,6 +231,7 @@ class FaRow(BaseModel):
     type_label: str
     answer: str
     char_count: int
+    is_empty: bool = False
 
 
 class Step2FaMetaResponse(BaseModel):
@@ -245,4 +246,5 @@ class Step2FaResponse(BaseModel):
     key_column_name: str = ""
     total_fa_rows: int
     filtered_row_count: int
+    empty_row_count: int = 0
     rows: List[FaRow]

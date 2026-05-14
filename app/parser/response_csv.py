@@ -535,8 +535,10 @@ def build_fa_data(
             continue
         for idx, answer in enumerate(df[q.question_code]):
             answer_str = str(answer) if answer is not None else ""
+            is_empty = (answer_str == "")
             rows.append({
                 "row_index": idx,
+                "is_empty": is_empty,
                 "key_value": str(df[key_col].iloc[idx]) if key_col else "",
                 "attr_values": {c: str(df[c].iloc[idx]) for c in valid_attr_cols},
                 "question_code": q.question_code,
@@ -548,28 +550,33 @@ def build_fa_data(
             })
 
     total_fa_rows = len(rows)
+    empty_row_count = sum(1 for r in rows if r["is_empty"])
 
-    if exclude_empty:
-        rows = [r for r in rows if r["answer"] != ""]
+    # 空行は min_chars / keyword フィルタの対象外（is_empty 行は除外しない）
     if min_chars > 0:
-        rows = [r for r in rows if r["char_count"] >= min_chars]
+        rows = [r for r in rows if r["is_empty"] or r["char_count"] >= min_chars]
     if keyword:
         kw = keyword.lower()
-        rows = [r for r in rows if kw in r["answer"].lower()]
+        rows = [r for r in rows if r["is_empty"] or kw in r["answer"].lower()]
 
+    # filtered_row_count = 空行を除いた有効行数
+    filtered_row_count = sum(1 for r in rows if not r["is_empty"])
+
+    # ソート: タプルキーで空行を末尾に
     if sort_by == "chars_desc":
-        rows.sort(key=lambda r: r["char_count"], reverse=True)
+        rows.sort(key=lambda r: (r["is_empty"], -r["char_count"]))
     elif sort_by == "chars_asc":
-        rows.sort(key=lambda r: r["char_count"])
+        rows.sort(key=lambda r: (r["is_empty"], r["char_count"]))
     elif sort_by == "attr_order" and sort_attr and sort_attr in valid_attr_cols:
-        rows.sort(key=lambda r: r["attr_values"].get(sort_attr, ""))
+        rows.sort(key=lambda r: (r["is_empty"], r["attr_values"].get(sort_attr, "")))
 
     return {
         "fa_columns": fa_columns_info,
         "attr_candidates": attr_candidates,
         "key_column_name": key_col,
         "total_fa_rows": total_fa_rows,
-        "filtered_row_count": len(rows),
+        "filtered_row_count": filtered_row_count,
+        "empty_row_count": empty_row_count,
         "rows": rows,
     }
 

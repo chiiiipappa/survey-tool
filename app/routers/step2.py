@@ -275,6 +275,7 @@ async def step2_fa(
         key_column_name=result["key_column_name"],
         total_fa_rows=result["total_fa_rows"],
         filtered_row_count=result["filtered_row_count"],
+        empty_row_count=result.get("empty_row_count", 0),
         rows=[FaRow(**r) for r in result["rows"]],
     )
 
@@ -324,6 +325,8 @@ async def step2_fa_export(
     # DataFrame 化（縦持ち）
     records = []
     for r in rows:
+        if exclude_empty and r.get("is_empty"):
+            continue
         rec: dict = {}
         if key_column_name and r["key_value"]:
             rec["回答ID"] = r["key_value"]
