@@ -480,38 +480,59 @@ pre.json-pre {
   top: 0;
 }
 
-/* 集計軸リスト */
-.axis-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 360px;
-  overflow-y: auto;
-}
-.axis-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background .1s;
-}
-.axis-item:hover { background: var(--color-bg); }
-.axis-item input[type="checkbox"] { flex-shrink: 0; accent-color: var(--color-primary); }
-.axis-code { font-weight: 600; font-size: .85rem; min-width: 64px; }
-.axis-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ---------------------------------------------------------------------------
+   STEP2 コントロールカード
+   --------------------------------------------------------------------------- */
+.step2-ctrl-grid   { display: flex; flex-direction: column; gap: 12px; }
+.step2-ctrl-row    { display: flex; align-items: flex-start; gap: 12px; }
+.step2-ctrl-label  { flex-shrink: 0; width: 110px; font-weight: 600; font-size: .875rem; padding-top: 10px; display: flex; flex-direction: column; gap: 3px; }
+.step2-ctrl-widget { flex: 1; min-width: 0; }
+.step2-ctrl-actions { display: flex; gap: 8px; align-items: center; padding-top: 4px; margin-left: 122px; }
 
 /* ---------------------------------------------------------------------------
-   FA 閲覧カード
+   STEP2 ステップ番号バッジ
    --------------------------------------------------------------------------- */
-.fa-filter-bar   { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; padding: 12px; background: var(--color-bg, #F8F8F8); border-radius: var(--radius); border: 1px solid var(--color-border); }
-.fa-filter-row   { display: flex; gap: 16px; flex-wrap: wrap; }
-.fa-filter-group { display: flex; flex-direction: column; gap: 6px; }
-.fa-filter-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
-.fa-count-bar    { padding: 4px 0 8px; }
-.fa-table-wrap   { max-height: 640px; overflow: auto; }
+.step2-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--color-primary); color: #fff;
+  font-size: .7rem; font-weight: 700; flex-shrink: 0; margin-right: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   STEP2 集計軸チェックボックスリスト
+   --------------------------------------------------------------------------- */
+.step2-axis-cb-search {
+  width: 100%; padding: 6px 10px;
+  border: 1px solid var(--color-border); border-radius: 4px;
+  margin-bottom: 8px; font-size: .875rem; box-sizing: border-box;
+  background: var(--color-surface); color: var(--color-text);
+}
+.step2-axis-cb-list {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 280px; overflow-y: auto;
+  border: 1px solid var(--color-border); border-radius: 4px; padding: 6px;
+}
+.step2-axis-cb-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 3px; cursor: pointer; font-size: .875rem;
+}
+.step2-axis-cb-item:hover { background: var(--color-bg, #F8F8F8); }
+.step2-axis-cb-item input[type="checkbox"] { flex-shrink: 0; cursor: pointer; }
+.step2-axis-cb-item.hidden { display: none; }
+
+/* ---------------------------------------------------------------------------
+   折りたたみヘッダー（データ変換・出力）
+   --------------------------------------------------------------------------- */
+.step2-collapse-hd { cursor: pointer; user-select: none; }
+.step2-collapse-hd:hover { background: var(--color-bg, #F8F8F8); }
+.step2-chevron { font-size: .75rem; margin-right: 6px; display: inline-block; }
+
+/* ---------------------------------------------------------------------------
+   FA 一覧カード
+   --------------------------------------------------------------------------- */
+.fa-count-bar  { padding: 4px 0 8px; }
+.fa-table-wrap { max-height: 640px; overflow: auto; }
 .fa-table-wrap table td.fa-answer-cell {
   max-width: 420px;
   white-space: pre-wrap;
@@ -521,15 +542,19 @@ pre.json-pre {
 }
 .fa-table-wrap table td.fa-chars-cell { text-align: right; white-space: nowrap; color: var(--color-text-muted); }
 
-/* FA 選択パネル */
-.fa-select-panel { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
-.fa-select-group { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 6px; }
+/* コンパクトフィルタバー（カードヘッダー内） */
+.fa-inline-filter       { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.fa-filter-input        { padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 13px; width: 140px; background: var(--color-surface); color: var(--color-text); }
+.fa-filter-inline-check { display: flex; align-items: center; gap: 4px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.fa-filter-inline-num   { display: flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+.fa-filter-num-input    { width: 56px; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 13px; background: var(--color-surface); color: var(--color-text); }
+.fa-filter-select       { padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 13px; background: var(--color-surface); color: var(--color-text); }
 
 /* FA マルチセレクト */
-.fa-multiselect { position: relative; border: 1px solid var(--color-border); border-radius: 6px; background: #fff; min-height: 40px; }
+.fa-multiselect { position: relative; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); min-height: 40px; }
 .fa-ms-input-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; min-height: 40px; align-items: center; cursor: text; }
-.fa-ms-search { border: none; outline: none; flex: 1; min-width: 80px; font-size: 13px; background: transparent; padding: 2px 0; }
-.fa-ms-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 200; background: #fff; border: 1px solid var(--color-border); border-top: none; border-radius: 0 0 6px 6px; max-height: 240px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+.fa-ms-search { border: none; outline: none; flex: 1; min-width: 80px; font-size: 13px; background: transparent; padding: 2px 0; color: var(--color-text); }
+.fa-ms-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 200; background: var(--color-surface); border: 1px solid var(--color-border); border-top: none; border-radius: 0 0 6px 6px; max-height: 240px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,.12); }
 .fa-ms-option { padding: 8px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
 .fa-ms-option:hover  { background: var(--color-surface-2, #F0F0F0); }
 .fa-ms-option.fa-ms-selected { background: var(--color-surface-2, #F0F0F0); font-weight: 600; }
@@ -540,7 +565,9 @@ pre.json-pre {
 .fa-ms-tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fa-ms-tag-remove { background: none; border: none; cursor: pointer; padding: 0 1px; font-size: 14px; line-height: 1; color: inherit; opacity: .7; flex-shrink: 0; }
 .fa-ms-tag-remove:hover { opacity: 1; }
-.fa-ms-placeholder { font-size: 13px; color: var(--color-text-muted); padding: 2px 0; }
+.fa-attr-cb-list { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 8px 0; min-height: 32px; align-items: center; }
+.fa-attr-cb-item { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; user-select: none; }
+.fa-attr-cb-item input[type="checkbox"] { accent-color: var(--color-primary, #DF0515); width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 
 /* FA 案内エリア */
 .fa-guidance { padding: 32px 16px; text-align: center; color: var(--color-text-muted); background: var(--color-bg, #F8F8F8); border-radius: var(--radius); border: 1px dashed var(--color-border); }

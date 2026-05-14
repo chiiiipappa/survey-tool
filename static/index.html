@@ -164,9 +164,10 @@
   <!-- ========== PANEL 3: STEP2 回答データ ========== -->
   <section id="panel-step2" class="panel">
 
-    <!-- アップロードカード -->
+    <!-- ① 回答データアップロード -->
     <div class="card">
       <div class="card-header">
+        <span class="step2-step-num">①</span>
         <span class="card-title">回答データ CSV / Excel を読み込む</span>
       </div>
       <div class="card-body">
@@ -187,148 +188,138 @@
       </div>
     </div>
 
-    <!-- 照合結果カード -->
-    <div class="card" id="step2-match-card" style="display:none">
-      <div class="card-header">
-        <span class="card-title">設問コードとの照合結果</span>
+    <!-- ② データ変換・出力（折りたたみ、初期は閉じる） -->
+    <div class="card" id="step2-advanced-card" style="display:none">
+      <div class="card-header step2-collapse-hd" id="step2-advanced-toggle">
+        <span class="step2-step-num">②</span>
+        <span id="step2-adv-chevron" class="step2-chevron">▶</span>
+        <span class="card-title">データ変換・出力</span>
         <div id="step2-match-summary" style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;"></div>
       </div>
-      <div class="card-body">
-        <div id="step2-match-detail"></div>
-      </div>
-    </div>
+      <div id="step2-advanced-body" style="display:none">
 
-    <!-- ラベル変換プレビューカード -->
-    <div class="card" id="step2-preview-card" style="display:none">
-      <div class="card-header">
-        <span class="card-title">ラベル変換プレビュー</span>
-        <div class="tab-bar" id="step2-preview-tabs" style="margin-left:auto;">
-          <button class="tab-btn active" data-tab="raw">元データ</button>
-          <button class="tab-btn" data-tab="labeled">変換後</button>
-          <button class="tab-btn" data-tab="unmatched">変換不可値</button>
+        <!-- 照合結果（要確認のみ） -->
+        <div class="card-body" style="border-top:1px solid var(--color-border)">
+          <div id="step2-match-detail"></div>
         </div>
-      </div>
-      <div class="card-body" style="padding:0;">
-        <div id="step2-preview-raw" class="step2-tab-pane table-wrap"></div>
-        <div id="step2-preview-labeled" class="step2-tab-pane table-wrap" style="display:none"></div>
-        <div id="step2-preview-unmatched" class="step2-tab-pane" style="display:none; padding:16px;"></div>
+
+        <!-- ラベル変換プレビュー -->
+        <div style="border-top:1px solid var(--color-border)">
+          <div class="card-header" style="border-bottom:0; padding-bottom:0">
+            <span class="card-title" style="font-size:.875rem">ラベル変換プレビュー</span>
+            <div class="tab-bar" id="step2-preview-tabs" style="margin-left:auto;">
+              <button class="tab-btn active" data-tab="raw">元データ</button>
+              <button class="tab-btn" data-tab="labeled">変換後</button>
+              <button class="tab-btn" data-tab="unmatched">変換不可値</button>
+            </div>
+          </div>
+          <div style="padding:0">
+            <div id="step2-preview-raw" class="step2-tab-pane table-wrap"></div>
+            <div id="step2-preview-labeled" class="step2-tab-pane table-wrap" style="display:none"></div>
+            <div id="step2-preview-unmatched" class="step2-tab-pane" style="display:none; padding:16px;"></div>
+          </div>
+        </div>
+
+        <!-- ラベル変換済みCSV出力 -->
+        <div style="border-top:1px solid var(--color-border); padding:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+          <div style="flex:1; min-width:200px;">
+            <div style="font-weight:600; margin-bottom:4px">ラベル変換済みデータ（全列）</div>
+            <div class="text-sm text-muted">UTF-8 BOM 付き CSV でダウンロードします。</div>
+          </div>
+          <button id="step2-export-btn" class="btn btn-primary">📥 CSV ダウンロード</button>
+        </div>
+
       </div>
     </div>
 
-    <!-- 集計軸選択カード -->
+    <!-- ③ 集計軸選択（アップロード後に表示） -->
     <div class="card" id="step2-axis-card" style="display:none">
       <div class="card-header">
-        <span class="card-title">集計軸の選択</span>
-        <span class="text-sm text-muted" style="margin-left:8px">複数選択可</span>
+        <span class="step2-step-num">③</span>
+        <span class="card-title">集計軸選択</span>
+        <span id="step2-axis-saved-badge" class="badge" style="display:none; margin-left:auto; background:var(--color-primary-light); color:var(--color-primary)">✔ 保存済</span>
       </div>
       <div class="card-body">
-        <p class="text-sm text-muted" style="margin-bottom:12px">
-          初期状態では単一回答（SA）・数値（NU）等が選択済みです。複数選択・自由回答は除外されています。
-        </p>
-        <div id="step2-axis-list" class="axis-list"></div>
-        <div style="margin-top:16px; display:flex; gap:8px;">
-          <button id="step2-save-axis-btn" class="btn btn-primary">集計軸を保存</button>
-          <button id="step2-select-all-btn" class="btn btn-secondary btn-sm">すべて選択</button>
-          <button id="step2-clear-all-btn" class="btn btn-secondary btn-sm">すべて解除</button>
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <button id="step2-axis-select-all"   class="btn btn-secondary btn-sm">全て選択</button>
+          <button id="step2-axis-deselect-all" class="btn btn-secondary btn-sm">全て削除</button>
+        </div>
+        <input id="step2-axis-search" class="step2-axis-cb-search" placeholder="列名を検索…">
+        <div id="step2-axis-cb-list" class="step2-axis-cb-list"></div>
+        <div style="margin-top:12px">
+          <button id="step2-save-axis-btn" class="btn btn-primary">完了</button>
         </div>
       </div>
     </div>
 
-    <!-- エクスポートカード -->
-    <div class="card" id="step2-export-card" style="display:none">
+    <!-- ④ FA 表形成（集計軸完了後に表示） -->
+    <div class="card" id="step2-fa-form-card" style="display:none">
       <div class="card-header">
-        <span class="card-title">エクスポート</span>
+        <span class="step2-step-num">④</span>
+        <span class="card-title">FA 表形成</span>
       </div>
-      <div class="card-body" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <div style="flex:1; min-width:200px;">
-          <div style="font-weight:600; margin-bottom:4px">ラベル変換済みデータ</div>
-          <div class="text-sm text-muted">UTF-8 BOM 付き CSV でダウンロードします。</div>
+      <div class="card-body">
+        <div class="step2-ctrl-grid">
+
+          <!-- FA設問 -->
+          <div class="step2-ctrl-row">
+            <div class="step2-ctrl-label">FA設問</div>
+            <div class="step2-ctrl-widget">
+              <div id="fa-question-ms" class="fa-multiselect"></div>
+            </div>
+          </div>
+
+          <!-- 付与属性列 -->
+          <div class="step2-ctrl-row">
+            <div class="step2-ctrl-label">
+              付与属性列
+              <span class="text-sm text-muted" style="font-weight:400">任意</span>
+            </div>
+            <div class="step2-ctrl-widget">
+              <div id="fa-attr-cb-list" class="fa-attr-cb-list"></div>
+            </div>
+          </div>
+
+          <!-- 表を更新 -->
+          <div class="step2-ctrl-actions">
+            <button id="fa-apply-btn" class="btn btn-primary">▶ 表を更新</button>
+          </div>
+
         </div>
-        <button id="step2-export-btn" class="btn btn-primary">
-          📥 CSV ダウンロード
-        </button>
       </div>
     </div>
 
-    <!-- FA閲覧カード -->
+    <!-- ⑤ FA 一覧（「表を更新」後に表示） -->
     <div class="card" id="step2-fa-card" style="display:none">
       <div class="card-header">
-        <span class="card-title">自由回答（FA）閲覧・抽出</span>
-        <div style="margin-left:auto; display:flex; gap:8px;">
+        <span class="step2-step-num">⑤</span>
+        <span class="card-title">FA 一覧</span>
+        <div class="fa-inline-filter">
+          <input type="text" id="fa-keyword" placeholder="キーワード検索…" class="fa-filter-input">
+          <label class="fa-filter-inline-check">
+            <input type="checkbox" id="fa-exclude-empty" checked>
+            <span>空欄除外</span>
+          </label>
+          <label class="fa-filter-inline-num">
+            <span>文字数</span>
+            <input type="number" id="fa-min-chars" value="0" min="0" class="fa-filter-num-input">
+            <span>以上</span>
+          </label>
+          <select id="fa-sort-select" class="fa-filter-select">
+            <option value="response_order">回答順</option>
+            <option value="chars_desc">文字数↓</option>
+            <option value="chars_asc">文字数↑</option>
+            <option value="attr_order">属性順</option>
+          </select>
+          <select id="fa-sort-attr-select" class="fa-filter-select" style="display:none"></select>
+        </div>
+        <div style="display:flex; gap:8px; margin-left:12px; flex-shrink:0">
           <button id="fa-export-csv-btn"   class="btn btn-secondary btn-sm" disabled>📥 CSV</button>
           <button id="fa-export-excel-btn" class="btn btn-secondary btn-sm" disabled>📥 Excel</button>
         </div>
       </div>
-      <div class="card-body">
-
-        <!-- 選択パネル -->
-        <div class="fa-select-panel">
-          <div class="fa-select-group">
-            <label class="fa-filter-label">① 表示するFA設問</label>
-            <div id="fa-question-ms" class="fa-multiselect"></div>
-          </div>
-          <div class="fa-select-group">
-            <label class="fa-filter-label">② 付与する属性列（任意）</label>
-            <select id="fa-attr-select"
-              style="padding:7px 10px; border:1px solid var(--color-border); border-radius:6px; font-size:.875rem; background:var(--color-surface); color:var(--color-text); width:100%;">
-              <option value="">（属性なし）</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- フィルタバー（最小限） -->
-        <div class="fa-filter-bar">
-          <div class="fa-filter-row" style="align-items:center; gap:16px; flex-wrap:wrap;">
-            <label style="display:flex; align-items:center; gap:6px; flex:1; min-width:180px;">
-              <span class="text-sm" style="white-space:nowrap">キーワード</span>
-              <input type="text" id="fa-keyword" placeholder="回答本文を検索…"
-                style="flex:1; padding:4px 8px; border:1px solid var(--color-border); border-radius:4px; font-size:13px;">
-            </label>
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-              <input type="checkbox" id="fa-exclude-empty" checked>
-              <span class="text-sm">空欄を除外</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px;">
-              <span class="text-sm">文字数</span>
-              <input type="number" id="fa-min-chars" value="0" min="0"
-                style="width:64px; padding:4px 6px; border:1px solid var(--color-border); border-radius:4px; font-size:13px;">
-              <span class="text-sm">文字以上</span>
-            </label>
-            <label style="display:flex; align-items:center; gap:6px;">
-              <span class="text-sm">ソート</span>
-              <select id="fa-sort-select"
-                style="padding:4px 8px; border:1px solid var(--color-border); border-radius:4px; font-size:13px;">
-                <option value="response_order">回答順</option>
-                <option value="chars_desc">文字数（多い順）</option>
-                <option value="chars_asc">文字数（少ない順）</option>
-                <option value="attr_order">属性順</option>
-              </select>
-              <select id="fa-sort-attr-select"
-                style="padding:4px 8px; border:1px solid var(--color-border); border-radius:4px; font-size:13px; display:none;">
-              </select>
-            </label>
-            <button id="fa-apply-btn" class="btn btn-primary btn-sm">表を更新</button>
-          </div>
-        </div>
-
-        <!-- 案内（初期表示） -->
-        <div id="fa-guidance" class="fa-guidance">
-          <div class="fa-guidance-icon">📋</div>
-          <div class="fa-guidance-text">FA設問と属性列を選択してから「表を更新」を押してください。</div>
-          <ol class="fa-guidance-steps">
-            <li>① 表示するFA設問を選択</li>
-            <li>② 付与する属性列を選択（任意）</li>
-            <li>③「表を更新」を押す</li>
-          </ol>
-        </div>
-
-        <!-- 件数バー -->
-        <div id="fa-count-bar" class="fa-count-bar text-sm text-muted" style="display:none"></div>
-
-        <!-- テーブル -->
-        <div id="fa-table-wrap" class="table-wrap fa-table-wrap"></div>
-
-      </div>
+      <div id="fa-count-bar" class="fa-count-bar text-sm text-muted" style="display:none; padding:0 20px 8px;"></div>
+      <div id="fa-table-wrap" class="table-wrap fa-table-wrap"></div>
     </div>
 
   </section>
