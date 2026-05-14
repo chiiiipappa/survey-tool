@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.routers import questions, upload
+from app.routers import step2 as step2_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,8 +33,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="調査票レイアウト確認ツール",
-    description="レイアウト CSV を読み込み、設問構造を確認するツール。完全オフライン動作。",
-    version="1.0.0",
+    description="レイアウト CSV を読み込み、設問構造の確認・回答データのラベル変換を行うツール。完全オフライン動作。",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -41,6 +42,7 @@ app = FastAPI(
 
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(questions.router, prefix="/api", tags=["questions"])
+app.include_router(step2_router.router, prefix="/api", tags=["step2"])
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

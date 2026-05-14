@@ -2,19 +2,27 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --color-primary:      #2563eb;
-  --color-primary-dark: #1d4ed8;
+  --color-primary:      #DF0515;
+  --color-primary-dark: #B8010F;
+  --color-primary-light: #FDECEA;
   --color-surface:      #ffffff;
-  --color-surface-alt:  #f8fafc;
-  --color-border:       #e2e8f0;
-  --color-text:         #1e293b;
-  --color-text-muted:   #64748b;
-  --color-warning-bg:   #fffbeb;
-  --color-warning-text: #92400e;
-  --color-error-bg:     #fef2f2;
-  --color-error-text:   #991b1b;
-  --color-success-bg:   #f0fdf4;
-  --color-success-text: #166534;
+  --color-surface-alt:  #F8F8F8;
+  --color-surface-2:    #F8F8F8;
+  --color-border:       #E0E0E0;
+  --color-text:         #333333;
+  --color-text-muted:   #676767;
+  --color-warning:      #FBC002;
+  --color-warning-bg:   #FEF8E1;
+  --color-warning-text: #7A5200;
+  --color-error-bg:     #FDECEA;
+  --color-error-text:   #B8010F;
+  --color-success:      #33C2B0;
+  --color-success-bg:   #E8F9F7;
+  --color-success-text: #1E8A7A;
+  --color-info:         #18658F;
+  --color-info-bg:      #E3EFF5;
+  --color-info-text:    #0D4A6B;
+  --color-bg:           #F8F8F8;
   --radius:  8px;
   --shadow:  0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
   --shadow-md: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
@@ -113,7 +121,7 @@ a:hover { text-decoration: underline; }
 }
 .drop-zone:hover, .drop-zone.dragover {
   border-color: var(--color-primary);
-  background: #eff6ff;
+  background: #FDECEA;
 }
 .drop-zone .drop-icon { font-size: 2.5rem; margin-bottom: 12px; }
 .drop-zone p { color: var(--color-text-muted); font-size: .875rem; line-height: 1.6; }
@@ -125,7 +133,7 @@ a:hover { text-decoration: underline; }
   gap: 12px;
   padding: 14px 20px;
   background: var(--color-success-bg);
-  border: 1px solid #bbf7d0;
+  border: 1px solid #A8E6DF;
   border-radius: var(--radius);
   font-size: .85rem;
   margin-top: 12px;
@@ -137,7 +145,7 @@ a:hover { text-decoration: underline; }
 /* ===== 警告・エラー ===== */
 .warning-box {
   background: var(--color-warning-bg);
-  border: 1px solid #fde68a;
+  border: 1px solid #F5D96A;
   border-radius: var(--radius);
   padding: 12px 16px;
   margin-top: 12px;
@@ -150,7 +158,7 @@ a:hover { text-decoration: underline; }
 
 .error-box {
   background: var(--color-error-bg);
-  border: 1px solid #fecaca;
+  border: 1px solid #F5A5A5;
   border-radius: var(--radius);
   padding: 12px 16px;
   margin-top: 12px;
@@ -264,9 +272,9 @@ tbody tr {
   border-bottom: 1px solid var(--color-border);
   transition: background .1s;
 }
-tbody tr:hover { background: #f8fafc; }
-tbody tr.row-child { background: #fafbff; }
-tbody tr.row-child:hover { background: #f1f5fd; }
+tbody tr:hover { background: #F8F8F8; }
+tbody tr.row-child { background: #F8F8F8; }
+tbody tr.row-child:hover { background: #F0F0F0; }
 tbody tr.row-unknown-type { background: var(--color-warning-bg); }
 tbody td {
   padding: 9px 12px;
@@ -287,13 +295,13 @@ tbody td {
   font-weight: 600;
   white-space: nowrap;
 }
-.badge-SA  { background: #dbeafe; color: #1d4ed8; }
-.badge-MA  { background: #dcfce7; color: #15803d; }
-.badge-FA  { background: #f3e8ff; color: #6b21a8; }
-.badge-NU  { background: #fef9c3; color: #78350f; }
-.badge-ML  { background: #ccfbf1; color: #0f766e; }
-.badge-unknown { background: #fee2e2; color: #991b1b; }
-.badge-step { background: #e5e7eb; color: #6b7280; }
+.badge-SA  { background: #E3EFF5; color: #18658F; }
+.badge-MA  { background: #E8F9F7; color: #1E8A7A; }
+.badge-FA  { background: #F5EDDF; color: #91673E; }
+.badge-NU  { background: #FEF8E1; color: #7A5200; }
+.badge-ML  { background: #E8F9F7; color: #1E8A7A; }
+.badge-unknown { background: #FDECEA; color: #B8010F; }
+.badge-step { background: #EBEBEB; color: #676767; }
 
 /* ===== テーブル件数バー ===== */
 .count-bar {
@@ -329,8 +337,8 @@ tbody td {
 pre.json-pre {
   max-height: 480px;
   overflow: auto;
-  background: #1e293b;
-  color: #e2e8f0;
+  background: #333333;
+  color: #E8E8E8;
   padding: 16px;
   border-radius: 6px;
   font-size: .75rem;
@@ -364,7 +372,7 @@ pre.json-pre {
   gap: 8px;
 }
 .toast {
-  background: #1e293b;
+  background: #333333;
   color: #fff;
   padding: 10px 16px;
   border-radius: 6px;
@@ -373,7 +381,7 @@ pre.json-pre {
   animation: fadeIn .2s ease;
   max-width: 360px;
 }
-.toast.error { background: #991b1b; }
+.toast.error { background: #B8010F; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 /* ===== 選択肢タグ ===== */
@@ -386,7 +394,7 @@ pre.json-pre {
 }
 .choice-tag {
   display: inline-block;
-  background: #f1f5f9;
+  background: #F0F0F0;
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -421,3 +429,121 @@ pre.json-pre {
 .text-sm { font-size: .8rem; }
 .mt-12 { margin-top: 12px; }
 .hidden { display: none !important; }
+
+/* ===== STEP2 固有スタイル ===== */
+
+/* バッジ色バリアント */
+.badge-ok   { background: #E8F9F7; color: #1E8A7A; }
+.badge-warn { background: #FEF8E1; color: #7A5200; }
+.badge-info { background: #E3EFF5; color: #0D4A6B; }
+
+/* バッジ一覧 */
+.badge-list { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* 照合セクション */
+.match-section { padding: 4px 0; }
+
+/* タブバー */
+.tab-bar { display: flex; gap: 4px; }
+.tab-btn {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: .8rem;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: background .15s, color .15s;
+}
+.tab-btn:hover  { background: var(--color-bg); }
+.tab-btn.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+
+/* プレビュータブペイン */
+.step2-tab-pane {}
+.step2-tab-pane table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8rem;
+}
+.step2-tab-pane th, .step2-tab-pane td {
+  border: 1px solid var(--color-border);
+  padding: 5px 8px;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.step2-tab-pane th {
+  background: var(--color-bg);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+/* 集計軸リスト */
+.axis-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.axis-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .1s;
+}
+.axis-item:hover { background: var(--color-bg); }
+.axis-item input[type="checkbox"] { flex-shrink: 0; accent-color: var(--color-primary); }
+.axis-code { font-weight: 600; font-size: .85rem; min-width: 64px; }
+.axis-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------------------------------------------------------------------------
+   FA 閲覧カード
+   --------------------------------------------------------------------------- */
+.fa-filter-bar   { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; padding: 12px; background: var(--color-bg, #F8F8F8); border-radius: var(--radius); border: 1px solid var(--color-border); }
+.fa-filter-row   { display: flex; gap: 16px; flex-wrap: wrap; }
+.fa-filter-group { display: flex; flex-direction: column; gap: 6px; }
+.fa-filter-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
+.fa-count-bar    { padding: 4px 0 8px; }
+.fa-table-wrap   { max-height: 640px; overflow: auto; }
+.fa-table-wrap table td.fa-answer-cell {
+  max-width: 420px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+  vertical-align: top;
+}
+.fa-table-wrap table td.fa-chars-cell { text-align: right; white-space: nowrap; color: var(--color-text-muted); }
+
+/* FA 選択パネル */
+.fa-select-panel { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.fa-select-group { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 6px; }
+
+/* FA マルチセレクト */
+.fa-multiselect { position: relative; border: 1px solid var(--color-border); border-radius: 6px; background: #fff; min-height: 40px; }
+.fa-ms-input-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; min-height: 40px; align-items: center; cursor: text; }
+.fa-ms-search { border: none; outline: none; flex: 1; min-width: 80px; font-size: 13px; background: transparent; padding: 2px 0; }
+.fa-ms-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 200; background: #fff; border: 1px solid var(--color-border); border-top: none; border-radius: 0 0 6px 6px; max-height: 240px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+.fa-ms-option { padding: 8px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
+.fa-ms-option:hover  { background: var(--color-surface-2, #F0F0F0); }
+.fa-ms-option.fa-ms-selected { background: var(--color-surface-2, #F0F0F0); font-weight: 600; }
+.fa-ms-check { font-size: 11px; width: 14px; text-align: center; flex-shrink: 0; color: var(--color-primary, #DF0515); }
+.fa-ms-option-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fa-ms-option-empty { padding: 10px 12px; font-size: 13px; color: var(--color-text-muted); }
+.fa-ms-tag { display: inline-flex; align-items: center; gap: 3px; background: var(--color-primary-light, #FDECEA); color: var(--color-primary, #DF0515); border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: 500; white-space: nowrap; max-width: 200px; }
+.fa-ms-tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fa-ms-tag-remove { background: none; border: none; cursor: pointer; padding: 0 1px; font-size: 14px; line-height: 1; color: inherit; opacity: .7; flex-shrink: 0; }
+.fa-ms-tag-remove:hover { opacity: 1; }
+.fa-ms-placeholder { font-size: 13px; color: var(--color-text-muted); padding: 2px 0; }
+
+/* FA 案内エリア */
+.fa-guidance { padding: 32px 16px; text-align: center; color: var(--color-text-muted); background: var(--color-bg, #F8F8F8); border-radius: var(--radius); border: 1px dashed var(--color-border); }
+.fa-guidance-icon { font-size: 2rem; margin-bottom: 8px; }
+.fa-guidance-text { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--color-text); }
+.fa-guidance-steps { text-align: left; display: inline-block; font-size: 13px; line-height: 2.2; }

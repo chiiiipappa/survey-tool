@@ -119,3 +119,130 @@ class ProjectLoadResponse(BaseModel):
     parse_warnings: List[str]
     graphs: List[GraphConfig]
     load_warnings: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP2: 回答データ読込・ラベル変換
+# ---------------------------------------------------------------------------
+
+class AxisCandidateItem(BaseModel):
+    question_code: str
+    question_text: str
+    type_code: str
+    type_label: str
+    is_default_selected: bool
+
+
+class UnmatchedValueItem(BaseModel):
+    question_code: str
+    value: str
+    count: int
+
+
+class BracketColumnItem(BaseModel):
+    column_name: str    # "Q3_1[1]"
+    base_code: str      # "Q3_1"
+    choice_no: int      # 1
+    choice_label: str   # "TV・ラジオ・CMなどで見る"
+    display_header: str # "Q3_1：TV・ラジオ・CMなどで見る"
+
+
+class MissingColumnDetail(BaseModel):
+    """不足列の分類詳細。不足判定された各レイアウトコードに対する診断結果。"""
+    question_code: str
+    type_code: str
+    type_label: str
+    question_text: str
+    stub: str
+    # verdict: "parent_matched" | "bracket_expanded" | "free_answer" | "need_check" | "unmatched"
+    verdict: str
+    verdict_label: str
+    reason: str
+    related_response_cols: List[str] = Field(default_factory=list)
+
+
+class Step2UploadResponse(BaseModel):
+    status: str = "ok"
+    filename: str
+    file_size: int
+    encoding_detected: str
+    response_row_count: int
+    response_col_count: int
+    preview_rows: List[dict]
+    labeled_preview_rows: List[dict]
+    matched_columns: List[str]
+    missing_columns: List[str]
+    extra_columns: List[str]
+    matched_question_count: int
+    unmatched_question_count: int
+    codebook: dict
+    unmatched_values: List[UnmatchedValueItem]
+    axis_candidates: List[AxisCandidateItem]
+    multi_select_columns: List[str]
+    bracket_columns: List[BracketColumnItem] = Field(default_factory=list)
+    missing_column_details: List[MissingColumnDetail] = Field(default_factory=list)
+
+
+class Step2AxisSaveRequest(BaseModel):
+    session_token: str
+    selected_axis_columns: List[str]
+
+
+class Step2StateResponse(BaseModel):
+    has_data: bool
+    filename: Optional[str] = None
+    response_row_count: int = 0
+    matched_columns: List[str] = Field(default_factory=list)
+    missing_columns: List[str] = Field(default_factory=list)
+    extra_columns: List[str] = Field(default_factory=list)
+    selected_axis_columns: List[str] = Field(default_factory=list)
+    axis_candidates: List[AxisCandidateItem] = Field(default_factory=list)
+    multi_select_columns: List[str] = Field(default_factory=list)
+    bracket_columns: List[BracketColumnItem] = Field(default_factory=list)
+    missing_column_details: List[MissingColumnDetail] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP2: FA閲覧
+# ---------------------------------------------------------------------------
+
+class FaColumnInfo(BaseModel):
+    question_code: str
+    question_text: str
+    type_code: str
+    type_label: str
+
+
+class FaAttrCandidate(BaseModel):
+    question_code: str
+    question_text: str
+    type_label: str
+    is_fan_do: bool
+    is_axis_selected: bool
+
+
+class FaRow(BaseModel):
+    row_index: int
+    key_value: str = ""
+    attr_values: dict
+    question_code: str
+    question_text: str
+    type_code: str
+    type_label: str
+    answer: str
+    char_count: int
+
+
+class Step2FaMetaResponse(BaseModel):
+    fa_columns: List[FaColumnInfo]
+    attr_candidates: List[FaAttrCandidate]
+    key_column_name: str = ""
+
+
+class Step2FaResponse(BaseModel):
+    fa_columns: List[FaColumnInfo]
+    attr_candidates: List[FaAttrCandidate]
+    key_column_name: str = ""
+    total_fa_rows: int
+    filtered_row_count: int
+    rows: List[FaRow]

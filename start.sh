@@ -15,4 +15,10 @@ echo "=== 依存パッケージをインストールします ==="
 pip install -q -r requirements.txt
 
 echo "=== サーバーを起動します (http://localhost:8002) ==="
+(
+  until curl -s http://127.0.0.1:8002 > /dev/null 2>&1; do
+    sleep 0.5
+  done
+  open http://localhost:8002
+) &
 uvicorn app.main:app --host 127.0.0.1 --port 8002 --reload --reload-dir app

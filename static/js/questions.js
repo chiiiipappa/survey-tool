@@ -1,9 +1,9 @@
 /**
- * 設問一覧パネルの制御（テーブル描画・検索・フィルタ・JSONビューア）。
+ * 設問一覧パネルの制御（テーブル描画・検索・フィルタ・軸/属性フラグ編集）。
  */
-import { getQuestions, getQuestionsJson, saveProject } from "./api.js";
-import { AppState, setFilterState } from "./state.js";
-import { showToast, showError, showSpinner, hideSpinner } from "./app.js";
+import { getQuestions, saveProject, saveStep2Axis } from "./api.js";
+import { AppState, setFilterState, setStep2AxisSelection, setStep2AttrSelection } from "./state.js";
+import { showToast, showError } from "./app.js";
 
 // 種別バッジスタイル
 const TYPE_BADGE = {
@@ -35,8 +35,10 @@ export function initQuestionsPanel() {
   childCheck.addEventListener("change", applyFilters);
   applyBtn.addEventListener("click", applyFilters);
 
-  // 選択肢の「他◯件を表示」展開ボタン（イベント委譲）
-  document.getElementById("questions-table").addEventListener("click", (e) => {
+  const table = document.getElementById("questions-table");
+
+  // 選択肢「他◯件」展開 + 集計軸/属性チェックボックス（イベント委譲）
+  table.addEventListener("click", (e) => {
     const btn = e.target.closest(".choice-more-btn");
     if (!btn) return;
     const list = btn.closest(".choice-list");
@@ -51,10 +53,30 @@ export function initQuestionsPanel() {
     }
   });
 
-  // JSON ビューア toggle
-  document.getElementById("json-viewer-toggle").addEventListener("click", toggleJsonViewer);
-  document.getElementById("json-copy-btn").addEventListener("click", copyJson);
-  document.getElementById("json-load-btn").addEventListener("click", loadJson);
+  table.addEventListener("change", async (e) => {
+    const cb = e.target;
+    const code = cb.dataset.code;
+    if (!code) return;
+
+    if (cb.classList.contains("q-axis-cb")) {
+      let cols = [...AppState.step2SelectedAxisColumns];
+      if (cb.checked) { if (!cols.includes(code)) cols.push(code); }
+      else { cols = cols.filter(c => c !== code); }
+      setStep2AxisSelection(cols);
+      try {
+        await saveStep2Axis(AppState.sessionToken, cols);
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    if (cb.classList.contains("q-attr-cb")) {
+      let cols = [...AppState.step2SelectedAttrColumns];
+      if (cb.checked) { if (!cols.includes(code)) cols.push(code); }
+      else { cols = cols.filter(c => c !== code); }
+      setStep2AttrSelection(cols);
+    }
+  });
 
   // プロジェクト保存ボタン
   document.getElementById("btn-save-project")?.addEventListener("click", async () => {
@@ -142,23 +164,32 @@ function renderTable(questions, totalCount, filteredCount) {
   const displayRows = questions.filter((q) => !q.has_children);
 
   if (displayRows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:32px; color:var(--color-text-muted)">該当する設問がありません。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--color-text-muted)">該当する設問がありません。</td></tr>`;
     countBar.textContent = `0件表示 / 全${totalCount}件`;
     return;
   }
 
   countBar.textContent = `${displayRows.length}件表示 / 全${totalCount}件`;
 
+  const axisSet     = new Set(AppState.step2AxisCandidates.map(c => c.question_code));
+  const attrSet     = new Set(AppState.step2AttrCandidates.map(c => c.question_code));
+  const axisSelected = new Set(AppState.step2SelectedAxisColumns);
+  const attrSelected = new Set(AppState.step2SelectedAttrColumns);
+  const hasStep2    = AppState.step2AxisCandidates.length > 0;
+
   tbody.innerHTML = displayRows.map((q, i) => {
-    const rowCls = q.is_child ? "row-child" : "";
+    const rowCls  = q.is_child ? "row-child" : "";
     const codeCls = "code-cell" + (q.is_child ? " is-child" : "");
 
-    // 子設問: 質問文=親Title、表側=子自身のTitle
-    //   日本語形式CSV: stub に子の固有テキストあり → stub 優先
-    //   CQT形式: stub が空のため question_text にフォールバック
-    // 通常設問: 質問文=自身のTitle、表側=stub（CSV由来、通常空）
     const questionText = q.is_child ? (q.parent_text || q.question_text) : q.question_text;
     const stubText     = q.is_child ? (q.stub || q.question_text) : (q.stub || "");
+
+    const axisCell = hasStep2 && axisSet.has(q.question_code)
+      ? `<td style="text-align:center"><input type="checkbox" class="q-axis-cb" data-code="${escHtml(q.question_code)}" ${axisSelected.has(q.question_code) ? "checked" : ""}></td>`
+      : `<td></td>`;
+    const attrCell = hasStep2 && attrSet.has(q.question_code)
+      ? `<td style="text-align:center"><input type="checkbox" class="q-attr-cb" data-code="${escHtml(q.question_code)}" ${attrSelected.has(q.question_code) ? "checked" : ""}></td>`
+      : `<td></td>`;
 
     return `
       <tr class="${rowCls}">
@@ -168,51 +199,10 @@ function renderTable(questions, totalCount, filteredCount) {
         <td><span class="text-truncate" title="${escHtml(questionText)}">${escHtml(questionText)}</span></td>
         <td><span class="text-truncate" title="${escHtml(stubText)}">${escHtml(stubText)}</span></td>
         <td>${buildChoiceCell(q.choices)}</td>
+        ${axisCell}
+        ${attrCell}
       </tr>`;
   }).join("");
-}
-
-// --- JSON ビューア ---
-let _jsonCache = null;
-
-async function loadJson() {
-  if (!AppState.sessionToken) return;
-  showSpinner("JSON を取得中…");
-  try {
-    const resp = await getQuestionsJson(AppState.sessionToken);
-    _jsonCache = JSON.stringify(resp.questions, null, 2);
-    document.getElementById("json-pre").textContent = _jsonCache;
-    openJsonViewer();
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    hideSpinner();
-  }
-}
-
-function toggleJsonViewer() {
-  const body = document.getElementById("json-viewer-body");
-  const isOpen = body.classList.toggle("open");
-  document.getElementById("json-viewer-toggle").textContent =
-    isOpen ? "▲ JSON ビューアを閉じる" : "▼ JSON ビューアを開く（内部データ確認）";
-  if (isOpen && !_jsonCache) loadJson();
-}
-
-function openJsonViewer() {
-  const body = document.getElementById("json-viewer-body");
-  body.classList.add("open");
-  document.getElementById("json-viewer-toggle").textContent = "▲ JSON ビューアを閉じる";
-}
-
-async function copyJson() {
-  if (!_jsonCache) await loadJson();
-  if (!_jsonCache) return;
-  try {
-    await navigator.clipboard.writeText(_jsonCache);
-    showToast("JSON をコピーしました。");
-  } catch {
-    showError("クリップボードへのコピーに失敗しました。");
-  }
 }
 
 function escHtml(s) {
