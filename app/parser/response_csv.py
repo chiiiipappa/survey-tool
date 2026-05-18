@@ -28,7 +28,7 @@ def _parse_bracket(col: str) -> Optional[tuple[str, int]]:
     m = BRACKET_RE.match(col)
     return (m.group(1), int(m.group(2))) if m else None
 
-PREVIEW_ROWS = 5
+PREVIEW_ROWS = 30
 MAX_ROWS_IN_MEMORY = 50_000
 
 

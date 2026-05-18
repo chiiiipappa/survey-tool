@@ -3,22 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>調査票レイアウト確認ツール</title>
+  <title>調査票解析ツール</title>
   <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
 
 <!-- ===== ヘッダー ===== -->
 <header class="app-header">
-  <h1>📋 調査票レイアウト確認ツール</h1>
-  <span class="version">v2.0 (STEP1+2)</span>
+  <h1>📋 調査票解析ツール</h1>
+  <span class="version">v3.0</span>
+  <button id="btn-save-project" class="btn btn-secondary btn-sm header-save-btn">💾 プロジェクト保存</button>
 </header>
 
 <!-- ===== ステップナビ ===== -->
 <nav class="step-nav">
-  <button id="btn-step-upload"    class="step-btn active">① レイアウトCSV読込</button>
-  <button id="btn-step-questions" class="step-btn" disabled>② 設問構造確認</button>
-  <button id="btn-step-step2"     class="step-btn" disabled>③ 回答データ読込</button>
+  <button id="btn-step-step1" class="step-btn active">① 調査票レイアウト確認</button>
+  <button id="btn-step-step2" class="step-btn" disabled>② 回答データ読込・FA表形成</button>
+  <button id="btn-step-step3" class="step-btn" disabled>③ クロス集計・グラフ作成</button>
 </nav>
 
 <!-- ===== メインコンテンツ ===== -->
@@ -39,7 +40,7 @@
             <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8 自動判定）</span>
           </p>
         </div>
-        <input type="file" id="file-input" accept=".csv" class="hidden">
+        <input type="file" id="file-input" accept=".csv" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
 
         <!-- ファイル情報バー -->
         <div id="file-info-bar" class="file-info-bar hidden"></div>
@@ -88,12 +89,51 @@
   <!-- ========== PANEL 2: 設問構造確認 ========== -->
   <section id="panel-questions" class="panel">
 
+    <!-- 設問一覧テーブルカード -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">設問一覧</span>
+      </div>
+      <!-- 上部コントロールバー -->
+      <div id="q-axis-ctrl-top" class="axis-ctrl-bar" style="display:none">
+        <button id="q-select-all-top" class="btn btn-secondary btn-sm">☑ 全て選択</button>
+        <button id="q-deselect-all-top" class="btn btn-secondary btn-sm">□ 全て解除</button>
+        <button id="q-update-axis-btn" class="btn btn-primary btn-sm">集計軸を更新して次へ →</button>
+      </div>
+      <div class="table-wrap" id="questions-table-wrap">
+        <table id="questions-table">
+          <thead>
+            <tr>
+              <th style="width:64px; text-align:center">集計軸</th>
+              <th style="width:52px">No.</th>
+              <th style="width:100px">コード</th>
+              <th style="width:100px">種別</th>
+              <th style="min-width:700px">質問文</th>
+              <th style="width:220px">表側</th>
+              <th style="min-width:450px">選択肢</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="7" style="text-align:center; padding:32px; color:var(--color-text-muted)">
+                CSV をアップロードすると設問一覧が表示されます。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="questions-count-bar" class="count-bar">–</div>
+    </div>
+
     <!-- 検索・フィルタカード -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">検索・フィルタ</span>
-        <div style="margin-left:auto; display:flex; gap:8px;">
-          <button id="btn-save-project" class="btn btn-secondary btn-sm">💾 プロジェクト保存</button>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
+          <div id="axis-summary" style="display:none; align-items:center; gap:4px; font-size:.8rem;">
+            <span style="color:var(--color-text-muted); white-space:nowrap;">集計軸:</span>
+            <div id="axis-summary-badges" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
+          </div>
         </div>
       </div>
       <div class="card-body">
@@ -115,47 +155,35 @@
       </div>
     </div>
 
-    <!-- 設問一覧テーブルカード -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">設問一覧</span>
-      </div>
-      <div class="table-wrap">
-        <table id="questions-table">
-          <thead>
-            <tr>
-              <th style="width:52px">No.</th>
-              <th style="width:140px">コード</th>
-              <th style="width:140px">種別</th>
-              <th>質問文</th>
-              <th style="width:220px">表側</th>
-              <th style="min-width:180px">選択肢</th>
-              <th style="width:64px; text-align:center">集計軸</th>
-              <th style="width:56px; text-align:center">属性</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td colspan="8" style="text-align:center; padding:32px; color:var(--color-text-muted)">
-                CSV をアップロードすると設問一覧が表示されます。
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div id="questions-count-bar" class="count-bar">–</div>
-    </div>
-
     <!-- STEP2 ナビカード -->
     <div class="card">
       <div class="card-body" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
         <div style="flex:1; min-width:200px;">
           <div style="font-weight:600; margin-bottom:4px">次のステップ</div>
-          <div class="text-sm text-muted">設問構造の確認が完了したら、回答データを読み込んでラベル変換を行います。</div>
+          <div class="text-sm text-muted">集計軸を選択したら、回答データを読み込んでFA表を作成します。</div>
         </div>
         <button id="btn-to-step2" class="btn btn-primary" disabled>
           回答データ読込へ →
         </button>
+      </div>
+    </div>
+
+    <!-- 読込済みCSVカード（最下部・読込後に表示） -->
+    <div class="card" id="csv-loaded-card" style="display:none">
+      <div class="card-body" style="padding:0">
+        <div class="drop-zone drop-zone-loaded">
+          <div class="drop-icon">📄</div>
+          <div id="csv-loaded-info" class="file-info-bar"
+               style="justify-content:center; margin-bottom:12px; margin-top:0"></div>
+          <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+            <button id="btn-csv-reload" class="btn btn-secondary btn-sm">↺ 再読込</button>
+            <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+              差し替え
+              <input type="file" id="replace-csv-input" accept=".csv" class="hidden">
+            </label>
+            <button id="btn-csv-unload" class="btn btn-secondary btn-sm">× 読込解除</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -165,7 +193,7 @@
   <section id="panel-step2" class="panel">
 
     <!-- ① 回答データアップロード -->
-    <div class="card">
+    <div class="card" id="step2-upload-card">
       <div class="card-header">
         <span class="step2-step-num">①</span>
         <span class="card-title">回答データ CSV / Excel を読み込む</span>
@@ -178,7 +206,7 @@
             <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8）・xlsx</span>
           </p>
         </div>
-        <input type="file" id="step2-file-input" accept=".csv,.xlsx" class="hidden">
+        <input type="file" id="step2-file-input" accept=".csv,.xlsx" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
 
         <!-- ファイル情報バー -->
         <div id="step2-file-info-bar" class="file-info-bar hidden"></div>
@@ -188,15 +216,14 @@
       </div>
     </div>
 
-    <!-- ② データ変換・出力（折りたたみ、初期は閉じる） -->
+    <!-- ② データ変換・出力 -->
     <div class="card" id="step2-advanced-card" style="display:none">
-      <div class="card-header step2-collapse-hd" id="step2-advanced-toggle">
+      <div class="card-header">
         <span class="step2-step-num">②</span>
-        <span id="step2-adv-chevron" class="step2-chevron">▶</span>
         <span class="card-title">データ変換・出力</span>
         <div id="step2-match-summary" style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;"></div>
       </div>
-      <div id="step2-advanced-body" style="display:none">
+      <div id="step2-advanced-body">
 
         <!-- 照合結果（要確認のみ） -->
         <div class="card-body" style="border-top:1px solid var(--color-border)">
@@ -232,31 +259,24 @@
       </div>
     </div>
 
-    <!-- ③ 集計軸選択（アップロード後に表示） -->
-    <div class="card" id="step2-axis-card" style="display:none">
+    <!-- ③ 選択済み集計軸（STEP1 から引き継ぎ） -->
+    <div class="card" id="step2-selected-axis-card" style="display:none">
       <div class="card-header">
         <span class="step2-step-num">③</span>
-        <span class="card-title">集計軸選択</span>
-        <span id="step2-axis-saved-badge" class="badge" style="display:none; margin-left:auto; background:var(--color-primary-light); color:var(--color-primary)">✔ 保存済</span>
+        <span class="card-title">選択済み集計軸（STEP1 で選択）</span>
       </div>
       <div class="card-body">
-        <div style="display:flex; gap:8px; margin-bottom:8px;">
-          <button id="step2-axis-select-all"   class="btn btn-secondary btn-sm">全て選択</button>
-          <button id="step2-axis-deselect-all" class="btn btn-secondary btn-sm">全て削除</button>
-        </div>
-        <input id="step2-axis-search" class="step2-axis-cb-search" placeholder="列名を検索…">
-        <div id="step2-axis-cb-list" class="step2-axis-cb-list"></div>
-        <div style="margin-top:12px">
-          <button id="step2-save-axis-btn" class="btn btn-primary">完了</button>
-        </div>
+        <div id="step2-selected-axis-list" class="badge-list"></div>
+        <div id="step2-missing-axis-warn" class="warning-box hidden" style="margin-top:8px"></div>
       </div>
     </div>
 
-    <!-- ④ FA 表形成（集計軸完了後に表示） -->
+    <!-- ④ FA 表形成（回答データ読込後に表示） -->
     <div class="card" id="step2-fa-form-card" style="display:none">
       <div class="card-header">
         <span class="step2-step-num">④</span>
         <span class="card-title">FA 表形成</span>
+
       </div>
       <div class="card-body">
         <div class="step2-ctrl-grid">
@@ -269,11 +289,11 @@
             </div>
           </div>
 
-          <!-- 付与属性列 -->
+          <!-- 集計軸（付与属性列） -->
           <div class="step2-ctrl-row">
             <div class="step2-ctrl-label">
-              付与属性列
-              <span class="text-sm text-muted" style="font-weight:400">任意</span>
+              集計軸
+              <span class="text-sm text-muted" style="font-weight:400">STEP1で選択した集計軸から選択</span>
             </div>
             <div class="step2-ctrl-widget">
               <div id="fa-attr-cb-list" class="fa-attr-cb-list"></div>
@@ -283,6 +303,7 @@
           <!-- 表を更新 -->
           <div class="step2-ctrl-actions">
             <button id="fa-apply-btn" class="btn btn-primary">▶ 表を更新</button>
+            <button id="fa-reselect-axis-btn" class="btn btn-secondary">← 集計軸の再選択</button>
           </div>
 
         </div>
@@ -294,6 +315,7 @@
       <div class="card-header">
         <span class="step2-step-num">⑤</span>
         <span class="card-title">FA 一覧</span>
+
         <div class="fa-inline-filter">
           <input type="text" id="fa-keyword" placeholder="キーワード検索…" class="fa-filter-input">
           <label class="fa-filter-inline-check">
@@ -322,6 +344,66 @@
       <div id="fa-table-wrap" class="table-wrap fa-table-wrap"></div>
     </div>
 
+    <!-- STEP3 ナビカード -->
+    <div class="card" id="step2-to-step3-card" style="display:none">
+      <div class="card-body" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <div style="font-weight:600; margin-bottom:4px">次のステップ</div>
+          <div class="text-sm text-muted">クロス集計・グラフ作成（準備中）へ進みます。</div>
+        </div>
+        <button id="btn-to-step3" class="btn btn-primary">
+          クロス集計へ →
+        </button>
+      </div>
+    </div>
+
+    <!-- 読込済み回答データカード（初回読込後に最下部に表示） -->
+    <div class="card" id="step2-loaded-card" style="display:none">
+      <div class="card-body" style="padding:0">
+        <div class="drop-zone drop-zone-loaded">
+          <div class="drop-icon">📊</div>
+          <div id="step2-loaded-info" class="file-info-bar"
+               style="justify-content:center; margin-bottom:12px; margin-top:0"></div>
+          <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+            <button class="btn btn-secondary btn-sm" disabled>↺ 差し替え</button>
+            <button class="btn btn-secondary btn-sm" disabled>＋ 追加読み込み</button>
+            <button class="btn btn-secondary btn-sm" disabled>× 読み込み解除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ========== PANEL: STEP3 クロス集計 ========== -->
+  <section id="panel-step3" class="panel">
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">クロス集計・グラフ作成</span>
+        <span class="badge" style="margin-left:auto; background:var(--color-surface-2,#F8F8F8); color:var(--color-text-muted); border:1px solid var(--color-border)">準備中</span>
+      </div>
+      <div class="card-body">
+        <div style="text-align:center; padding:40px 0; color:var(--color-text-muted)">
+          <div style="font-size:2.5rem; margin-bottom:16px">📊</div>
+          <div style="font-weight:600; font-size:1.1rem; margin-bottom:8px; color:var(--color-text)">
+            クロス集計・グラフ作成
+          </div>
+          <div class="text-sm" style="margin-bottom:4px">
+            今後ここでクロス集計・グラフ作成を行う予定です。
+          </div>
+          <div class="text-sm">
+            STEP1 で選択した集計軸を使い、全設問とのクロス集計・グラフ生成を行います。
+          </div>
+        </div>
+
+        <div style="border-top:1px solid var(--color-border); padding-top:16px; margin-top:8px">
+          <div style="font-weight:600; margin-bottom:8px">STEP1 で選択された集計軸</div>
+          <div id="step3-axis-display" class="badge-list"></div>
+        </div>
+      </div>
+    </div>
+
   </section>
 
 </main>
@@ -335,6 +417,6 @@
 <!-- ===== Toast ===== -->
 <div id="toast-container"></div>
 
-<script type="module" src="/static/js/app.js"></script>
+<script type="module" src="/static/js/app.js?v=3"></script>
 </body>
 </html>

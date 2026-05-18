@@ -5,6 +5,7 @@ import { AppState, setActivePanel } from "./state.js";
 import { initUploadPanel } from "./upload.js";
 import { initQuestionsPanel, refreshQuestions } from "./questions.js";
 import { initStep2Panel } from "./step2.js";
+import { initStep3Panel } from "./step3.js";
 
 // ---------------------------------------------------------------------------
 // グローバルユーティリティ（他モジュールからインポートして使う）
@@ -37,13 +38,18 @@ export function showError(msg) {
 // ステップナビゲーション
 // ---------------------------------------------------------------------------
 
-const PANELS = ["upload", "questions", "step2"];
+const PANELS = ["upload", "questions", "step2", "step3"];
 
-function activatePanel(name) {
+export function activatePanel(name) {
   PANELS.forEach((p) => {
     document.getElementById(`panel-${p}`)?.classList.toggle("active", p === name);
-    document.getElementById(`btn-step-${p}`)?.classList.toggle("active", p === name);
   });
+
+  const step1Active = name === "upload" || name === "questions";
+  document.getElementById("btn-step-step1")?.classList.toggle("active", step1Active);
+  document.getElementById("btn-step-step2")?.classList.toggle("active", name === "step2");
+  document.getElementById("btn-step-step3")?.classList.toggle("active", name === "step3");
+
   setActivePanel(name);
   if (name === "questions") refreshQuestions();
 }
@@ -56,34 +62,38 @@ document.addEventListener("DOMContentLoaded", () => {
   initUploadPanel();
   initQuestionsPanel();
   initStep2Panel();
+  initStep3Panel();
 
-  // ステップボタン
-  document.getElementById("btn-step-upload").addEventListener("click", () => activatePanel("upload"));
-  document.getElementById("btn-step-questions").addEventListener("click", () => {
-    if (AppState.sessionToken) activatePanel("questions");
+  // ステップナビボタン
+  document.getElementById("btn-step-step1")?.addEventListener("click", () => {
+    activatePanel(AppState.sessionToken ? "questions" : "upload");
   });
-  document.getElementById("btn-step-step2").addEventListener("click", () => {
+  document.getElementById("btn-step-step2")?.addEventListener("click", () => {
     if (AppState.sessionToken) activatePanel("step2");
   });
+  document.getElementById("btn-step-step3")?.addEventListener("click", () => {
+    if (AppState.sessionToken) activatePanel("step3");
+  });
 
-  // アップロードパネルの「設問確認へ」ボタン
-  document.getElementById("btn-to-questions").addEventListener("click", () => {
+  // パネル内ナビゲーションボタン
+  document.getElementById("btn-to-questions")?.addEventListener("click", () => {
     if (AppState.sessionToken) activatePanel("questions");
   });
-
-  // 設問確認パネルの「回答データ読込へ」ボタン
-  document.getElementById("btn-to-step2").addEventListener("click", () => {
+  document.getElementById("btn-to-step2")?.addEventListener("click", () => {
     if (AppState.sessionToken) activatePanel("step2");
   });
+  document.getElementById("btn-to-step3")?.addEventListener("click", () => {
+    if (AppState.sessionToken) activatePanel("step3");
+  });
 
-  // セッショントークンが確定したら ② ③ を有効化する
+  // セッション確立後に ② ③ を有効化
   document.addEventListener("survey:statechange", () => {
     const hasSession = !!AppState.sessionToken;
-    document.getElementById("btn-step-questions").disabled = !hasSession;
     document.getElementById("btn-step-step2").disabled = !hasSession;
+    document.getElementById("btn-step-step3").disabled = !hasSession;
     document.getElementById("btn-to-step2").disabled = !hasSession;
+    document.getElementById("btn-to-questions").disabled = !hasSession;
   });
 
-  // 初期状態でアップロードパネルをアクティブに
   activatePanel("upload");
 });

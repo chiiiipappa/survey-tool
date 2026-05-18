@@ -11,12 +11,19 @@ const CHOICE_MODE_LABEL = {
   none:                 "選択肢列なし",
 };
 
+let _lastFile = null;
+
 export function initUploadPanel() {
+  // ブラウザのファイル保存ダイアログ抑制（ゾーン外ドロップ対策）
+  document.addEventListener("dragover", (e) => e.preventDefault());
+  document.addEventListener("drop", (e) => e.preventDefault());
+
   const dropZone     = document.getElementById("drop-zone");
   const fileInput    = document.getElementById("file-input");
   const projectInput = document.getElementById("project-input");
 
-  // ドラッグ&ドロップ
+  dropZone.addEventListener("click", () => fileInput.click());
+
   dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
     dropZone.classList.add("dragover");
@@ -26,12 +33,11 @@ export function initUploadPanel() {
     e.preventDefault();
     dropZone.classList.remove("dragover");
     const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    if (f) handleCsvFile(f);
   });
-  dropZone.addEventListener("click", () => fileInput.click());
 
   fileInput.addEventListener("change", () => {
-    if (fileInput.files[0]) handleFile(fileInput.files[0]);
+    if (fileInput.files[0]) handleCsvFile(fileInput.files[0]);
     fileInput.value = "";
   });
 
@@ -42,12 +48,12 @@ export function initUploadPanel() {
   });
 }
 
-async function handleFile(file) {
+export async function handleCsvFile(file) {
   if (!file.name.toLowerCase().endsWith(".csv")) {
     showError("CSV ファイル（.csv）を選択してください。");
     return;
   }
-
+  _lastFile = file;
   showSpinner("CSV を解析中…");
   try {
     const resp = await uploadFile(file);
@@ -61,6 +67,10 @@ async function handleFile(file) {
   } finally {
     hideSpinner();
   }
+}
+
+export function reloadLastCsvFile() {
+  if (_lastFile) handleCsvFile(_lastFile);
 }
 
 async function handleProjectLoad(file) {

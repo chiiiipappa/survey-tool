@@ -1,9 +1,12 @@
 /**
  * 設問一覧パネルの制御（テーブル描画・検索・フィルタ・軸/属性フラグ編集）。
  */
-import { getQuestions, saveProject, saveStep2Axis } from "./api.js";
-import { AppState, setFilterState, setStep2AxisSelection, setStep2AttrSelection } from "./state.js";
-import { showToast, showError } from "./app.js";
+import { getQuestions, saveProject } from "./api.js";
+import { AppState, setFilterState, setStep1AxisCodes, resetState } from "./state.js";
+import { showToast, showError, activatePanel } from "./app.js";
+import { handleCsvFile, reloadLastCsvFile } from "./upload.js";
+
+const AXIS_TYPE_CODES = new Set(["SA", "S", "NU", "N", "ML"]);
 
 // 種別バッジスタイル
 const TYPE_BADGE = {
@@ -20,6 +23,28 @@ function typeBadge(typeCode, typeLabel) {
 }
 
 let _debounceTimer = null;
+
+function selectAllAxes() {
+  const cbs = [...document.querySelectorAll("#questions-table .q-axis-cb")];
+  const codes = [...AppState.step1AxisCodes];
+  cbs.forEach(cb => {
+    cb.checked = true;
+    if (!codes.includes(cb.dataset.code)) codes.push(cb.dataset.code);
+  });
+  setStep1AxisCodes(codes);
+}
+
+function deselectAllAxes() {
+  const cbs = [...document.querySelectorAll("#questions-table .q-axis-cb")];
+  const visibleCodes = new Set(cbs.map(cb => cb.dataset.code));
+  cbs.forEach(cb => { cb.checked = false; });
+  setStep1AxisCodes(AppState.step1AxisCodes.filter(c => !visibleCodes.has(c)));
+}
+
+function setAxisCtrlVisible(visible) {
+  const el = document.getElementById("q-axis-ctrl-top");
+  if (el) el.style.display = visible ? "" : "none";
+}
 
 export function initQuestionsPanel() {
   const searchInput = document.getElementById("q-search");
@@ -59,23 +84,35 @@ export function initQuestionsPanel() {
     if (!code) return;
 
     if (cb.classList.contains("q-axis-cb")) {
-      let cols = [...AppState.step2SelectedAxisColumns];
+      let cols = [...AppState.step1AxisCodes];
       if (cb.checked) { if (!cols.includes(code)) cols.push(code); }
       else { cols = cols.filter(c => c !== code); }
-      setStep2AxisSelection(cols);
-      try {
-        await saveStep2Axis(AppState.sessionToken, cols);
-      } catch (err) {
-        showError(err.message);
-      }
+      setStep1AxisCodes(cols);
     }
+  });
 
-    if (cb.classList.contains("q-attr-cb")) {
-      let cols = [...AppState.step2SelectedAttrColumns];
-      if (cb.checked) { if (!cols.includes(code)) cols.push(code); }
-      else { cols = cols.filter(c => c !== code); }
-      setStep2AttrSelection(cols);
-    }
+  // 全選択/全解除ボタン
+  document.getElementById("q-select-all-top")?.addEventListener("click", selectAllAxes);
+  document.getElementById("q-deselect-all-top")?.addEventListener("click", deselectAllAxes);
+
+  // 集計軸を更新ボタン → Step2へ遷移
+  document.getElementById("q-update-axis-btn")?.addEventListener("click", () => {
+    activatePanel("step2");
+  });
+
+  // CSV情報カードのボタン
+  document.getElementById("btn-csv-reload")?.addEventListener("click", () => {
+    reloadLastCsvFile();
+  });
+
+  document.getElementById("replace-csv-input")?.addEventListener("change", (e) => {
+    if (e.target.files[0]) handleCsvFile(e.target.files[0]);
+    e.target.value = "";
+  });
+
+  document.getElementById("btn-csv-unload")?.addEventListener("click", () => {
+    resetState();
+    activatePanel("upload");
   });
 
   // プロジェクト保存ボタン
@@ -94,8 +131,48 @@ export function initQuestionsPanel() {
 }
 
 function onStateChange() {
+  updateCsvInfoCard();
+  updateAxisSummary();
   if (AppState.activePanel !== "questions") return;
   updateTypeDropdown();
+}
+
+function updateCsvInfoCard() {
+  const card = document.getElementById("csv-loaded-card");
+  if (!card) return;
+  if (!AppState.sessionToken || !AppState.sourceFilename) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+  const dt = AppState.loadedAt
+    ? AppState.loadedAt.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : "–";
+  document.getElementById("csv-loaded-info").innerHTML = `
+    <div class="info-item"><span class="info-label">ファイル:</span><span class="info-value">${escHtml(AppState.sourceFilename)}</span></div>
+    <div class="info-item"><span class="info-label">設問数:</span><span class="info-value">${AppState.rowCount} 件</span></div>
+    <div class="info-item"><span class="info-label">読込日時:</span><span class="info-value">${dt}</span></div>
+  `;
+}
+
+function updateAxisSummary() {
+  const summary = document.getElementById("axis-summary");
+  const badges  = document.getElementById("axis-summary-badges");
+  if (!summary || !badges) return;
+  const codes = AppState.step1AxisCodes;
+  if (!codes.length) { summary.style.display = "none"; return; }
+  summary.style.display = "flex";
+  const qMap = new Map((AppState.questions ?? []).map(q => [q.question_code, q]));
+  const MAX_SHOW = 5;
+  const shown = codes.slice(0, MAX_SHOW);
+  const rest  = codes.length - shown.length;
+  badges.innerHTML =
+    shown.map(c => {
+      const q = qMap.get(c);
+      const label = escHtml((q ? (q.question_text || q.stub || c) : c).slice(0, 8));
+      return `<span class="badge" title="${escHtml(c)}">${label}</span>`;
+    }).join("") +
+    (rest > 0 ? `<span class="badge" style="background:var(--color-surface-2,#F8F8F8); color:var(--color-text-muted)">+${rest}</span>` : "");
 }
 
 export async function refreshQuestions() {
@@ -164,18 +241,16 @@ function renderTable(questions, totalCount, filteredCount) {
   const displayRows = questions.filter((q) => !q.has_children);
 
   if (displayRows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--color-text-muted)">該当する設問がありません。</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:32px; color:var(--color-text-muted)">該当する設問がありません。</td></tr>`;
     countBar.textContent = `0件表示 / 全${totalCount}件`;
+    setAxisCtrlVisible(false);
     return;
   }
 
   countBar.textContent = `${displayRows.length}件表示 / 全${totalCount}件`;
 
-  const axisSet     = new Set(AppState.step2AxisCandidates.map(c => c.question_code));
-  const attrSet     = new Set(AppState.step2AttrCandidates.map(c => c.question_code));
-  const axisSelected = new Set(AppState.step2SelectedAxisColumns);
-  const attrSelected = new Set(AppState.step2SelectedAttrColumns);
-  const hasStep2    = AppState.step2AxisCandidates.length > 0;
+  const axisSelected = new Set(AppState.step1AxisCodes);
+  let hasAxisCb = false;
 
   tbody.innerHTML = displayRows.map((q, i) => {
     const rowCls  = q.is_child ? "row-child" : "";
@@ -184,25 +259,25 @@ function renderTable(questions, totalCount, filteredCount) {
     const questionText = q.is_child ? (q.parent_text || q.question_text) : q.question_text;
     const stubText     = q.is_child ? (q.stub || q.question_text) : (q.stub || "");
 
-    const axisCell = hasStep2 && axisSet.has(q.question_code)
+    const hasAxis = AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase());
+    if (hasAxis) hasAxisCb = true;
+    const axisCell = hasAxis
       ? `<td style="text-align:center"><input type="checkbox" class="q-axis-cb" data-code="${escHtml(q.question_code)}" ${axisSelected.has(q.question_code) ? "checked" : ""}></td>`
-      : `<td></td>`;
-    const attrCell = hasStep2 && attrSet.has(q.question_code)
-      ? `<td style="text-align:center"><input type="checkbox" class="q-attr-cb" data-code="${escHtml(q.question_code)}" ${attrSelected.has(q.question_code) ? "checked" : ""}></td>`
       : `<td></td>`;
 
     return `
       <tr class="${rowCls}">
+        ${axisCell}
         <td>${i + 1}</td>
         <td class="${codeCls}">${escHtml(q.question_code)}</td>
         <td>${typeBadge(q.type_code, q.type_label)}</td>
         <td><span class="text-truncate" title="${escHtml(questionText)}">${escHtml(questionText)}</span></td>
         <td><span class="text-truncate" title="${escHtml(stubText)}">${escHtml(stubText)}</span></td>
         <td>${buildChoiceCell(q.choices)}</td>
-        ${axisCell}
-        ${attrCell}
       </tr>`;
   }).join("");
+
+  setAxisCtrlVisible(hasAxisCb);
 }
 
 function escHtml(s) {

@@ -2,10 +2,22 @@
  * アプリケーション状態管理シングルトン。
  * カスタムイベント "survey:statechange" で変更を通知する。
  */
+const _AXIS_TYPE_CODES = new Set(["SA", "S", "NU", "N"]);
+
+function deriveStep1AxisDefaults(questions) {
+  return (questions ?? [])
+    .filter(q =>
+      _AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase()) &&
+      !q.has_children
+    )
+    .map(q => q.question_code);
+}
+
 export const AppState = {
   // セッション
   sessionToken: null,
   // ファイル情報
+  loadedAt: null,
   sourceFilename: null,
   sourceEncoding: "",
   fileSize: 0,
@@ -15,6 +27,8 @@ export const AppState = {
   questions: [],
   allTypeCodes: [],
   parseWarnings: [],
+  // STEP1: 集計軸選択
+  step1AxisCodes: [],
   // UI
   activePanel: "upload",
   searchText: "",
@@ -46,6 +60,7 @@ function _emit() {
 
 export function setUploadResult(resp) {
   AppState.sessionToken    = resp.session_token;
+  AppState.loadedAt        = new Date();
   AppState.sourceFilename  = resp.filename;
   AppState.sourceEncoding  = resp.encoding_detected;
   AppState.fileSize        = resp.file_size;
@@ -54,6 +69,7 @@ export function setUploadResult(resp) {
   AppState.questions       = resp.questions ?? [];
   AppState.allTypeCodes    = resp.all_type_codes ?? [];
   AppState.parseWarnings   = resp.parse_warnings ?? [];
+  AppState.step1AxisCodes  = deriveStep1AxisDefaults(AppState.questions);
   _emit();
 }
 
@@ -62,6 +78,7 @@ export function setLoadedProject(resp) {
   AppState.questions      = resp.questions ?? [];
   AppState.parseWarnings  = resp.parse_warnings ?? [];
   AppState.allTypeCodes   = [...new Set((resp.questions ?? []).map(q => q.type_code).filter(Boolean))].sort();
+  AppState.step1AxisCodes = deriveStep1AxisDefaults(AppState.questions);
   _emit();
 }
 
@@ -122,8 +139,14 @@ export function setStep2AttrSelection(cols) {
   _emit();
 }
 
+export function setStep1AxisCodes(codes) {
+  AppState.step1AxisCodes = Array.isArray(codes) ? [...codes] : [];
+  _emit();
+}
+
 export function resetState() {
   AppState.sessionToken    = null;
+  AppState.loadedAt        = null;
   AppState.sourceFilename  = null;
   AppState.sourceEncoding  = "";
   AppState.fileSize        = 0;
@@ -152,5 +175,6 @@ export function resetState() {
   AppState.step2MultiSelectColumns = [];
   AppState.step2AttrCandidates = [];
   AppState.step2SelectedAttrColumns = [];
+  AppState.step1AxisCodes = [];
   _emit();
 }

@@ -1,9 +1,9 @@
 /**
  * STEP2: 回答データ読込・ラベル変換 パネル UI ロジック。
  */
-import { AppState, setStep2UploadResult, setStep2AxisSelection, setStep2FaMeta } from "./state.js";
-import { uploadResponseFile, saveStep2Axis, exportLabeledData, getFaData, exportFaData, getFaMeta } from "./api.js";
-import { showSpinner, hideSpinner, showToast, showError } from "./app.js";
+import { AppState, setStep2UploadResult, setStep2FaMeta } from "./state.js";
+import { uploadResponseFile, exportLabeledData, getFaData, exportFaData, getFaMeta } from "./api.js";
+import { showSpinner, hideSpinner, showToast, showError, activatePanel } from "./app.js";
 
 // ---------------------------------------------------------------------------
 // 初期化
@@ -12,13 +12,9 @@ import { showSpinner, hideSpinner, showToast, showError } from "./app.js";
 export function initStep2Panel() {
   _initDropZone();
   _initTabSwitcher();
-  _initAxisSaveButton();
-  _initAxisControls();
   _initExportButton();
   _initFaCard();
-  _initCollapsible();
 
-  // 集計軸保存後に付与属性列・ソート属性を同期
   document.addEventListener("survey:statechange", () => {
     _updateAttrMultiSelect();
     _updateSortAttrSelect();
@@ -85,11 +81,28 @@ async function _handleFile(file) {
 
 function _renderAll(resp) {
   renderFileInfoBar(resp);
-  renderAdvancedCard(resp);  // ② 折りたたみ（collapsed 状態で表示）
+  renderAdvancedCard(resp);          // ② 折りたたみ
   renderPreviewCard(resp);
-  renderAxisCard(resp);      // ③ 集計軸チェックボックス
-  _loadFaMeta();             // ④ 用マルチセレクト事前初期化
-  // ④⑤ は集計軸完了・表を更新 まで非表示
+  renderSelectedAxisDisplay(resp);   // ③ 選択済み集計軸（読み取り専用）
+  document.getElementById("step2-upload-card").style.display = "none";
+  _renderStep2LoadedInfo(resp);
+  document.getElementById("step2-loaded-card").style.display = "";
+  document.getElementById("step2-selected-axis-card").style.display = "";
+  document.getElementById("step2-fa-form-card").style.display = "";  // ④ 即時表示
+  document.getElementById("step2-to-step3-card").style.display = "";
+  _loadFaMeta();
+}
+
+function _renderStep2LoadedInfo(resp) {
+  const el = document.getElementById("step2-loaded-info");
+  if (!el) return;
+  el.innerHTML = `
+    <span>📊 <strong>${_esc(resp.filename)}</strong></span>
+    <span class="badge">${_esc(resp.encoding_detected)}</span>
+    <span>${resp.response_row_count.toLocaleString("ja-JP")} 行</span>
+    <span>${resp.response_col_count.toLocaleString("ja-JP")} 列</span>
+    <span>${(resp.file_size / 1024).toFixed(1)} KB</span>
+  `;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,92 +135,38 @@ export function renderFileInfoBar(resp) {
 }
 
 // ---------------------------------------------------------------------------
-// ③ 集計軸選択カード
+// ③ 選択済み集計軸表示（STEP1 から引き継ぎ、読み取り専用）
 // ---------------------------------------------------------------------------
 
-export function renderAxisCard(resp) {
-  const card = document.getElementById("step2-axis-card");
-  card.style.display = "";
+function renderSelectedAxisDisplay(resp) {
+  const matchedSet = new Set(resp.matched_columns ?? []);
+  const validated  = AppState.step1AxisCodes.filter(c => matchedSet.has(c));
+  const missing    = AppState.step1AxisCodes.filter(c => !matchedSet.has(c));
 
-  const candidates = resp.axis_candidates ?? [];
-  const savedSet   = new Set(AppState.step2SelectedAxisColumns);
-  const listEl     = document.getElementById("step2-axis-cb-list");
+  _faState.validatedStep1Axes = validated;
 
-  // 再アップロード時にイベントが重複しないよう search input を作り直す
-  const oldSearch = document.getElementById("step2-axis-search");
-  const newSearch = oldSearch.cloneNode(true);
-  oldSearch.parentNode.replaceChild(newSearch, oldSearch);
-
-  const hasSaved = savedSet.size > 0;
-
-  listEl.innerHTML = candidates.map(c => {
-    const combinedText = c.question_code + " " + c.question_text;
-    const isDefault = !hasSaved && (
-      combinedText.includes("ファンラベル") || combinedText.includes("[属性]")
-    );
-    const checked     = (hasSaved ? savedSet.has(c.question_code) : isDefault) ? "checked" : "";
-    const searchLabel = combinedText.toLowerCase();
-    const badge       = c.type_label
-      ? `<span class="badge" style="margin-left:auto;font-size:10px">${_esc(c.type_label)}</span>`
-      : "";
-    return `<label class="step2-axis-cb-item" data-label="${_esc(searchLabel)}">
-      <input type="checkbox" value="${_esc(c.question_code)}" ${checked}>
-      <span><strong>${_esc(c.question_code)}</strong>　${_esc(c.question_text)}</span>
-      ${badge}
-    </label>`;
-  }).join("");
-
-  newSearch.addEventListener("input", () => {
-    const q = newSearch.value.toLowerCase();
-    listEl.querySelectorAll(".step2-axis-cb-item").forEach(item => {
-      item.classList.toggle("hidden", q.length > 0 && !item.dataset.label.includes(q));
-    });
-  });
-
-  // 以前に集計軸を保存済みの場合は ③ 保存済バッジ + ④ を表示
-  if (AppState.step2SelectedAxisColumns.length > 0) {
-    document.getElementById("step2-axis-saved-badge").style.display = "";
-    document.getElementById("step2-fa-form-card").style.display = "";
+  const listEl = document.getElementById("step2-selected-axis-list");
+  if (listEl) {
+    if (!AppState.step1AxisCodes.length) {
+      listEl.innerHTML = '<span class="text-sm text-muted">STEP1 で集計軸が選択されていません。</span>';
+    } else {
+      const axisInfoMap = new Map((resp.axis_candidates ?? []).map(c => [c.question_code, c]));
+      listEl.innerHTML = validated.map(code => {
+        const info  = axisInfoMap.get(code);
+        const label = info ? `${code}　${info.question_text}` : code;
+        return `<span class="badge badge-ok">${_esc(label)}</span>`;
+      }).join("");
+    }
   }
-}
 
-// ---------------------------------------------------------------------------
-// 集計軸 保存ボタン
-// ---------------------------------------------------------------------------
-
-function _initAxisSaveButton() {
-  document.getElementById("step2-save-axis-btn").addEventListener("click", handleAxisSave);
-}
-
-function _initAxisControls() {
-  document.getElementById("step2-axis-select-all").addEventListener("click", () => {
-    document.querySelectorAll('#step2-axis-cb-list input[type="checkbox"]')
-      .forEach(cb => { cb.checked = true; });
-  });
-  document.getElementById("step2-axis-deselect-all").addEventListener("click", () => {
-    document.querySelectorAll('#step2-axis-cb-list input[type="checkbox"]')
-      .forEach(cb => { cb.checked = false; });
-  });
-}
-
-export async function handleAxisSave() {
-  if (!AppState.sessionToken) return;
-  const selected = Array.from(
-    document.querySelectorAll('#step2-axis-cb-list input[type="checkbox"]:checked')
-  ).map(cb => cb.value);
-  showSpinner("集計軸を保存中…");
-  try {
-    await saveStep2Axis(AppState.sessionToken, selected);
-    setStep2AxisSelection(selected);
-    showToast(`集計軸を保存しました（${selected.length} 列）`);
-    document.getElementById("step2-axis-saved-badge").style.display = "";
-    document.getElementById("step2-fa-form-card").style.display = "";
-    _updateAttrMultiSelect();
-    _updateSortAttrSelect();
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    hideSpinner();
+  const warnEl = document.getElementById("step2-missing-axis-warn");
+  if (warnEl) {
+    if (missing.length > 0) {
+      warnEl.innerHTML = `<strong>⚠ 以下の集計軸は回答データに存在しません:</strong> ${missing.map(_esc).join("、")}`;
+      warnEl.classList.remove("hidden");
+    } else {
+      warnEl.classList.add("hidden");
+    }
   }
 }
 
@@ -217,6 +176,7 @@ export async function handleAxisSave() {
 
 export function renderAdvancedCard(resp) {
   document.getElementById("step2-advanced-card").style.display = "";
+  document.getElementById("step2-advanced-body").style.display = "";
   renderMatchCard(resp);
 }
 
@@ -344,8 +304,26 @@ function _missingTable(items) {
 
 export function renderPreviewCard(resp) {
   _renderPreviewTable("step2-preview-raw", resp.preview_rows ?? []);
-  _renderPreviewTable("step2-preview-labeled", resp.labeled_preview_rows ?? []);
+  _renderLabeledPreviewTable("step2-preview-labeled", resp.labeled_preview_rows ?? []);
   _renderUnmatchedTable("step2-preview-unmatched", resp.unmatched_values ?? []);
+}
+
+function _renderLabeledPreviewTable(containerId, rows) {
+  const el = document.getElementById(containerId);
+  if (!rows.length) {
+    el.innerHTML = '<p class="text-sm text-muted" style="padding:16px">データがありません。</p>';
+    return;
+  }
+  const questionMap = new Map(AppState.questions.map(q => [q.question_code, q.question_text]));
+  const cols = Object.keys(rows[0]);
+  const thead = `<tr>${cols.map(c => {
+    const title = questionMap.get(c) ?? c;
+    return `<th title="${_esc(c)}">${_esc(title)}</th>`;
+  }).join("")}</tr>`;
+  const tbody = rows.map(row =>
+    `<tr>${cols.map(c => `<td>${_esc(String(row[c] ?? ""))}</td>`).join("")}</tr>`
+  ).join("");
+  el.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
 }
 
 function _renderPreviewTable(containerId, rows) {
@@ -423,9 +401,10 @@ export async function handleExport() {
 // ---------------------------------------------------------------------------
 
 const _faState = {
-  faColumns:   [],
-  _msQuestion: null,
-  hasData:     false,
+  faColumns:          [],
+  _msQuestion:        null,
+  hasData:            false,
+  validatedStep1Axes: [],
 };
 
 function _initFaCard() {
@@ -436,6 +415,10 @@ function _initFaCard() {
       return;
     }
     _loadFaData(_collectFaParams());
+  });
+
+  document.getElementById("fa-reselect-axis-btn")?.addEventListener("click", () => {
+    activatePanel("questions");
   });
 
   document.getElementById("fa-sort-select").addEventListener("change", (e) => {
@@ -496,23 +479,28 @@ function _initMultiSelects(meta) {
     placeholder: "FA設問を検索・選択…",
   });
 
-  // 付与属性列 multi-select（集計軸保存後に選択肢が更新される）
-  const candidateMap = new Map(AppState.step2AxisCandidates.map(c => [c.question_code, c]));
-  const attrOptions = AppState.step2SelectedAxisColumns.map(code => {
+  // 付与属性列: STEP1 集計軸以外の候補のみ
+  _renderExtraAttrCheckboxes(meta.attr_candidates ?? []);
+  _updateSortAttrSelect();
+}
+
+function _renderExtraAttrCheckboxes(attrCandidates) {
+  const candidateMap = new Map(attrCandidates.map(c => [c.question_code, c]));
+  const options = _faState.validatedStep1Axes.map(code => {
     const info = candidateMap.get(code);
     return { value: code, label: info ? `${code}　${info.question_text}` : code };
   });
-  _renderAttrCheckboxes(attrOptions);
-
-  _updateSortAttrSelect();
+  _renderAttrCheckboxes(options);
 }
 
 function _updateAttrMultiSelect() {
   const candidateMap = new Map(AppState.step2AxisCandidates.map(c => [c.question_code, c]));
-  const options = AppState.step2SelectedAxisColumns.map(code => {
-    const info = candidateMap.get(code);
-    return { value: code, label: info ? `${code}　${info.question_text}` : code };
-  });
+  const options = AppState.step1AxisCodes
+    .filter(code => candidateMap.has(code))
+    .map(code => {
+      const info = candidateMap.get(code);
+      return { value: code, label: `${code}　${info.question_text}` };
+    });
   _renderAttrCheckboxes(options);
 }
 
@@ -521,7 +509,7 @@ function _renderAttrCheckboxes(options) {
   if (!container) return;
   const prevSelected = new Set(_getAttrSelected());
   if (!options.length) {
-    container.innerHTML = '<span class="text-sm text-muted">集計軸を保存すると選択肢が表示されます</span>';
+    container.innerHTML = '<span class="text-sm text-muted">追加属性列の候補がありません</span>';
     return;
   }
   container.innerHTML = options.map(o => `
@@ -543,17 +531,17 @@ function _updateSortAttrSelect() {
   if (!sel) return;
   const cur = sel.value;
   const candidateMap = new Map(AppState.step2AxisCandidates.map(c => [c.question_code, c]));
-  sel.innerHTML = AppState.step2SelectedAxisColumns
-    .map(code => {
-      const info = candidateMap.get(code);
-      const label = info ? `${code}　${info.question_text}` : code;
-      return `<option value="${_esc(code)}" ${code === cur ? "selected" : ""}>${_esc(label)}</option>`;
-    }).join("");
+  const allCols = AppState.step1AxisCodes.filter(code => candidateMap.has(code));
+  sel.innerHTML = allCols.map(code => {
+    const info = candidateMap.get(code);
+    const label = info ? `${code}　${info.question_text}` : code;
+    return `<option value="${_esc(code)}" ${code === cur ? "selected" : ""}>${_esc(label)}</option>`;
+  }).join("");
 }
 
 function _collectFaParams() {
   return {
-    attrColumns:  _getAttrSelected(),
+    attrColumns: _getAttrSelected(),
     faCodes:      _faState._msQuestion?.getSelected() ?? [],
     excludeEmpty: document.getElementById("fa-exclude-empty").checked,
     minChars:     parseInt(document.getElementById("fa-min-chars").value, 10) || 0,

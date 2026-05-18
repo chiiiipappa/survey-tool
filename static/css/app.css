@@ -52,7 +52,8 @@ a:hover { text-decoration: underline; }
   box-shadow: var(--shadow-md);
 }
 .app-header h1 { font-size: 1rem; font-weight: 600; letter-spacing: .02em; }
-.app-header .version { font-size: .75rem; opacity: .75; margin-left: auto; }
+.app-header .version { font-size: .75rem; opacity: .75; }
+.app-header .header-save-btn { margin-left: auto; }
 
 .step-nav {
   background: var(--color-surface);
@@ -84,7 +85,7 @@ a:hover { text-decoration: underline; }
 }
 
 .main-content {
-  max-width: 1200px;
+  max-width: 95vw;
   margin: 0 auto;
   padding: 24px;
 }
@@ -112,6 +113,7 @@ a:hover { text-decoration: underline; }
 
 /* ===== アップロード ===== */
 .drop-zone {
+  display: block;
   border: 2px dashed var(--color-border);
   border-radius: var(--radius);
   padding: 48px 24px;
@@ -126,6 +128,15 @@ a:hover { text-decoration: underline; }
 .drop-zone .drop-icon { font-size: 2.5rem; margin-bottom: 12px; }
 .drop-zone p { color: var(--color-text-muted); font-size: .875rem; line-height: 1.6; }
 .drop-zone strong { color: var(--color-primary); cursor: pointer; }
+.drop-zone.drop-zone-loaded {
+  cursor: default;
+  border-style: solid;
+  padding: 24px;
+}
+.drop-zone.drop-zone-loaded:hover {
+  border-color: var(--color-border);
+  background: transparent;
+}
 
 .file-info-bar {
   display: flex;
@@ -250,6 +261,21 @@ a:hover { text-decoration: underline; }
 /* ===== テーブル ===== */
 .table-wrap {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 560px;
+}
+.scroll-top-mirror {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.axis-ctrl-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt, #FAFAFA);
 }
 table {
   width: 100%;
@@ -257,6 +283,9 @@ table {
   font-size: .85rem;
 }
 thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: var(--color-surface-alt);
   border-bottom: 2px solid var(--color-border);
   padding: 10px 12px;
@@ -283,7 +312,8 @@ tbody td {
 }
 .code-cell { font-family: ui-monospace, monospace; font-size: .8rem; }
 .code-cell.is-child { padding-left: 28px; }
-.text-truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.text-truncate { max-width: 700px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+#questions-table { min-width: 2000px; width: max-content; }
 
 /* ===== バッジ ===== */
 .badge {
