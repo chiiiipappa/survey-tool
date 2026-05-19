@@ -266,6 +266,13 @@ class Step1AxisSettingsRequest(BaseModel):
     step3_active_axis_code: str = ""
 
 
+class ProjectSaveRequest(BaseModel):
+    session_token: str
+    project_name: str = ""
+    step3_chart_type_map: dict = Field(default_factory=dict)    # 後方互換
+    step3_question_settings: dict = Field(default_factory=dict)  # 新
+
+
 class LayoutSaveData(BaseModel):
     layout_file: LayoutFileInfo
     questions: List[QuestionItem] = Field(default_factory=list)
@@ -274,6 +281,8 @@ class LayoutSaveData(BaseModel):
     choice_column_mode: str = "none"
     all_type_codes: List[str] = Field(default_factory=list)
     step3_active_axis_code: str = ""
+    step3_chart_type_map: dict = Field(default_factory=dict)     # 後方互換
+    step3_question_settings: dict = Field(default_factory=dict)  # 新
 
 
 class Step2SaveData(BaseModel):

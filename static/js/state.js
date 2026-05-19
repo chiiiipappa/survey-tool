@@ -63,6 +63,7 @@ export const AppState = {
   step3CrosstabConfigs: [],
   step3ActiveAxisCode: "",
   step3LastGeneratedAxisCode: "",
+  step3QuestionSettings: {},  // { question_code: QuestionSettings }
 };
 
 function _emit() {
@@ -97,6 +98,26 @@ export function setStep3Configs(configs) {
 
 export function setStep3ActiveAxis(code) {
   AppState.step3ActiveAxisCode = code ?? "";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3Setting(questionCode, key, value) {
+  const existing = AppState.step3QuestionSettings[questionCode] ?? {};
+  AppState.step3QuestionSettings = {
+    ...AppState.step3QuestionSettings,
+    [questionCode]: { ...existing, [key]: value },
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3SettingsBulk(updates) {
+  const next = { ...AppState.step3QuestionSettings };
+  for (const [qCode, partial] of Object.entries(updates)) {
+    next[qCode] = { ...(next[qCode] ?? {}), ...partial };
+  }
+  AppState.step3QuestionSettings = next;
   AppState.isDirty = true;
   _emit();
 }
@@ -159,6 +180,18 @@ export function setLoadedProject(resp) {
   AppState.step3CrosstabConfigs = resp.step3_crosstab_configs ?? [];
   AppState.step3ActiveAxisCode = resp.step3_active_axis_code ?? "";
   AppState.step3LastGeneratedAxisCode = "";
+  // 旧 step3_chart_type_map からのマイグレーション + 新 step3_question_settings の復元
+  const _oldMap = resp.layout?.step3_chart_type_map ?? {};
+  const _newSettings = resp.layout?.step3_question_settings ?? {};
+  const _migrated = {};
+  for (const [k, v] of Object.entries(_oldMap)) {
+    if (!_newSettings[k]) {
+      _migrated[k] = v === "hbar" ? { chartType: "bar", orientation: "h" }
+                   : v === "vbar" ? { chartType: "bar", orientation: "v" }
+                   : { chartType: v };
+    }
+  }
+  AppState.step3QuestionSettings = { ..._migrated, ..._newSettings };
   _emit();
 }
 
@@ -267,5 +300,6 @@ export function resetState() {
   AppState.step3CrosstabConfigs = [];
   AppState.step3ActiveAxisCode = "";
   AppState.step3LastGeneratedAxisCode = "";
+  AppState.step3QuestionSettings = {};
   _emit();
 }

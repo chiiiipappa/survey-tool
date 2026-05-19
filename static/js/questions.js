@@ -341,7 +341,7 @@ export function initProjectHeader() {
     }
     try {
       await saveStep1AxisSettings(AppState.sessionToken, AppState.step1AxisCodes, AppState.step3ActiveAxisCode);
-      await saveProject(AppState.sessionToken, AppState.projectName);
+      await saveProject(AppState.sessionToken, AppState.projectName, AppState.step3QuestionSettings);
       markClean(new Date());
       showToast("プロジェクトを保存しました。");
     } catch (err) {

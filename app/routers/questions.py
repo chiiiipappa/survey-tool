@@ -21,6 +21,7 @@ from app.schemas import (
     LayoutSaveData,
     ProjectData,
     ProjectLoadResponse,
+    ProjectSaveRequest,
     QuestionsJsonResponse,
     QuestionsResponse,
     QuestionItem,
@@ -111,11 +112,10 @@ async def save_step1_axis_settings(body: Step1AxisSettingsRequest) -> dict:
 
 
 @router.post("/project/save", summary="プロジェクト ZIP (.surv) ダウンロード")
-async def save_project(
-    session_token: str = Query(...),
-    project_name: str = Query(""),
-) -> StreamingResponse:
+async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
     """現在のセッション状態を .surv（ZIP）形式でダウンロードする。STEP1・STEP2 を含む。"""
+    session_token = req.session_token
+    project_name = req.project_name
     questions = _require_session(session_token)
     meta = survey_cache.get_meta(session_token)
     step2 = survey_cache.get_step2(session_token)
@@ -139,6 +139,8 @@ async def save_project(
         choice_column_mode=meta.get("choice_column_mode", "none"),
         all_type_codes=meta.get("all_type_codes", []),
         step3_active_axis_code=meta.get("step3_active_axis_code", ""),
+        step3_chart_type_map=req.step3_chart_type_map,
+        step3_question_settings=req.step3_question_settings,
     )
 
     buf = io.BytesIO()

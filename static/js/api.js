@@ -42,9 +42,16 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surv) をダウンロードする。 */
-export async function saveProject(token, projectName = "") {
-  const params = new URLSearchParams({ session_token: token, project_name: projectName });
-  const res = await fetch(`${BASE}/project/save?${params}`, { method: "POST" });
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}) {
+  const res = await fetch(`${BASE}/project/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: token,
+      project_name: projectName,
+      step3_question_settings: step3QuestionSettings,
+    }),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "保存に失敗しました。");

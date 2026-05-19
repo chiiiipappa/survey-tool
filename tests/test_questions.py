@@ -61,7 +61,7 @@ def test_all_type_codes_returned(client, uploaded_token):
 
 
 def test_project_save_returns_zip(client, uploaded_token):
-    resp = client.post(f"/api/project/save?session_token={uploaded_token}&project_name=test")
+    resp = client.post("/api/project/save", json={"session_token": uploaded_token, "project_name": "test"})
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/zip")
     # ZIP ファイルとして読める
@@ -80,7 +80,7 @@ def test_project_save_returns_zip(client, uploaded_token):
 def test_project_load_surv(client, uploaded_token):
     # .surv で保存
     save_resp = client.post(
-        f"/api/project/save?session_token={uploaded_token}&project_name=test"
+        "/api/project/save", json={"session_token": uploaded_token, "project_name": "test"}
     )
     surv_bytes = save_resp.content
 
