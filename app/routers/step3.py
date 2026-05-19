@@ -22,7 +22,7 @@ router = APIRouter()
 
 # SA / MA / 数値系のみクロス集計対象。FAは除外。
 _CROSSTAB_SA_TYPES = {"SA", "S", "NU", "N"}
-_CROSSTAB_MA_TYPES = {"MA", "ML"}
+_CROSSTAB_MA_TYPES = {"MA", "ML", "M"}
 _SKIP_TYPES = {"FA", "OA", "OE", "FT", "FN"}
 
 
@@ -81,7 +81,9 @@ def _crosstab_ma(
         if display_col not in df.columns:
             continue
 
-        answered = sub[display_col].notna() & (sub[display_col].astype(str).str.strip() != "")
+        # "-" は convert_labels が 0（未選択）に付けるラベル。空文字・NaN とともに除外する。
+        val_str = sub[display_col].fillna("").astype(str).str.strip()
+        answered = ~val_str.isin(["", "-"])
         grp = answered.groupby(sub[axis_col]).sum().reindex(axis_cats, fill_value=0)
 
         counts = [int(grp[cat]) for cat in axis_cats]

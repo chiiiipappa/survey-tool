@@ -575,7 +575,7 @@ function _datalabels(show, isH, stacked = false) {
   if (!show) return { display: false };
   if (stacked) {
     return {
-      display:    ctx => (isH ? ctx.parsed.x : ctx.parsed.y) >= 5,
+      display:    ctx => ctx.parsed && (isH ? ctx.parsed.x : ctx.parsed.y) >= 5,
       anchor:     "center",
       align:      "center",
       formatter:  v => `${v.toFixed(1)}%`,
@@ -584,7 +584,7 @@ function _datalabels(show, isH, stacked = false) {
     };
   }
   return {
-    display:    ctx => (isH ? ctx.parsed.x : ctx.parsed.y) >= 3,
+    display:    ctx => ctx.parsed && (isH ? ctx.parsed.x : ctx.parsed.y) >= 3,
     anchor:     "end",
     align:      isH ? "right" : "top",
     formatter:  v => `${v.toFixed(1)}%`,
@@ -619,7 +619,7 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel) {
       maintainAspectRatio:  false,
       plugins: {
         legend:     { position: "bottom", labels: { font: { size: 11 } } },
-        tooltip:    { callbacks: { label: ctx => `${ctx.dataset.label}: ${(isH ? ctx.parsed.x : ctx.parsed.y).toFixed(1)}%` } },
+        tooltip:    { callbacks: { label: ctx => { const v = ctx.parsed ? (isH ? ctx.parsed.x : ctx.parsed.y) : null; return `${ctx.dataset.label}: ${v !== null ? v.toFixed(1) : "N/A"}%`; } } },
         datalabels: _datalabels(showPctLabel, isH),
       },
       scales: _barScales(isH),
@@ -629,10 +629,17 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel) {
 
 /** 100%積み上げ棒 */
 function _buildStacked100Config(result, axisCategories, isH, showPctLabel) {
-  const labels   = result.rows.map(r => r.label);
+  const labels = result.rows.map(r => r.label);
+  // 軸カテゴリーごとに percents の合計を求め、積み上げが100%になるよう正規化
+  const sums = axisCategories.map((_, ci) =>
+    result.rows.reduce((s, r) => s + (r.percents[ci] ?? 0), 0)
+  );
   const datasets = axisCategories.map((cat, ci) => ({
     label: cat,
-    data:  result.rows.map(r => r.percents[ci] ?? 0),
+    data: result.rows.map(r => {
+      const raw = r.percents[ci] ?? 0;
+      return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
+    }),
     backgroundColor: COLORS[ci % COLORS.length],
   }));
   const stackedScales = isH
@@ -649,7 +656,7 @@ function _buildStacked100Config(result, axisCategories, isH, showPctLabel) {
       maintainAspectRatio:  false,
       plugins: {
         legend:     { position: "bottom", labels: { font: { size: 11 } } },
-        tooltip:    { callbacks: { label: ctx => `${ctx.dataset.label}: ${(isH ? ctx.parsed.x : ctx.parsed.y).toFixed(1)}%` } },
+        tooltip:    { callbacks: { label: ctx => { const v = ctx.parsed ? (isH ? ctx.parsed.x : ctx.parsed.y) : null; return `${ctx.dataset.label}: ${v !== null ? v.toFixed(1) : "N/A"}%`; } } },
         datalabels: _datalabels(showPctLabel, isH, true),
       },
       scales: stackedScales,
@@ -678,7 +685,7 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel) {
       maintainAspectRatio:  false,
       plugins: {
         legend:     { position: "bottom", labels: { font: { size: 11 } } },
-        tooltip:    { callbacks: { label: ctx => `${ctx.dataset.label}: ${(isH ? ctx.parsed.x : ctx.parsed.y).toFixed(1)}%` } },
+        tooltip:    { callbacks: { label: ctx => { const v = ctx.parsed ? (isH ? ctx.parsed.x : ctx.parsed.y) : null; return `${ctx.dataset.label}: ${v !== null ? v.toFixed(1) : "N/A"}%`; } } },
         datalabels: _datalabels(showPctLabel, isH),
       },
       scales,
@@ -712,9 +719,9 @@ function _buildAvgBarConfig(result, axisCategories, showPctLabel) {
       maintainAspectRatio: false,
       plugins: {
         legend:     { display: false },
-        tooltip:    { callbacks: { label: ctx => `平均: ${ctx.parsed.y !== null ? ctx.parsed.y.toFixed(2) : "N/A"}` } },
+        tooltip:    { callbacks: { label: ctx => `平均: ${ctx.parsed && ctx.parsed.y !== null ? ctx.parsed.y.toFixed(2) : "N/A"}` } },
         datalabels: showPctLabel ? {
-          display:    ctx => ctx.parsed.y !== null,
+          display:    ctx => ctx.parsed != null && ctx.parsed.y !== null,
           anchor:     "end",
           align:      "top",
           formatter:  v => v !== null ? v.toFixed(2) : "",
