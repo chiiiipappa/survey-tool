@@ -59,6 +59,8 @@ export const AppState = {
   projectName: "",
   projectSavedAt: null,   // Date | null
   isDirty: false,
+  // STEP1 カラー設定
+  step1AxisColors: {},  // { axis_question_code: { fixedPalette: string | null } }
   // STEP3
   step3CrosstabConfigs: [],
   step3ActiveAxisCode: "",
@@ -118,6 +120,23 @@ export function setStep3SettingsBulk(updates) {
     next[qCode] = { ...(next[qCode] ?? {}), ...partial };
   }
   AppState.step3QuestionSettings = next;
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep1FixedPalette(axisCode, paletteKey) {
+  AppState.step1AxisColors = {
+    ...AppState.step1AxisColors,
+    [axisCode]: { fixedPalette: paletteKey },
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function clearStep1FixedPalette(axisCode) {
+  const next = { ...AppState.step1AxisColors };
+  delete next[axisCode];
+  AppState.step1AxisColors = next;
   AppState.isDirty = true;
   _emit();
 }
@@ -192,6 +211,7 @@ export function setLoadedProject(resp) {
     }
   }
   AppState.step3QuestionSettings = { ..._migrated, ..._newSettings };
+  AppState.step1AxisColors = resp.layout?.step1_axis_colors ?? {};
   _emit();
 }
 

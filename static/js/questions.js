@@ -2,11 +2,32 @@
  * 設問一覧パネルの制御（テーブル描画・検索・フィルタ・軸/属性フラグ編集）。
  */
 import { getQuestions, saveProject, loadProject, saveStep1AxisSettings } from "./api.js";
-import { AppState, setFilterState, setStep1AxisCodes, resetState, setLoadedProject, setProjectName, markClean, markDirty } from "./state.js";
+import { AppState, setFilterState, setStep1AxisCodes, resetState, setLoadedProject, setProjectName, markClean, markDirty, setStep1FixedPalette, clearStep1FixedPalette } from "./state.js";
 import { showToast, showError, showSpinner, hideSpinner, activatePanel } from "./app.js";
 import { handleCsvFile, reloadLastCsvFile } from "./upload.js";
 
 const AXIS_TYPE_CODES = new Set(["SA", "S", "NU", "N", "ML"]);
+
+const FIXED_PALETTE_LABELS = {
+  fan_label:  "ファンラベル",
+  gender:     "男女パレット",
+  age_gender: "性年代パレット",
+  age_a:      "年代別パレットA",
+  age_b:      "年代別パレットB",
+  scale_67:   "6〜7段階",
+  scale_1011: "10〜11段階",
+};
+const FIXED_PALETTE_PREVIEWS = {
+  fan_label:  ["#FF5050","#FF9999","#FFCCCC","#BFBFBF"],
+  gender:     ["#1D4ED8","#DB2777"],
+  age_gender: ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A","#FBCFE8","#F9A8D4","#F472B6","#EC4899","#DB2777","#9D174D"],
+  age_a:      ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"],
+  age_b:      ["#D1FAE5","#A7F3D0","#6EE7B7","#34D399","#10B981","#065F46"],
+  scale_67:   ["#9D174D","#EC4899","#F9A8D4","#D9D9D9","#93C5FD","#3B82F6","#1E3A8A"],
+  scale_1011: ["#9D174D","#DB2777","#EC4899","#F472B6","#F9A8D4","#D9D9D9","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"],
+};
+const DEFAULT_COLORS_PREVIEW = ["#4299E1","#F6AD55","#68D391","#F687B3","#9F7AEA"];
+const FIXED_PALETTE_ORDER_Q = ["fan_label","gender","age_gender","age_a","age_b","scale_67","scale_1011"];
 
 // 種別バッジスタイル
 const TYPE_BADGE = {
@@ -143,11 +164,34 @@ export function initQuestionsPanel() {
 
   // 状態変化を監視して種別フィルターを更新
   document.addEventListener("survey:statechange", onStateChange);
+
+  // STEP1 固定パレット変更
+  document.getElementById("step1-axis-color-body")?.addEventListener("change", e => {
+    const sel = e.target.closest(".step1-axis-palette-select");
+    if (!sel) return;
+    const axisCode = sel.dataset.axis;
+    const val = sel.value;
+    if (val === "__auto__") {
+      clearStep1FixedPalette(axisCode);
+    } else if (val === "__none__") {
+      setStep1FixedPalette(axisCode, null);
+    } else {
+      setStep1FixedPalette(axisCode, val);
+    }
+    const previewEl = document.querySelector(`[data-axis-preview="${CSS.escape(axisCode)}"]`);
+    if (previewEl) {
+      const colors = (val !== "__auto__" && val !== "__none__")
+        ? (FIXED_PALETTE_PREVIEWS[val] ?? DEFAULT_COLORS_PREVIEW)
+        : DEFAULT_COLORS_PREVIEW;
+      previewEl.innerHTML = colors.map(c => `<span style="background:${c}"></span>`).join("");
+    }
+  });
 }
 
 function onStateChange() {
   updateCsvInfoCard();
   updateAxisSummary();
+  updateAxisColorSection();
   if (AppState.activePanel !== "questions") return;
   updateTypeDropdown();
 }
@@ -188,6 +232,64 @@ function updateAxisSummary() {
       return `<span class="badge" title="${escHtml(c)}">${label}</span>`;
     }).join("") +
     (rest > 0 ? `<span class="badge" style="background:var(--color-surface-2,#F8F8F8); color:var(--color-text-muted)">+${rest}</span>` : "");
+}
+
+function _detectFixedPaletteFromQuestion(code) {
+  const q = (AppState.questions ?? []).find(q => q.question_code === code);
+  if (!q) return null;
+  const text = (q.question_text ?? "") + (q.stub ?? "");
+  if (/[*＊]ファンラベル/.test(text) || /ファン度/.test(text) ||
+      /FAN_LEVEL/i.test(code) || /SKFAN/i.test(code)) return "fan_label";
+  const labels = (q.choices ?? []).map(c => c.choice_text ?? "");
+  if (labels.some(l => /コアファン/.test(l)) && labels.some(l => /ライトファン/.test(l))) return "fan_label";
+  if (labels.some(l => /\d+代(男性|女性)/.test(l))) return "age_gender";
+  if (labels.some(l => /^男($|性)/.test(l)) || labels.some(l => /^女($|性)/.test(l))) return "gender";
+  if (labels.some(l => /\d+代/.test(l))) return "age_a";
+  if (labels.some(l => /High[1-5]|TOP[23]/.test(l)) && labels.some(l => /Low[1-5]/.test(l)))
+    return labels.length > 7 ? "scale_1011" : "scale_67";
+  return null;
+}
+
+function updateAxisColorSection() {
+  const card = document.getElementById("step1-axis-color-card");
+  const body = document.getElementById("step1-axis-color-body");
+  if (!card || !body) return;
+  const codes = AppState.step1AxisCodes;
+  if (!codes.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+
+  const qMap = new Map((AppState.questions ?? []).map(q => [q.question_code, q]));
+  body.innerHTML = codes.map(code => {
+    const q = qMap.get(code);
+    const labelText = escHtml(q ? (q.question_text || q.stub || code) : code);
+    const entry      = AppState.step1AxisColors?.[code];
+    const isExplicit = entry && "fixedPalette" in entry;
+    const autoKey    = _detectFixedPaletteFromQuestion(code);
+    const selectedKey = isExplicit ? entry.fixedPalette : autoKey;
+
+    const previewColors = selectedKey
+      ? (FIXED_PALETTE_PREVIEWS[selectedKey] ?? DEFAULT_COLORS_PREVIEW)
+      : DEFAULT_COLORS_PREVIEW;
+    const swatches = previewColors.map(c => `<span style="background:${c}"></span>`).join("");
+
+    const autoLabel = autoKey ? `自動検出（${FIXED_PALETTE_LABELS[autoKey]}）` : "自動検出（なし）";
+    const options = [
+      `<option value="__auto__"${!isExplicit ? " selected" : ""}>${escHtml(autoLabel)}</option>`,
+      ...FIXED_PALETTE_ORDER_Q.map(key =>
+        `<option value="${key}"${isExplicit && selectedKey === key ? " selected" : ""}>${escHtml(FIXED_PALETTE_LABELS[key])}</option>`
+      ),
+      `<option value="__none__"${isExplicit && selectedKey === null ? " selected" : ""}>なし（デフォルト配色）</option>`,
+    ].join("");
+
+    return `
+      <div class="step1-axis-color-row" data-axis="${escHtml(code)}">
+        <span class="step1-axis-color-label">${labelText}
+          <span style="font-size:.78rem; color:var(--color-text-muted)">(${escHtml(code)})</span>
+        </span>
+        <select class="step1-axis-palette-select" data-axis="${escHtml(code)}">${options}</select>
+        <div class="step1-axis-palette-swatches" data-axis-preview="${escHtml(code)}">${swatches}</div>
+      </div>`;
+  }).join("");
 }
 
 export async function refreshQuestions() {
@@ -341,7 +443,7 @@ export function initProjectHeader() {
     }
     try {
       await saveStep1AxisSettings(AppState.sessionToken, AppState.step1AxisCodes, AppState.step3ActiveAxisCode);
-      await saveProject(AppState.sessionToken, AppState.projectName, AppState.step3QuestionSettings);
+      await saveProject(AppState.sessionToken, AppState.projectName, AppState.step3QuestionSettings, AppState.step1AxisColors);
       markClean(new Date());
       showToast("プロジェクトを保存しました。");
     } catch (err) {

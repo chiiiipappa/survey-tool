@@ -168,6 +168,17 @@
       <div id="questions-count-bar" class="count-bar">–</div>
     </div>
 
+    <!-- 集計軸カラー設定カード -->
+    <div class="card" id="step1-axis-color-card" style="display:none; margin-top:12px">
+      <div class="card-header">
+        <span class="card-title">集計軸カラー設定</span>
+        <span style="font-size:.8rem; color:var(--color-text-muted); margin-left:8px">集計軸ごとのデフォルトカラーを設定します（STEP3で上書き可）</span>
+      </div>
+      <div class="card-body" id="step1-axis-color-body" style="padding:12px 16px">
+        <!-- questions.js で動的生成 -->
+      </div>
+    </div>
+
     <!-- STEP2 ナビカード -->
     <div class="card">
       <div class="card-body" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
@@ -456,6 +467,34 @@
 <!-- ===== Toast ===== -->
 <div id="toast-container"></div>
 
-<script type="module" src="/static/js/app.js?v=5"></script>
+<!-- ===== STEP3 カラー設定モーダル ===== -->
+<div id="step3-color-modal" class="step3-color-overlay" hidden>
+  <div class="step3-color-dialog">
+    <div class="step3-color-dialog-header">
+      <span id="step3-color-title" style="font-weight:600; font-size:.95rem"></span>
+      <button id="step3-color-close" class="btn btn-secondary btn-sm">✕ 閉じる</button>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="font-size:.8rem; color:var(--color-text-muted); margin-bottom:6px">パレットプリセット</div>
+      <div id="step3-palette-btns" style="display:flex; gap:6px; flex-wrap:wrap"></div>
+      <div style="font-size:.8rem; color:var(--color-text-muted); margin-top:8px; margin-bottom:4px">色チップをドラッグ → 系列へドロップ</div>
+      <div id="step3-drag-palette" class="step3-drag-palette-area"></div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="font-size:.8rem; color:var(--color-text-muted); margin-bottom:4px">系列ごとの色・順序（☰ でドラッグ並び替え）</div>
+      <div id="step3-color-rows"></div>
+    </div>
+    <div style="margin-bottom:4px; font-size:.8rem; color:var(--color-text-muted)">プレビュー</div>
+    <div id="step3-color-preview" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; min-height:26px; padding:6px; background:var(--color-surface-2,#f8f8f8); border-radius:4px"></div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid var(--color-border); padding-top:12px">
+      <button id="step3-color-reset"     class="btn btn-secondary btn-sm">STEP1設定に戻す</button>
+      <button id="step3-color-apply-one" class="btn btn-primary btn-sm">現在のグラフだけ変更</button>
+      <button id="step3-color-apply-all" class="btn btn-primary btn-sm">同じ集計軸すべてに適用</button>
+      <button id="step3-color-cancel"    class="btn btn-secondary btn-sm">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/js/app.js?v=8"></script>
 </body>
 </html>

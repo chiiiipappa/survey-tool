@@ -42,7 +42,7 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surv) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}) {
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}) {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -50,6 +50,7 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       session_token: token,
       project_name: projectName,
       step3_question_settings: step3QuestionSettings,
+      step1_axis_colors: step1AxisColors,
     }),
   });
   if (!res.ok) {
@@ -272,4 +273,49 @@ export async function exportLabeledData(token) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// STEP3 エクスポート
+// ---------------------------------------------------------------------------
+
+function _triggerBlobDownload(blob, cd, fallback) {
+  const match = cd.match(/filename\*=UTF-8''([^;\r\n]+)/i)
+             ?? cd.match(/filename="?([^";\r\n]+)"?/i);
+  const filename = match ? decodeURIComponent(match[1]) : fallback;
+  const url = URL.createObjectURL(blob);
+  Object.assign(document.createElement("a"), { href: url, download: filename }).click();
+  URL.revokeObjectURL(url);
+}
+
+/** クロス集計結果を Excel ファイルとしてダウンロードする。 */
+export async function exportCrosstabExcel(payload) {
+  const res = await fetch(`${BASE}/step3/export/excel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Excel エクスポートに失敗しました。");
+  }
+  _triggerBlobDownload(await res.blob(), res.headers.get("Content-Disposition") ?? "", "crosstab.xlsx");
+}
+
+/** クロス集計結果を CSV / ZIP としてダウンロードする。 */
+export async function exportCrosstabCsv(payload, { single = false, questionCode = "" } = {}) {
+  const params = new URLSearchParams();
+  if (single)       params.set("single", "true");
+  if (questionCode) params.set("question_code", questionCode);
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/step3/export/csv${qs ? "?" + qs : ""}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "CSV エクスポートに失敗しました。");
+  }
+  _triggerBlobDownload(await res.blob(), res.headers.get("Content-Disposition") ?? "", single ? "crosstab.csv" : "crosstab.zip");
 }

@@ -141,6 +141,7 @@ async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
         step3_active_axis_code=meta.get("step3_active_axis_code", ""),
         step3_chart_type_map=req.step3_chart_type_map,
         step3_question_settings=req.step3_question_settings,
+        step1_axis_colors=req.step1_axis_colors,
     )
 
     buf = io.BytesIO()

@@ -5,7 +5,14 @@
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
 import { AppState, setStep3ActiveAxis, setStep3Setting, setStep3SettingsBulk } from "./state.js";
+
 import { generateCrosstab } from "./api.js";
+import {
+  exportSingleExcel, exportAllExcel,
+  exportSingleCsv,   exportAllCsv,
+  exportSinglePng,   exportAllPng,
+  initStep3ExportBulkButtons,
+} from "./step3_export.js";
 
 // ---------------------------------------------------------------------------
 // グラフ種別定義
@@ -45,10 +52,161 @@ const COLORS = [
   "#76E4F7", "#FC8181", "#B7EE8F", "#F6E05E", "#90CDF4",
 ];
 
+// ---------------------------------------------------------------------------
+// 固定カラー（特定ラベルに常に適用）
+// ---------------------------------------------------------------------------
+
+const FIXED_COLORS_MAP = {
+  "その他":             "#BFBFBF",
+  "あてはまるものはない": "#BFBFBF",
+  "全体":               "#676767",
+};
+
+function _fixedColorFor(label) {
+  if (FIXED_COLORS_MAP[label]) return FIXED_COLORS_MAP[label];
+  if (/^その他($|[（(・\/])/.test(label)) return "#BFBFBF";
+  if (/あてはまるものはない/.test(label))  return "#BFBFBF";
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// 固定パレット（ラベルマッピングセット）
+// ---------------------------------------------------------------------------
+
+const FIXED_PALETTES = {
+  fan_label: {
+    label: "ファンラベル",
+    preview: ["#FF5050","#FF9999","#FFCCCC","#BFBFBF"],
+    colorFor(label) {
+      if (/コアファン/.test(label))      return "#FF5050";
+      if (/ライトファン/.test(label))    return "#FFCCCC";
+      if (/ファン/.test(label))          return "#FF9999";
+      if (/非ファン|その他/.test(label)) return "#BFBFBF";
+      return null;
+    },
+  },
+  gender: {
+    label: "男女パレット",
+    preview: ["#1D4ED8","#DB2777"],
+    colorFor(label) {
+      if (/^男($|性)/.test(label)) return "#1D4ED8";
+      if (/^女($|性)/.test(label)) return "#DB2777";
+      return null;
+    },
+  },
+  age_gender: {
+    label: "性年代パレット",
+    preview: ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A","#FBCFE8","#F9A8D4","#F472B6","#EC4899","#DB2777","#9D174D"],
+    colorFor(label) {
+      const m = label.match(/(\d+)代(男性|女性)/);
+      if (!m) return null;
+      const d = parseInt(m[1]);
+      const male   = {10:"#BFDBFE",20:"#93C5FD",30:"#60A5FA",40:"#3B82F6",50:"#1D4ED8",60:"#1E3A8A"};
+      const female = {10:"#FBCFE8",20:"#F9A8D4",30:"#F472B6",40:"#EC4899",50:"#DB2777",60:"#9D174D"};
+      return (m[2] === "男性" ? male : female)[d] ?? null;
+    },
+  },
+  age_a: {
+    label: "年代別パレットA",
+    preview: ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"],
+    colorFor(label) {
+      const m = label.match(/(\d+)代/);
+      if (!m) return null;
+      const map = {10:"#BFDBFE",20:"#93C5FD",30:"#60A5FA",40:"#3B82F6",50:"#1D4ED8",60:"#1E3A8A"};
+      return map[parseInt(m[1])] ?? null;
+    },
+  },
+  age_b: {
+    label: "年代別パレットB",
+    preview: ["#D1FAE5","#A7F3D0","#6EE7B7","#34D399","#10B981","#065F46"],
+    colorFor(label) {
+      const m = label.match(/(\d+)代/);
+      if (!m) return null;
+      const map = {10:"#D1FAE5",20:"#A7F3D0",30:"#6EE7B7",40:"#34D399",50:"#10B981",60:"#065F46"};
+      return map[parseInt(m[1])] ?? null;
+    },
+  },
+  scale_67: {
+    label: "6〜7段階",
+    preview: ["#9D174D","#EC4899","#F9A8D4","#D9D9D9","#93C5FD","#3B82F6","#1E3A8A"],
+    colorFor(label) {
+      if (/High3|TOP2/.test(label)) return "#9D174D";
+      if (/High2|TOP3/.test(label)) return "#EC4899";
+      if (/High1/.test(label))      return "#F9A8D4";
+      if (/Middle/.test(label))     return "#D9D9D9";
+      if (/Low1/.test(label))       return "#93C5FD";
+      if (/Low2/.test(label))       return "#3B82F6";
+      if (/Low3/.test(label))       return "#1E3A8A";
+      return null;
+    },
+  },
+  scale_1011: {
+    label: "10〜11段階",
+    preview: ["#9D174D","#DB2777","#EC4899","#F472B6","#F9A8D4","#D9D9D9","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"],
+    colorFor(label) {
+      if (/High5/.test(label))  return "#9D174D";
+      if (/High4/.test(label))  return "#DB2777";
+      if (/High3/.test(label))  return "#EC4899";
+      if (/High2/.test(label))  return "#F472B6";
+      if (/High1/.test(label))  return "#F9A8D4";
+      if (/Middle/.test(label)) return "#D9D9D9";
+      if (/Low1/.test(label))   return "#93C5FD";
+      if (/Low2/.test(label))   return "#60A5FA";
+      if (/Low3/.test(label))   return "#3B82F6";
+      if (/Low4/.test(label))   return "#1D4ED8";
+      if (/Low5/.test(label))   return "#1E3A8A";
+      return null;
+    },
+  },
+};
+const FIXED_PALETTE_ORDER = ["fan_label","gender","age_gender","age_a","age_b","scale_67","scale_1011"];
+
+function _detectFixedPaletteFromLabels(labels) {
+  if (labels.some(l => /コアファン/.test(l)) && labels.some(l => /ライトファン/.test(l)))
+    return "fan_label";
+  if (labels.some(l => /\d+代(男性|女性)/.test(l)))
+    return "age_gender";
+  if (labels.some(l => /^男($|性)/.test(l)) || labels.some(l => /^女($|性)/.test(l)))
+    return "gender";
+  if (labels.some(l => /\d+代/.test(l)))
+    return "age_a";
+  if (labels.some(l => /High[1-5]|TOP[23]/.test(l)) && labels.some(l => /Low[1-5]/.test(l)))
+    return labels.length > 7 ? "scale_1011" : "scale_67";
+  return null;
+}
+
+function _getActiveFixedPaletteKey(labels) {
+  const entry = AppState.step1AxisColors?.[AppState.step3ActiveAxisCode];
+  if (entry && "fixedPalette" in entry) return entry.fixedPalette;
+  return _detectFixedPaletteFromLabels(labels);
+}
+
 // Chart.js インスタンス管理
 const _charts = new Map();
 // 最後に取得したクロス集計データ（再描画用キャッシュ）
 let _lastCrosstabData = null;
+// カラーモーダル状態
+let _colorModalIdx = null;
+let _colorModalColors = [];
+// ドラッグ状態（"color" | "row" | null）
+let _dragType  = null;
+let _dragValue = null;
+
+// 色解決：STEP3個別設定 > 固定カラー > 固定パレット > COLORSデフォルト
+function _getColorsForGraph(questionCode, labels) {
+  const s = AppState.step3QuestionSettings[questionCode] ?? {};
+  if (s.customColors?.length > 0) {
+    return labels.map((_, i) => s.customColors[i % s.customColors.length]);
+  }
+  const paletteKey = _getActiveFixedPaletteKey(labels);
+  const palette    = paletteKey ? FIXED_PALETTES[paletteKey] : null;
+  return labels.map((l, i) => {
+    const fc = _fixedColorFor(l);
+    if (fc) return fc;
+    if (palette) { const pc = palette.colorFor(l); if (pc) return pc; }
+    return COLORS[i % COLORS.length];
+  });
+}
 
 // ---------------------------------------------------------------------------
 // 初期化
@@ -72,6 +230,9 @@ export function initStep3Panel() {
     resultsEl.addEventListener("change", _onResultsChange);
     resultsEl.addEventListener("click",  _onResultsClick);
   }
+
+  // カラーモーダル初期化
+  _initColorModal();
 }
 
 // ---------------------------------------------------------------------------
@@ -210,8 +371,9 @@ function _renderResults(container, data) {
     <div class="card-body" style="padding:12px 16px">
       <div style="font-weight:600; margin-bottom:8px">${_esc(axis_question_text)}（表側）</div>
       <div style="display:flex; flex-wrap:wrap; gap:8px">`;
+  const _axisCatColors = _getColorsForGraph("__axis__", axis_categories);
   axis_categories.forEach((cat, i) => {
-    const color = COLORS[i % COLORS.length];
+    const color = _axisCatColors[i];
     html += `<span style="display:inline-flex; align-items:center; gap:4px; font-size:.85rem">
       <span style="display:inline-block; width:12px; height:12px; border-radius:2px; background:${color}"></span>
       ${_esc(cat)} <span style="color:var(--color-text-muted)">n=${axis_totals[i] ?? 0}</span>
@@ -231,6 +393,19 @@ function _renderResults(container, data) {
       <button data-bulk="sa-stacked100-v" class="btn btn-secondary btn-sm step3-bulk-btn">SA → 100%積み上げ</button>
       <button data-bulk="ma-bar-h"        class="btn btn-secondary btn-sm step3-bulk-btn">MA → 横棒</button>
       <button data-bulk="nu-avg_bar-v"    class="btn btn-secondary btn-sm step3-bulk-btn">数値 → 平均棒</button>
+      <span style="width:1px; height:18px; background:var(--color-border,#E2E8F0); margin:0 4px"></span>
+      <button data-bulk-transpose="true"  class="btn btn-secondary btn-sm step3-bulk-transpose-btn">全て行列入替</button>
+      <button data-bulk-transpose="false" class="btn btn-secondary btn-sm step3-bulk-transpose-btn">全て通常に戻す</button>
+    </div>
+  </div>`;
+
+  // 一括エクスポートバー
+  html += `<div class="card" style="margin-bottom:8px">
+    <div class="card-body" style="padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px">
+      <span style="font-size:.85rem; font-weight:600; color:var(--color-text-muted)">一括出力：</span>
+      <button id="step3-export-all-excel" class="btn btn-secondary btn-sm">📥 すべてExcel</button>
+      <button id="step3-export-all-csv"   class="btn btn-secondary btn-sm">📥 すべてCSV (ZIP)</button>
+      <button id="step3-export-all-png"   class="btn btn-secondary btn-sm">📥 すべてPNG</button>
     </div>
   </div>`;
 
@@ -249,7 +424,7 @@ function _renderResults(container, data) {
       })
       .join("");
 
-    // 向きラジオ（bar/stacked100/grouped のみ）
+    // 向きラジオ・行列入替（bar/stacked100/grouped のみ）
     const showOrient = ORIENTATION_TYPES.has(settings.chartType);
     const orientHtml = showOrient ? `
       <span class="step3-orient-ctrl">
@@ -267,6 +442,22 @@ function _renderResults(container, data) {
                  ${settings.orientation === "h" ? "checked" : ""}> 横
         </label>
       </span>` : "";
+    const transposeHtml = showOrient ? `
+      <span class="step3-transpose-ctrl">
+        表示方向：
+        <label style="font-size:.82rem; cursor:pointer">
+          <input type="radio" class="step3-transpose-radio"
+                 name="step3-transpose-${idx}" value="false"
+                 data-q="${_esc(result.question_code)}" data-idx="${idx}"
+                 ${!settings.transpose ? "checked" : ""}> 通常
+        </label>
+        <label style="font-size:.82rem; cursor:pointer">
+          <input type="radio" class="step3-transpose-radio"
+                 name="step3-transpose-${idx}" value="true"
+                 data-q="${_esc(result.question_code)}" data-idx="${idx}"
+                 ${settings.transpose ? "checked" : ""}> 行列入替
+        </label>
+      </span>` : "";
 
     // 除外バッジ（除外中のみ表示）
     const excludedBadge = `<span id="step3-excluded-badge-${idx}" class="badge-excluded"${settings.excluded ? "" : " hidden"}>除外</span>`;
@@ -281,7 +472,11 @@ function _renderResults(container, data) {
           <span style="font-weight:600; font-size:.95rem">${_esc(result.question_text)}</span>
           ${excludedBadge}
         </div>
-        <div style="display:flex; gap:6px; flex-shrink:0">
+        <div style="display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm step3-color-btn"
+                  data-q="${_esc(result.question_code)}" data-idx="${idx}">
+            🎨 カラー設定
+          </button>
           <button class="btn btn-secondary btn-sm step3-exclude-btn"
                   data-q="${_esc(result.question_code)}" data-idx="${idx}"
                   data-excluded="${settings.excluded}">
@@ -291,6 +486,9 @@ function _renderResults(container, data) {
                   data-q="${_esc(result.question_code)}" data-idx="${idx}">
             ${settings.collapsed ? "展開 ▼" : "折りたたむ ▲"}
           </button>
+          <button class="btn btn-secondary btn-sm step3-export-excel-btn" data-idx="${idx}" title="Excelとして保存">📊 Excel</button>
+          <button class="btn btn-secondary btn-sm step3-export-csv-btn"   data-idx="${idx}" title="CSVとして保存">📄 CSV</button>
+          <button class="btn btn-secondary btn-sm step3-export-png-btn"   data-idx="${idx}" title="PNGとして保存">🖼 PNG</button>
         </div>
       </div>
 
@@ -319,6 +517,7 @@ function _renderResults(container, data) {
             <option value="desc"    ${settings.sortOrder === "desc"     ? " selected" : ""}>降順</option>
             <option value="asc"     ${settings.sortOrder === "asc"      ? " selected" : ""}>昇順</option>
           </select>
+          ${transposeHtml}
         </div>
 
         <!-- グラフ + 表 -->
@@ -347,6 +546,9 @@ function _renderResults(container, data) {
     if (!areaEl) return;
     _renderChartInArea(areaEl, result, settings, axis_categories, axis_totals);
   });
+
+  // 一括エクスポートボタンにイベントを登録
+  initStep3ExportBulkButtons();
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +561,14 @@ function _onResultsChange(e) {
   if (orientRadio?.checked) {
     setStep3Setting(orientRadio.dataset.q, "orientation", orientRadio.value);
     _rerenderQuestion(parseInt(orientRadio.dataset.idx, 10));
+    return;
+  }
+
+  // 行列入替ラジオ
+  const transposeRadio = e.target.closest(".step3-transpose-radio");
+  if (transposeRadio?.checked) {
+    setStep3Setting(transposeRadio.dataset.q, "transpose", transposeRadio.value === "true");
+    _rerenderQuestionFull(parseInt(transposeRadio.dataset.idx, 10));
     return;
   }
 
@@ -419,6 +629,13 @@ function _onResultsClick(e) {
     return;
   }
 
+  // カラー設定
+  const colorBtn = e.target.closest(".step3-color-btn");
+  if (colorBtn) {
+    _openColorModal(parseInt(colorBtn.dataset.idx, 10));
+    return;
+  }
+
   // 折りたたみ
   const collapseBtn = e.target.closest(".step3-collapse-btn");
   if (collapseBtn) {
@@ -457,10 +674,25 @@ function _onResultsClick(e) {
     return;
   }
 
-  // 一括変更
+  // 個別エクスポート（Excel / CSV / PNG）
+  const excelBtn = e.target.closest(".step3-export-excel-btn");
+  if (excelBtn) { exportSingleExcel(parseInt(excelBtn.dataset.idx, 10)); return; }
+  const csvBtn = e.target.closest(".step3-export-csv-btn");
+  if (csvBtn)   { exportSingleCsv(parseInt(csvBtn.dataset.idx, 10));   return; }
+  const pngBtn = e.target.closest(".step3-export-png-btn");
+  if (pngBtn)   { exportSinglePng(parseInt(pngBtn.dataset.idx, 10));   return; }
+
+  // 一括変更（グラフ種別・向き）
   const bulkBtn = e.target.closest(".step3-bulk-btn");
   if (bulkBtn) {
     _handleBulkChange(bulkBtn.dataset.bulk);
+    return;
+  }
+
+  // 一括行列入替
+  const bulkTransposeBtn = e.target.closest(".step3-bulk-transpose-btn");
+  if (bulkTransposeBtn) {
+    _handleBulkTranspose(bulkTransposeBtn.dataset.bulkTranspose === "true");
   }
 }
 
@@ -493,12 +725,13 @@ function _rerenderQuestionFull(idx) {
   }
 
   const sortedResult = { ...result, rows: _sortedRows(result.rows, settings.sortOrder) };
+  const tp = settings.transpose ?? false;
   const pctPanel = document.getElementById(`step3-tab-pct-${idx}`);
   const nPanel   = document.getElementById(`step3-tab-n-${idx}`);
   if (pctPanel) pctPanel.innerHTML = _buildPctTable(sortedResult,
-    _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
+    _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals, tp);
   if (nPanel) nPanel.innerHTML = _buildNTable(sortedResult,
-    _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
+    _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals, tp);
 }
 
 // ---------------------------------------------------------------------------
@@ -506,14 +739,13 @@ function _rerenderQuestionFull(idx) {
 // ---------------------------------------------------------------------------
 
 function _toggleOrientCtrl(idx, chartType) {
-  const ctrl = document.querySelector(`.step3-controls-bar [data-idx="${idx}"].step3-orient-radio`);
-  // 向きラジオの親 span を取得
   const bar = document.querySelector(`#step3-body-${idx} .step3-controls-bar`);
   if (!bar) return;
-  const orientSpan = bar.querySelector(".step3-orient-ctrl");
-  if (orientSpan) {
-    orientSpan.style.display = ORIENTATION_TYPES.has(chartType) ? "" : "none";
-  }
+  const show = ORIENTATION_TYPES.has(chartType) ? "" : "none";
+  const orientSpan    = bar.querySelector(".step3-orient-ctrl");
+  const transposeSpan = bar.querySelector(".step3-transpose-ctrl");
+  if (orientSpan)    orientSpan.style.display    = show;
+  if (transposeSpan) transposeSpan.style.display = show;
 }
 
 // ---------------------------------------------------------------------------
@@ -521,7 +753,7 @@ function _toggleOrientCtrl(idx, chartType) {
 // ---------------------------------------------------------------------------
 
 function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals) {
-  const { chartType, orientation, showPctLabel, sortOrder } = settings;
+  const { chartType, orientation, showPctLabel, sortOrder, transpose } = settings;
 
   // 既存チャートを破棄
   const areaKey = areaEl.id;
@@ -543,6 +775,7 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
   const rows   = _sortedRows(result.rows, sortOrder);
   const sorted = { ...result, rows };
   const isH    = orientation === "h";
+  const tp     = transpose ?? false;
 
   if (chartType === "pie") {
     areaEl.style.display   = "flex";
@@ -559,10 +792,10 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
   areaEl.appendChild(canvas);
 
   let config;
-  if (chartType === "avg_bar")    config = _buildAvgBarConfig(sorted, axisCategories, showPctLabel);
-  else if (chartType === "stacked100") config = _buildStacked100Config(sorted, axisCategories, isH, showPctLabel);
-  else if (chartType === "grouped")    config = _buildGroupedConfig(sorted, axisCategories, isH, showPctLabel);
-  else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel);
+  if (chartType === "avg_bar")         config = _buildAvgBarConfig(sorted, axisCategories, showPctLabel);
+  else if (chartType === "stacked100") config = _buildStacked100Config(sorted, axisCategories, isH, showPctLabel, tp);
+  else if (chartType === "grouped")    config = _buildGroupedConfig(sorted, axisCategories, isH, showPctLabel, tp);
+  else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel, tp);
 
   _charts.set(areaKey, new Chart(canvas, config));
 }
@@ -602,14 +835,27 @@ function _barScales(isH) {
         y: { beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } } };
 }
 
-/** 棒グラフ（bar + orientation） */
-function _buildBarConfig(result, axisCategories, isH, showPctLabel) {
-  const labels   = result.rows.map(r => r.label);
-  const datasets = axisCategories.map((cat, ci) => ({
-    label: cat,
-    data:  result.rows.map(r => r.percents[ci] ?? 0),
-    backgroundColor: COLORS[ci % COLORS.length],
-  }));
+/** 棒グラフ（bar + orientation）
+ *  transpose=true → labels=集計軸, datasets=選択肢（grouped 相当） */
+function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = false) {
+  let labels, datasets;
+  if (transpose) {
+    const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
+    labels   = axisCategories;
+    datasets = result.rows.map((row, ri) => ({
+      label: row.label,
+      data:  axisCategories.map((_, ci) => row.percents[ci] ?? 0),
+      backgroundColor: palette[ri],
+    }));
+  } else {
+    const palette = _getColorsForGraph(result.question_code, axisCategories);
+    labels   = result.rows.map(r => r.label);
+    datasets = axisCategories.map((cat, ci) => ({
+      label: cat,
+      data:  result.rows.map(r => r.percents[ci] ?? 0),
+      backgroundColor: palette[ci],
+    }));
+  }
   return {
     type: "bar",
     data: { labels, datasets },
@@ -627,21 +873,38 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel) {
   };
 }
 
-/** 100%積み上げ棒 */
-function _buildStacked100Config(result, axisCategories, isH, showPctLabel) {
-  const labels = result.rows.map(r => r.label);
-  // 軸カテゴリーごとに percents の合計を求め、積み上げが100%になるよう正規化
+/** 100%積み上げ棒
+ *  transpose=false → labels=選択肢, datasets=集計軸（各軸カテゴリーで正規化）
+ *  transpose=true  → labels=集計軸, datasets=選択肢（各軸カテゴリーで正規化） */
+function _buildStacked100Config(result, axisCategories, isH, showPctLabel, transpose = false) {
+  // 軸カテゴリーごとの percents 合計（正規化の分母）
   const sums = axisCategories.map((_, ci) =>
     result.rows.reduce((s, r) => s + (r.percents[ci] ?? 0), 0)
   );
-  const datasets = axisCategories.map((cat, ci) => ({
-    label: cat,
-    data: result.rows.map(r => {
-      const raw = r.percents[ci] ?? 0;
-      return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
-    }),
-    backgroundColor: COLORS[ci % COLORS.length],
-  }));
+  let labels, datasets;
+  if (transpose) {
+    const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
+    labels   = axisCategories;
+    datasets = result.rows.map((row, ri) => ({
+      label: row.label,
+      data: axisCategories.map((_, ci) => {
+        const raw = row.percents[ci] ?? 0;
+        return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
+      }),
+      backgroundColor: palette[ri],
+    }));
+  } else {
+    const palette = _getColorsForGraph(result.question_code, axisCategories);
+    labels   = result.rows.map(r => r.label);
+    datasets = axisCategories.map((cat, ci) => ({
+      label: cat,
+      data: result.rows.map(r => {
+        const raw = r.percents[ci] ?? 0;
+        return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
+      }),
+      backgroundColor: palette[ci],
+    }));
+  }
   const stackedScales = isH
     ? { x: { stacked: true, beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } },
         y: { stacked: true, ticks: { font: { size: 10 } } } }
@@ -664,13 +927,27 @@ function _buildStacked100Config(result, axisCategories, isH, showPctLabel) {
   };
 }
 
-/** grouped棒（軸カテゴリをX軸、選択肢をデータセット） */
-function _buildGroupedConfig(result, axisCategories, isH, showPctLabel) {
-  const datasets = result.rows.map((row, ri) => ({
-    label: row.label,
-    data:  axisCategories.map((_, ci) => row.percents[ci] ?? 0),
-    backgroundColor: COLORS[ri % COLORS.length],
-  }));
+/** grouped棒（軸カテゴリをX軸、選択肢をデータセット）
+ *  transpose=true → labels=選択肢, datasets=集計軸（bar 通常と同じ構造） */
+function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpose = false) {
+  let labels, datasets;
+  if (transpose) {
+    const palette = _getColorsForGraph(result.question_code, axisCategories);
+    labels   = result.rows.map(r => r.label);
+    datasets = axisCategories.map((cat, ci) => ({
+      label: cat,
+      data:  result.rows.map(r => r.percents[ci] ?? 0),
+      backgroundColor: palette[ci],
+    }));
+  } else {
+    const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
+    labels   = axisCategories;
+    datasets = result.rows.map((row, ri) => ({
+      label: row.label,
+      data:  axisCategories.map((_, ci) => row.percents[ci] ?? 0),
+      backgroundColor: palette[ri],
+    }));
+  }
   const scales = isH
     ? { x: { beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } },
         y: { ticks: { font: { size: 10 } } } }
@@ -678,7 +955,7 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel) {
         y: { beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } } };
   return {
     type: "bar",
-    data: { labels: axisCategories, datasets },
+    data: { labels, datasets },
     options: {
       indexAxis:            isH ? "y" : "x",
       responsive:           true,
@@ -711,7 +988,7 @@ function _buildAvgBarConfig(result, axisCategories, showPctLabel) {
       datasets: [{
         label: "平均値",
         data:  avgs,
-        backgroundColor: axisCategories.map((_, i) => COLORS[i % COLORS.length]),
+        backgroundColor: _getColorsForGraph(result.question_code, axisCategories),
       }],
     },
     options: {
@@ -740,7 +1017,7 @@ function _buildAvgBarConfig(result, axisCategories, showPctLabel) {
 
 /** 円グラフ（軸カテゴリごとに小さな pie） */
 function _renderPieCharts(areaEl, result, axisCategories, areaKey) {
-  const pieColors = result.rows.map((_, ri) => COLORS[ri % COLORS.length]);
+  const pieColors = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
   const pies = [];
 
   axisCategories.forEach((cat, ci) => {
@@ -811,6 +1088,25 @@ function _handleBulkChange(bulkKey) {
   if (Object.keys(updates).length > 0) setStep3SettingsBulk(updates);
 }
 
+function _handleBulkTranspose(value) {
+  const data = _lastCrosstabData;
+  if (!data) return;
+
+  const updates = {};
+  data.results.forEach((result, idx) => {
+    const settings = _getSettings(result.question_code, result.type_code);
+    // 向き選択が有効なチャート種別のみ対象（pie / avg_bar / table_only は非対象）
+    if (!ORIENTATION_TYPES.has(settings.chartType)) return;
+    updates[result.question_code] = { transpose: value };
+    // ラジオボタンの DOM を更新
+    const radios = document.querySelectorAll(`.step3-transpose-radio[data-q="${result.question_code}"]`);
+    radios.forEach(r => { r.checked = (r.value === "true") === value; });
+    _rerenderQuestionFull(idx);
+  });
+
+  if (Object.keys(updates).length > 0) setStep3SettingsBulk(updates);
+}
+
 // ---------------------------------------------------------------------------
 // クロス表（タブ式: ％表 / N表）
 // ---------------------------------------------------------------------------
@@ -819,6 +1115,7 @@ function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
   const pctId = `step3-tab-pct-${idx}`;
   const nId   = `step3-tab-n-${idx}`;
   const sorted = { ...result, rows: _sortedRows(result.rows, settings.sortOrder) };
+  const tp = settings.transpose ?? false;
 
   return `<div class="step3-tab-area">
     <div class="step3-tab-bar">
@@ -826,15 +1123,36 @@ function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
       <button class="step3-tab-btn"        data-tab-target="${nId}">N表</button>
     </div>
     <div id="${pctId}" class="step3-tab-panel">
-      ${_buildPctTable(sorted, axisCategories, axisTotals)}
+      ${_buildPctTable(sorted, axisCategories, axisTotals, tp)}
     </div>
     <div id="${nId}" class="step3-tab-panel" hidden>
-      ${_buildNTable(sorted, axisCategories, axisTotals)}
+      ${_buildNTable(sorted, axisCategories, axisTotals, tp)}
     </div>
   </div>`;
 }
 
-function _buildPctTable(result, axisCategories, axisTotals) {
+function _buildPctTable(result, axisCategories, axisTotals, transpose = false) {
+  if (transpose) {
+    // 行=集計軸カテゴリー, 列=選択肢
+    const headerCols = result.rows
+      .map(row => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem" title="${_esc(row.label)}">${_esc(row.label)}</th>`)
+      .join("");
+    const rows = axisCategories
+      .map((cat, ci) => {
+        const cells = result.rows
+          .map(row => `<td style="text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap">${row.percents[ci]?.toFixed(1) ?? "0.0"}%</td>`)
+          .join("");
+        return `<tr><td style="padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${cells}</tr>`;
+      })
+      .join("");
+    return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
+      <thead style="background:var(--color-surface-2,#F8F8F8)">
+        <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">集計軸</th>${headerCols}</tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+  // 通常: 行=選択肢, 列=集計軸カテゴリー
   const headerCols = axisCategories
     .map((cat, i) => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted)">n=${axisTotals[i] ?? 0}</span></th>`)
     .join("");
@@ -854,7 +1172,28 @@ function _buildPctTable(result, axisCategories, axisTotals) {
   </table>`;
 }
 
-function _buildNTable(result, axisCategories, axisTotals) {
+function _buildNTable(result, axisCategories, axisTotals, transpose = false) {
+  if (transpose) {
+    // 行=集計軸カテゴリー, 列=選択肢
+    const headerCols = result.rows
+      .map(row => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem" title="${_esc(row.label)}">${_esc(row.label)}</th>`)
+      .join("");
+    const rows = axisCategories
+      .map((cat, ci) => {
+        const cells = result.rows
+          .map(row => `<td style="text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap">${row.counts[ci] ?? 0}</td>`)
+          .join("");
+        return `<tr><td style="padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${cells}</tr>`;
+      })
+      .join("");
+    return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
+      <thead style="background:var(--color-surface-2,#F8F8F8)">
+        <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">集計軸</th>${headerCols}</tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+  // 通常: 行=選択肢, 列=集計軸カテゴリー
   const headerCols = axisCategories
     .map((cat, i) => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted)">n=${axisTotals[i] ?? 0}</span></th>`)
     .join("");
@@ -896,11 +1235,15 @@ function _getSettings(questionCode, typeCode) {
   const defaultH = ["MA", "ML", "M"].includes(typeCode);
   return {
     chartType,
-    orientation:  s.orientation  ?? (defaultH ? "h" : "v"),
-    showPctLabel: s.showPctLabel ?? true,
-    sortOrder:    s.sortOrder    ?? "original",
-    collapsed:    s.collapsed    ?? false,
-    excluded:     s.excluded     ?? false,
+    orientation:   s.orientation   ?? (defaultH ? "h" : "v"),
+    showPctLabel:  s.showPctLabel  ?? true,
+    sortOrder:     s.sortOrder     ?? "original",
+    collapsed:     s.collapsed     ?? false,
+    excluded:      s.excluded      ?? false,
+    transpose:     s.transpose     ?? false,
+    customColors:  s.customColors  ?? null,
+    hiddenChoices: s.hiddenChoices ?? [],
+    graphTitle:    s.graphTitle    ?? "",
   };
 }
 
@@ -956,3 +1299,245 @@ function _esc(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+// ---------------------------------------------------------------------------
+// カラーモーダル
+// ---------------------------------------------------------------------------
+
+function _getColorSeriesLabels(result, settings, axisCategories) {
+  const { chartType, transpose } = settings;
+  if (chartType === "pie")     return result.rows.map(r => r.label);
+  if (chartType === "avg_bar") return axisCategories;
+  if (chartType === "bar" || chartType === "stacked100")
+    return transpose ? result.rows.map(r => r.label) : axisCategories;
+  if (chartType === "grouped")
+    return transpose ? axisCategories : result.rows.map(r => r.label);
+  return axisCategories;
+}
+
+function _openColorModal(idx) {
+  const data = _lastCrosstabData;
+  if (!data) return;
+  const result   = data.results[idx];
+  if (!result) return;
+  const settings = _getSettings(result.question_code, result.type_code);
+  const labels   = _getColorSeriesLabels(result, settings, data.axis_categories);
+  _colorModalIdx    = idx;
+  _colorModalColors = [..._getColorsForGraph(result.question_code, labels)];
+
+  document.getElementById("step3-color-title").textContent =
+    `${result.question_code}  ${result.question_text}`;
+  _refreshColorModal(labels);
+  document.getElementById("step3-color-modal").hidden = false;
+}
+
+function _refreshColorModal(labels) {
+  const paletteEl = document.getElementById("step3-palette-btns");
+  if (paletteEl) {
+    const paletteKey = _getActiveFixedPaletteKey(labels);
+    const activePal  = paletteKey ? FIXED_PALETTES[paletteKey] : null;
+    const noticeHtml = activePal
+      ? `<div class="fixed-palette-notice">🎨 ${_esc(activePal.label)}が適用されています。</div>`
+      : "";
+    const btns = FIXED_PALETTE_ORDER.map(key => {
+      const p  = FIXED_PALETTES[key];
+      const sw = p.preview.map(c => `<span style="background:${c}"></span>`).join("");
+      const active = key === paletteKey ? " active" : "";
+      return `<button class="step3-palette-swatch${active}" data-palette="${key}" title="${_esc(p.label)}">${sw}</button>`;
+    }).join("");
+    const defSw  = COLORS.slice(0, 3).map(c => `<span style="background:${c}"></span>`).join("");
+    const noneBtn = `<button class="step3-palette-swatch${!paletteKey ? " active" : ""}" data-palette="__none__" title="デフォルト配色">${defSw}</button>`;
+    paletteEl.innerHTML = noticeHtml + btns + noneBtn;
+  }
+
+  // 系列カラーピッカー
+  const rowsEl = document.getElementById("step3-color-rows");
+  if (rowsEl) {
+    rowsEl.innerHTML = _colorModalColors.map((color, i) => `
+      <div class="step3-color-row" data-ci="${i}">
+        <span class="step3-drag-handle" draggable="true" data-ci="${i}" title="ドラッグして並び替え">☰</span>
+        <input type="color" class="step3-color-input" value="${color}" data-ci="${i}">
+        <span class="step3-color-label">${_esc(labels[i] ?? `系列${i + 1}`)}</span>
+      </div>`).join("");
+  }
+
+  _refreshDragPalette(labels);
+  _refreshColorPreview(labels);
+}
+
+function _refreshColorPreview(labels) {
+  const previewEl = document.getElementById("step3-color-preview");
+  if (!previewEl) return;
+  previewEl.innerHTML = _colorModalColors.map((c, i) => `
+    <span class="step3-preview-chip">
+      <span style="background:${c}"></span>${_esc(labels[i] ?? `系列${i + 1}`)}
+    </span>`).join("");
+}
+
+function _refreshDragPalette(labels) {
+  const el = document.getElementById("step3-drag-palette");
+  if (!el) return;
+  const paletteKey = _getActiveFixedPaletteKey(labels);
+  const colors = paletteKey ? FIXED_PALETTES[paletteKey].preview : COLORS;
+  el.innerHTML = colors.map(c =>
+    `<span class="step3-drag-color-chip" draggable="true" data-color="${c}" style="background:${c}" title="${c}"></span>`
+  ).join("");
+}
+
+function _reRenderCard(idx) {
+  const data = _lastCrosstabData;
+  if (!data) return;
+  const result   = data.results[idx];
+  if (!result) return;
+  const settings = _getSettings(result.question_code, result.type_code);
+  const areaEl   = document.getElementById(`step3-chart-area-${idx}`);
+  if (areaEl) _renderChartInArea(areaEl, result, settings, data.axis_categories, data.axis_totals);
+}
+
+function _initColorModal() {
+  const modal      = document.getElementById("step3-color-modal");
+  if (!modal) return;
+  const rowsEl     = document.getElementById("step3-color-rows");
+  const paletteEl  = document.getElementById("step3-drag-palette");
+
+  // パレット選択
+  document.getElementById("step3-palette-btns")?.addEventListener("click", e => {
+    const btn = e.target.closest(".step3-palette-swatch");
+    if (!btn) return;
+    const data   = _lastCrosstabData;
+    const result = data?.results[_colorModalIdx];
+    if (!result) return;
+    const settings = _getSettings(result.question_code, result.type_code);
+    const labels   = _getColorSeriesLabels(result, settings, data.axis_categories);
+    const key = btn.dataset.palette;
+    if (key === "__none__") {
+      _colorModalColors = labels.map((_, i) => COLORS[i % COLORS.length]);
+    } else {
+      const p = FIXED_PALETTES[key];
+      if (!p) return;
+      _colorModalColors = labels.map((l, i) => {
+        const fc = _fixedColorFor(l);
+        if (fc) return fc;
+        return p.colorFor(l) ?? COLORS[i % COLORS.length];
+      });
+    }
+    _refreshColorModal(labels);
+  });
+
+  // 個別色変更
+  rowsEl?.addEventListener("input", e => {
+    const input = e.target.closest(".step3-color-input");
+    if (!input) return;
+    const ci = parseInt(input.dataset.ci, 10);
+    _colorModalColors[ci] = input.value;
+    const data   = _lastCrosstabData;
+    const result = data?.results[_colorModalIdx];
+    if (!result) return;
+    const settings = _getSettings(result.question_code, result.type_code);
+    _refreshColorPreview(_getColorSeriesLabels(result, settings, data.axis_categories));
+  });
+
+  // ドラッグ: パレットチップ
+  paletteEl?.addEventListener("dragstart", e => {
+    const chip = e.target.closest(".step3-drag-color-chip");
+    if (!chip) return;
+    _dragType  = "color";
+    _dragValue = chip.dataset.color;
+    e.dataTransfer.effectAllowed = "copy";
+  });
+
+  // ドラッグ: 行ハンドル
+  rowsEl?.addEventListener("dragstart", e => {
+    const handle = e.target.closest(".step3-drag-handle");
+    if (!handle) return;
+    _dragType  = "row";
+    _dragValue = parseInt(handle.dataset.ci, 10);
+    e.dataTransfer.effectAllowed = "move";
+    handle.closest(".step3-color-row")?.classList.add("dragging");
+  });
+
+  rowsEl?.addEventListener("dragover", e => {
+    if (!_dragType) return;
+    const row = e.target.closest(".step3-color-row");
+    if (!row) return;
+    e.preventDefault();
+    rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("drag-over"));
+    row.classList.add("drag-over");
+  });
+
+  rowsEl?.addEventListener("dragleave", e => {
+    if (!rowsEl.contains(e.relatedTarget)) {
+      rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("drag-over"));
+    }
+  });
+
+  rowsEl?.addEventListener("drop", e => {
+    e.preventDefault();
+    const row = e.target.closest(".step3-color-row");
+    rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("drag-over", "dragging"));
+    const data   = _lastCrosstabData;
+    const result = data?.results[_colorModalIdx];
+    if (!result || !row) { _dragType = null; _dragValue = null; return; }
+    const settings = _getSettings(result.question_code, result.type_code);
+    const labels   = _getColorSeriesLabels(result, settings, data.axis_categories);
+    const toIdx    = parseInt(row.dataset.ci, 10);
+    if (_dragType === "row" && _dragValue !== null && _dragValue !== toIdx) {
+      const [moved] = _colorModalColors.splice(_dragValue, 1);
+      _colorModalColors.splice(toIdx, 0, moved);
+      _refreshColorModal(labels);
+    } else if (_dragType === "color" && _dragValue) {
+      _colorModalColors[toIdx] = _dragValue;
+      _refreshColorModal(labels);
+    }
+    _dragType  = null;
+    _dragValue = null;
+  });
+
+  rowsEl?.addEventListener("dragend", () => {
+    rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("dragging", "drag-over"));
+    _dragType  = null;
+    _dragValue = null;
+  });
+
+  // STEP1設定に戻す
+  document.getElementById("step3-color-reset")?.addEventListener("click", () => {
+    const result = _lastCrosstabData?.results[_colorModalIdx];
+    if (!result) return;
+    setStep3Setting(result.question_code, "customColors", null);
+    _reRenderCard(_colorModalIdx);
+    modal.hidden = true;
+  });
+
+  // 現在のグラフだけ変更
+  document.getElementById("step3-color-apply-one")?.addEventListener("click", () => {
+    const result = _lastCrosstabData?.results[_colorModalIdx];
+    if (!result) return;
+    setStep3Setting(result.question_code, "customColors", [..._colorModalColors]);
+    _reRenderCard(_colorModalIdx);
+    modal.hidden = true;
+  });
+
+  // 同じ集計軸すべてに適用
+  document.getElementById("step3-color-apply-all")?.addEventListener("click", () => {
+    const allResults = _lastCrosstabData?.results ?? [];
+    const colors = [..._colorModalColors];
+    allResults.forEach(r => setStep3Setting(r.question_code, "customColors", colors));
+    allResults.forEach((_, i) => _reRenderCard(i));
+    modal.hidden = true;
+  });
+
+  // キャンセル / 閉じる
+  document.getElementById("step3-color-cancel")?.addEventListener("click", () => { modal.hidden = true; });
+  document.getElementById("step3-color-close")?.addEventListener("click",  () => { modal.hidden = true; });
+  modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
+}
+
+// ---------------------------------------------------------------------------
+// エクスポートモジュール向けに utility を公開
+// ---------------------------------------------------------------------------
+export { _sortedRows          as sortedRows };
+export { _getSettings         as getSettings };
+export { _getColorsForGraph   as getColorsForGraph };
+export { _getColorSeriesLabels as getColorSeriesLabels };
+export function getLastCrosstabData() { return _lastCrosstabData; }
+export function getCharts() { return _charts; }

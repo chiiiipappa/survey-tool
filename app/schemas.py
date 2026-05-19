@@ -271,6 +271,7 @@ class ProjectSaveRequest(BaseModel):
     project_name: str = ""
     step3_chart_type_map: dict = Field(default_factory=dict)    # 後方互換
     step3_question_settings: dict = Field(default_factory=dict)  # 新
+    step1_axis_colors: dict = Field(default_factory=dict)
 
 
 class LayoutSaveData(BaseModel):
@@ -283,6 +284,7 @@ class LayoutSaveData(BaseModel):
     step3_active_axis_code: str = ""
     step3_chart_type_map: dict = Field(default_factory=dict)     # 後方互換
     step3_question_settings: dict = Field(default_factory=dict)  # 新
+    step1_axis_colors: dict = Field(default_factory=dict)
 
 
 class Step2SaveData(BaseModel):
@@ -368,3 +370,34 @@ class Step3CrosstabResponse(BaseModel):
     axis_totals: List[int]
     results: List[CrosstabResult]
     warnings: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP3 エクスポート用スキーマ
+# ---------------------------------------------------------------------------
+
+class ExportQuestionRow(BaseModel):
+    label: str
+    percents: List[float]
+    counts: List[int]
+
+
+class ExportQuestion(BaseModel):
+    question_code: str
+    question_text: str
+    type_code: str
+    chart_type: str = "bar"       # bar|grouped|stacked100|pie|avg_bar|table_only
+    orientation: str = "v"        # v|h
+    show_pct_label: bool = True
+    transpose: bool = False
+    graph_title: str = ""         # 空文字なら question_text を使用
+    resolved_colors: List[str] = Field(default_factory=list)
+    rows: List[ExportQuestionRow] = Field(default_factory=list)
+
+
+class Step3ExportRequest(BaseModel):
+    axis_question_code: str
+    axis_question_text: str
+    axis_categories: List[str]
+    axis_totals: List[int]
+    questions: List[ExportQuestion]
