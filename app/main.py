@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
 
 from app.routers import questions, upload
 from app.routers import step2 as step2_router
@@ -21,6 +22,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
+
+
+class _NoCacheStaticFiles(StaticFiles):
+    """開発用: JS ファイルをブラウザにキャッシュさせない。"""
+
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        if path.endswith(".js"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
 
 
 @asynccontextmanager
@@ -44,7 +55,7 @@ app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(questions.router, prefix="/api", tags=["questions"])
 app.include_router(step2_router.router, prefix="/api", tags=["step2"])
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/", include_in_schema=False)

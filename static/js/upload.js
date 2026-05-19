@@ -70,7 +70,7 @@ export async function handleCsvFile(file) {
 }
 
 export function reloadLastCsvFile() {
-  if (_lastFile) handleCsvFile(_lastFile);
+  if (_lastFile) return handleCsvFile(_lastFile);
 }
 
 async function handleProjectLoad(file) {

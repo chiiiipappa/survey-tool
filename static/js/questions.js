@@ -101,19 +101,19 @@ export function initQuestionsPanel() {
   });
 
   // CSV情報カードのボタン
-  document.getElementById("btn-csv-reload")?.addEventListener("click", () => {
-    reloadLastCsvFile();
+  document.getElementById("btn-csv-reload")?.addEventListener("click", async () => {
+    await reloadLastCsvFile();
+    applyFilters();
   });
 
   const replaceInput = document.getElementById("replace-csv-input");
 
-  replaceInput?.addEventListener("change", (e) => {
-    if (e.target.files[0]) handleCsvFile(e.target.files[0]);
+  replaceInput?.addEventListener("change", async (e) => {
+    if (e.target.files[0]) {
+      await handleCsvFile(e.target.files[0]);
+      applyFilters();
+    }
     e.target.value = "";
-  });
-
-  document.getElementById("btn-csv-replace")?.addEventListener("click", () => {
-    replaceInput?.click();
   });
 
   const replaceDropZone = document.getElementById("csv-replace-drop-zone");
@@ -125,11 +125,14 @@ export function initQuestionsPanel() {
     });
     replaceDropZone.addEventListener("dragleave", () =>
       replaceDropZone.classList.remove("dragover"));
-    replaceDropZone.addEventListener("drop", (e) => {
+    replaceDropZone.addEventListener("drop", async (e) => {
       e.preventDefault();
       replaceDropZone.classList.remove("dragover");
       const file = e.dataTransfer.files[0];
-      if (file) handleCsvFile(file);
+      if (file) {
+        await handleCsvFile(file);
+        applyFilters();
+      }
     });
   }
 

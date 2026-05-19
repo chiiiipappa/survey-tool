@@ -175,11 +175,11 @@
             <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8 自動判定）</span>
           </p>
         </div>
-        <input type="file" id="replace-csv-input" accept=".csv" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
+        <input type="file" id="replace-csv-input" accept=".csv" style="position:absolute;width:0;height:0;opacity:0;overflow:hidden;">
         <div id="csv-loaded-info" class="file-info-bar" style="margin-top:16px;"></div>
         <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
           <button id="btn-csv-reload" class="btn btn-secondary btn-sm">↺ 再読込</button>
-          <button id="btn-csv-replace" class="btn btn-secondary btn-sm">差し替え</button>
+          <label for="replace-csv-input" class="btn btn-secondary btn-sm">差し替え</label>
           <button id="btn-csv-unload" class="btn btn-secondary btn-sm">× 読込解除</button>
         </div>
       </div>

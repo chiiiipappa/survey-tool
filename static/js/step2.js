@@ -37,12 +37,12 @@ function _initDropZone() {
 
   dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
-    dropZone.classList.add("drag-over");
+    dropZone.classList.add("dragover");
   });
-  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
   dropZone.addEventListener("drop", (e) => {
     e.preventDefault();
-    dropZone.classList.remove("drag-over");
+    dropZone.classList.remove("dragover");
     const file = e.dataTransfer?.files?.[0];
     if (file) _handleFile(file);
   });
