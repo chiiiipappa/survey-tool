@@ -272,6 +272,7 @@ class ProjectSaveRequest(BaseModel):
     step3_chart_type_map: dict = Field(default_factory=dict)    # 後方互換
     step3_question_settings: dict = Field(default_factory=dict)  # 新
     step1_axis_colors: dict = Field(default_factory=dict)
+    user_palettes: dict = Field(default_factory=dict)
 
 
 class LayoutSaveData(BaseModel):
@@ -285,6 +286,7 @@ class LayoutSaveData(BaseModel):
     step3_chart_type_map: dict = Field(default_factory=dict)     # 後方互換
     step3_question_settings: dict = Field(default_factory=dict)  # 新
     step1_axis_colors: dict = Field(default_factory=dict)
+    user_palettes: dict = Field(default_factory=dict)
 
 
 class Step2SaveData(BaseModel):

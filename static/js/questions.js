@@ -443,7 +443,7 @@ export function initProjectHeader() {
     }
     try {
       await saveStep1AxisSettings(AppState.sessionToken, AppState.step1AxisCodes, AppState.step3ActiveAxisCode);
-      await saveProject(AppState.sessionToken, AppState.projectName, AppState.step3QuestionSettings, AppState.step1AxisColors);
+      await saveProject(AppState.sessionToken, AppState.projectName, AppState.step3QuestionSettings, AppState.step1AxisColors, AppState.userPalettes);
       markClean(new Date());
       showToast("プロジェクトを保存しました。");
     } catch (err) {

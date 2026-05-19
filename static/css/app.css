@@ -775,6 +775,55 @@ pre.json-pre {
   width: 100%;
 }
 
+/* ===== 新規パレット生成セクション ===== */
+.step3-gen-palette-body {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 0 4px;
+}
+.step3-gen-row {
+  display: flex; align-items: center; gap: 8px; font-size: .8rem;
+}
+.step3-gen-row label {
+  width: 90px; color: var(--color-text-muted); flex-shrink: 0; font-size: .78rem;
+}
+.step3-gen-input {
+  flex: 1; font-size: .8rem; padding: 2px 6px;
+  border: 1px solid var(--color-border); border-radius: 3px;
+}
+.step3-gen-num  { width: 60px; flex: none; }
+.step3-gen-hex  { font-size: .75rem; color: var(--color-text-muted); font-family: monospace; }
+.step3-gen-select { flex: 1; font-size: .8rem; border: 1px solid var(--color-border); border-radius: 3px; padding: 2px 4px; }
+.step3-gen-preview {
+  display: flex; flex-wrap: wrap; gap: 3px; min-height: 32px;
+  padding: 4px; background: var(--color-surface-2, #f8f8f8); border-radius: 4px;
+}
+.step3-gen-preview-chip {
+  width: 30px; height: 30px; border-radius: 3px; display: inline-block;
+  border: 1px solid rgba(0,0,0,.08);
+}
+
+/* ===== ユーザーパレット行 ===== */
+.step3-user-palette-row {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px dashed var(--color-border);
+}
+.step3-user-palette-swatch span {
+  width: 16px; height: 16px;
+}
+
+/* ===== カスタム上書きバッジ ===== */
+.step3-custom-badge {
+  font-size: .68rem;
+  color: var(--color-text-muted);
+  background: var(--color-surface-2, #f8f8f8);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
 /* ===== STEP3 エクスポートボタン ===== */
 .step3-export-excel-btn,
 .step3-export-csv-btn,
@@ -791,4 +840,71 @@ pre.json-pre {
 .step3-export-loading {
   opacity: .55;
   pointer-events: none;
+}
+
+/* ===== グラフタイプ ボタングループ ===== */
+.step3-chart-type-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.step3-chart-btn {
+  font-size: .73rem;
+  padding: 2px 7px;
+  border: 1px solid var(--color-border, #E2E8F0);
+  border-radius: 3px;
+  cursor: pointer;
+  background: #fff;
+  white-space: nowrap;
+  line-height: 1.5;
+  transition: background .1s, color .1s;
+}
+.step3-chart-btn:hover:not(.active) {
+  background: var(--color-surface-2, #F8F8F8);
+}
+.step3-chart-btn.active {
+  background: var(--color-primary, #3182CE);
+  color: #fff;
+  border-color: var(--color-primary, #3182CE);
+}
+.step3-chart-btn.not-recommended {
+  color: #9CA3AF;
+  border-color: #D1D5DB;
+}
+.step3-chart-btn.not-recommended:hover:not(.active) {
+  background: #F9FAFB;
+}
+.step3-chart-btn.not-recommended.active {
+  background: #9CA3AF;
+  border-color: #9CA3AF;
+  color: #fff;
+}
+
+/* ===== 表示選択肢パネル ===== */
+.step3-choices-panel {
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--color-border, #E2E8F0);
+  background: var(--color-surface-2, #F8F8F8);
+}
+.step3-choices-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.step3-choices-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+.step3-choice-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .82rem;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.step3-choice-row input[type="checkbox"] {
+  cursor: pointer;
 }

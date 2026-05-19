@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3Setting, setStep3SettingsBulk } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, addUserPalette } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
 import {
@@ -23,6 +23,9 @@ const CHART_TYPES = [
   { id: "stacked100", label: "100%積み上げ" },
   { id: "pie",        label: "円グラフ" },
   { id: "grouped",    label: "grouped棒" },
+  { id: "line",       label: "折れ線" },
+  { id: "radar",      label: "レーダー" },
+  { id: "scatter",    label: "散布図" },
   { id: "avg_bar",    label: "平均棒" },
   { id: "table_only", label: "表のみ" },
 ];
@@ -33,16 +36,24 @@ const RECOMMENDED_CHART = {
   NU: "avg_bar", N: "avg_bar",
 };
 
-const ALLOWED_CHARTS = {
-  SA: ["bar", "pie", "stacked100", "grouped", "table_only"],
-  S:  ["bar", "pie", "stacked100", "grouped", "table_only"],
-  MA: ["bar", "stacked100", "table_only"],
-  ML: ["bar", "stacked100", "table_only"],
-  M:  ["bar", "stacked100", "table_only"],
-  NU: ["avg_bar", "table_only"],
-  N:  ["avg_bar", "table_only"],
+// 推奨度: "recommended" | "available" | "not_recommended"
+const _SA_SUIT = { bar:"recommended", pie:"recommended", stacked100:"available", grouped:"available",
+                   line:"available", radar:"available", scatter:"not_recommended", avg_bar:"not_recommended", table_only:"available" };
+const _MA_SUIT = { bar:"recommended", stacked100:"available",
+                   pie:"not_recommended", grouped:"not_recommended", line:"not_recommended",
+                   radar:"not_recommended", scatter:"not_recommended", avg_bar:"not_recommended", table_only:"available" };
+const _NU_SUIT = { avg_bar:"recommended", table_only:"available", line:"available", scatter:"available",
+                   bar:"not_recommended", stacked100:"not_recommended", pie:"not_recommended",
+                   grouped:"not_recommended", radar:"not_recommended" };
+const CHART_SUITABILITY = {
+  SA: _SA_SUIT, S: _SA_SUIT,
+  MA: _MA_SUIT, ML: _MA_SUIT, M: _MA_SUIT,
+  NU: _NU_SUIT, N: _NU_SUIT,
 };
-const ALLOWED_CHARTS_DEFAULT = ["bar", "stacked100", "pie", "grouped", "avg_bar", "table_only"];
+
+function _chartSuitability(chartId, typeCode) {
+  return (CHART_SUITABILITY[typeCode] ?? {})[chartId] ?? "available";
+}
 
 // 向き選択が有効なチャートタイプ
 const ORIENTATION_TYPES = new Set(["bar", "stacked100", "grouped"]);
@@ -51,6 +62,83 @@ const COLORS = [
   "#4299E1", "#F6AD55", "#68D391", "#F687B3", "#9F7AEA",
   "#76E4F7", "#FC8181", "#B7EE8F", "#F6E05E", "#90CDF4",
 ];
+
+// ---------------------------------------------------------------------------
+// 色変換ユーティリティ（キーカラー → パレット生成用）
+// ---------------------------------------------------------------------------
+
+function _hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      case b: h = ((r - g) / d + 4) / 6; break;
+    }
+  }
+  return [h, s, l];
+}
+
+function _hslToHex(h, s, l) {
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  const toHex = v => Math.round(v * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// キーカラーを基準に N 色のパレットを生成
+function _generatePaletteColors(keyHex, count, stepPct, pattern, finePct, satAdjPct) {
+  const [h, s, l] = _hexToHsl(keyHex);
+  const step = stepPct / 100;
+  const fine = finePct / 100;
+  const sAdj = Math.min(1, Math.max(0, s + satAdjPct / 100));
+  const clampL = v => Math.min(0.95, Math.max(0.05, v));
+
+  let lightnesses;
+  if (pattern === "center") {
+    const ci = Math.floor(count / 2);
+    lightnesses = Array.from({ length: count }, (_, i) => clampL(l + (ci - i) * step + fine));
+  } else if (pattern === "light_to_dark") {
+    lightnesses = Array.from({ length: count }, (_, i) => clampL(l - i * step + fine));
+  } else {
+    lightnesses = Array.from({ length: count }, (_, i) => clampL(l - (count - 1 - i) * step + fine));
+  }
+  return lightnesses.map(lv => _hslToHex(h, sAdj, lv));
+}
+
+// ユーザーパレット ID から palette-like オブジェクトを返す（インデックスベース）
+function _getUserPaletteObj(paletteId) {
+  const entry = AppState.userPalettes?.[paletteId];
+  if (!entry) return null;
+  return {
+    label: entry.paletteName,
+    preview: entry.generatedColors,
+    generatedColors: entry.generatedColors,
+    colorFor: () => null,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // 固定カラー（特定ラベルに常に適用）
@@ -186,24 +274,43 @@ const _charts = new Map();
 // 最後に取得したクロス集計データ（再描画用キャッシュ）
 let _lastCrosstabData = null;
 // カラーモーダル状態
-let _colorModalIdx = null;
-let _colorModalColors = [];
-// ドラッグ状態（"color" | "row" | null）
+let _colorModalIdx       = null;
+let _colorModalLabels    = [];    // 現在の系列ラベル配列
+let _colorModalPaletteKey = null; // モーダル内選択中パレットキー
+let _colorModalOverrides  = {};   // { label: hex } 個別上書き
+// ドラッグ状態（"color" | null）
 let _dragType  = null;
 let _dragValue = null;
 
-// 色解決：STEP3個別設定 > 固定カラー > 固定パレット > COLORSデフォルト
+// 色解決：個別上書き > 固定カラー > 選択パレット > STEP1軸パレット > COLORSデフォルト
 function _getColorsForGraph(questionCode, labels) {
   const s = AppState.step3QuestionSettings[questionCode] ?? {};
-  if (s.customColors?.length > 0) {
+
+  // 旧形式: selectedPalette キーがなく customColors が存在 → 旧パスにフォールバック
+  if (!("selectedPalette" in s) && s.customColors?.length > 0) {
     return labels.map((_, i) => s.customColors[i % s.customColors.length]);
   }
-  const paletteKey = _getActiveFixedPaletteKey(labels);
-  const palette    = paletteKey ? FIXED_PALETTES[paletteKey] : null;
+
+  const overrides = s.overriddenSeriesColors ?? {};
+  // 新形式: selectedPalette キーがあればそれを使用、なければ軸レベル or 自動検出
+  const paletteKey = "selectedPalette" in s
+    ? s.selectedPalette
+    : _getActiveFixedPaletteKey(labels);
+  const palette = paletteKey
+    ? (FIXED_PALETTES[paletteKey] ?? _getUserPaletteObj(paletteKey))
+    : null;
+
   return labels.map((l, i) => {
+    if (overrides[l]) return overrides[l];
     const fc = _fixedColorFor(l);
     if (fc) return fc;
-    if (palette) { const pc = palette.colorFor(l); if (pc) return pc; }
+    if (palette) {
+      if (palette.generatedColors) {
+        return palette.generatedColors[i % palette.generatedColors.length];
+      }
+      const pc = palette.colorFor(l);
+      if (pc) return pc;
+    }
     return COLORS[i % COLORS.length];
   });
 }
@@ -233,6 +340,7 @@ export function initStep3Panel() {
 
   // カラーモーダル初期化
   _initColorModal();
+  _initGenPaletteSection();
 }
 
 // ---------------------------------------------------------------------------
@@ -414,15 +522,16 @@ function _renderResults(container, data) {
     const settings = _getSettings(result.question_code, result.type_code);
     const recommended = _recommendedType(result.type_code);
     const recommendedLabel = _recommendedLabel(result.type_code);
-    const allowed = _allowedTypes(result.type_code);
 
-    const options = allowed
-      .map(id => {
-        const lbl = _chartLabel(id);
-        const sel = id === settings.chartType ? " selected" : "";
-        return `<option value="${id}"${sel}>${_esc(lbl)}</option>`;
-      })
-      .join("");
+    const chartBtnGroup = `<div class="step3-chart-type-btns">${
+      CHART_TYPES.map(t => {
+        const suit = _chartSuitability(t.id, result.type_code);
+        const active = t.id === settings.chartType ? " active" : "";
+        const cls = suit === "not_recommended" ? " not-recommended" : "";
+        const title = suit === "not_recommended" ? `${t.label}（非推奨）` : t.label;
+        return `<button class="step3-chart-btn${active}${cls}" data-q="${_esc(result.question_code)}" data-idx="${idx}" data-chart="${t.id}" title="${_esc(title)}">${_esc(t.label)}</button>`;
+      }).join("")
+    }</div>`;
 
     // 向きラジオ・行列入替（bar/stacked100/grouped のみ）
     const showOrient = ORIENTATION_TYPES.has(settings.chartType);
@@ -473,6 +582,10 @@ function _renderResults(container, data) {
           ${excludedBadge}
         </div>
         <div style="display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm step3-choices-toggle-btn"
+                  data-q="${_esc(result.question_code)}" data-idx="${idx}">
+            🔧 表示選択肢
+          </button>
           <button class="btn btn-secondary btn-sm step3-color-btn"
                   data-q="${_esc(result.question_code)}" data-idx="${idx}">
             🎨 カラー設定
@@ -498,9 +611,7 @@ function _renderResults(container, data) {
         <!-- グラフ設定バー -->
         <div class="step3-controls-bar">
           <span style="font-size:.78rem; color:var(--color-text-muted)">推奨: ${_esc(recommendedLabel)}</span>
-          <select class="step3-chart-type-select" data-q="${_esc(result.question_code)}" data-idx="${idx}">
-            ${options}
-          </select>
+          ${chartBtnGroup}
           <button class="btn btn-secondary btn-sm step3-chart-reset-btn"
                   data-q="${_esc(result.question_code)}" data-type="${_esc(recommended)}" data-idx="${idx}">
             推奨に戻す
@@ -519,6 +630,9 @@ function _renderResults(container, data) {
           </select>
           ${transposeHtml}
         </div>
+
+        <!-- 表示選択肢パネル -->
+        ${_buildChoicesPanel(result, idx, settings.hiddenChoices)}
 
         <!-- グラフ + 表 -->
         <div class="card-body" style="padding:16px">
@@ -572,15 +686,19 @@ function _onResultsChange(e) {
     return;
   }
 
-  // グラフ種別セレクト
-  const chartSel = e.target.closest(".step3-chart-type-select");
-  if (chartSel) {
-    const qCode = chartSel.dataset.q;
-    const idx   = parseInt(chartSel.dataset.idx, 10);
-    setStep3Setting(qCode, "chartType", chartSel.value);
-    // 向きラジオの表示切替
-    _toggleOrientCtrl(idx, chartSel.value);
-    _rerenderQuestion(idx);
+  // 表示選択肢 チェックボックス
+  const choiceCb = e.target.closest(".step3-choice-cb");
+  if (choiceCb) {
+    const idx    = parseInt(choiceCb.dataset.idx, 10);
+    const result = _lastCrosstabData?.results[idx];
+    if (!result) return;
+    const current = _getSettings(result.question_code, result.type_code).hiddenChoices ?? [];
+    const label = choiceCb.dataset.label;
+    const newHidden = choiceCb.checked
+      ? current.filter(l => l !== label)
+      : [...new Set([...current, label])];
+    setStep3Setting(choiceCb.dataset.q, "hiddenChoices", newHidden);
+    _rerenderQuestionFull(idx);
     return;
   }
 
@@ -594,6 +712,41 @@ function _onResultsChange(e) {
 }
 
 function _onResultsClick(e) {
+  // グラフタイプ ボタングループ
+  const chartBtn = e.target.closest(".step3-chart-btn");
+  if (chartBtn) {
+    const qCode = chartBtn.dataset.q;
+    const idx   = parseInt(chartBtn.dataset.idx, 10);
+    const chart = chartBtn.dataset.chart;
+    setStep3Setting(qCode, "chartType", chart);
+    chartBtn.closest(".step3-chart-type-btns")
+      .querySelectorAll(".step3-chart-btn")
+      .forEach(b => b.classList.toggle("active", b.dataset.chart === chart));
+    _toggleOrientCtrl(idx, chart);
+    _rerenderQuestionFull(idx);
+    return;
+  }
+
+  // 表示選択肢パネル toggle
+  const choicesToggle = e.target.closest(".step3-choices-toggle-btn");
+  if (choicesToggle) {
+    const panel = document.getElementById(`step3-choices-panel-${choicesToggle.dataset.idx}`);
+    if (panel) panel.hidden = !panel.hidden;
+    return;
+  }
+
+  // すべて表示 / 初期状態に戻す
+  const showAllBtn = e.target.closest(".step3-choices-show-all-btn, .step3-choices-reset-btn");
+  if (showAllBtn) {
+    const qCode = showAllBtn.dataset.q;
+    const idx   = parseInt(showAllBtn.dataset.idx, 10);
+    setStep3Setting(qCode, "hiddenChoices", []);
+    document.querySelectorAll(`#step3-choices-panel-${idx} .step3-choice-cb`)
+      .forEach(cb => { cb.checked = true; });
+    _rerenderQuestionFull(idx);
+    return;
+  }
+
   // タブ切り替え
   const tabBtn = e.target.closest(".step3-tab-btn");
   if (tabBtn) {
@@ -614,10 +767,10 @@ function _onResultsClick(e) {
     const recommended = resetBtn.dataset.type;
     const idx         = parseInt(resetBtn.dataset.idx, 10);
     setStep3Setting(qCode, "chartType", recommended);
-    const sel = document.querySelector(`.step3-chart-type-select[data-q="${qCode}"]`);
-    if (sel) sel.value = recommended;
+    document.querySelectorAll(`.step3-chart-btn[data-q="${qCode}"]`)
+      .forEach(b => b.classList.toggle("active", b.dataset.chart === recommended));
     _toggleOrientCtrl(idx, recommended);
-    _rerenderQuestion(idx);
+    _rerenderQuestionFull(idx);
     return;
   }
 
@@ -724,7 +877,11 @@ function _rerenderQuestionFull(idx) {
       _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
   }
 
-  const sortedResult = { ...result, rows: _sortedRows(result.rows, settings.sortOrder) };
+  const hidden = settings.hiddenChoices ?? [];
+  const sortedResult = {
+    ...result,
+    rows: _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), settings.sortOrder),
+  };
   const tp = settings.transpose ?? false;
   const pctPanel = document.getElementById(`step3-tab-pct-${idx}`);
   const nPanel   = document.getElementById(`step3-tab-n-${idx}`);
@@ -772,7 +929,8 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
   areaEl.style.display = "";
   areaEl.style.height  = "";
 
-  const rows   = _sortedRows(result.rows, sortOrder);
+  const hidden = settings.hiddenChoices ?? [];
+  const rows   = _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), sortOrder);
   const sorted = { ...result, rows };
   const isH    = orientation === "h";
   const tp     = transpose ?? false;
@@ -786,6 +944,24 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
     return;
   }
 
+  if (chartType === "radar") {
+    areaEl.style.position = "relative";
+    areaEl.style.height   = "300px";
+    const canvas = document.createElement("canvas");
+    areaEl.appendChild(canvas);
+    _charts.set(areaKey, new Chart(canvas, _buildRadarConfig(sorted, axisCategories)));
+    return;
+  }
+
+  if (chartType === "scatter") {
+    areaEl.style.position = "relative";
+    areaEl.style.height   = "280px";
+    const canvas = document.createElement("canvas");
+    areaEl.appendChild(canvas);
+    _charts.set(areaKey, new Chart(canvas, _buildScatterConfig(sorted, axisCategories)));
+    return;
+  }
+
   areaEl.style.position = "relative";
   areaEl.style.height   = "260px";
   const canvas = document.createElement("canvas");
@@ -795,6 +971,7 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
   if (chartType === "avg_bar")         config = _buildAvgBarConfig(sorted, axisCategories, showPctLabel);
   else if (chartType === "stacked100") config = _buildStacked100Config(sorted, axisCategories, isH, showPctLabel, tp);
   else if (chartType === "grouped")    config = _buildGroupedConfig(sorted, axisCategories, isH, showPctLabel, tp);
+  else if (chartType === "line")       config = _buildLineConfig(sorted, axisCategories, showPctLabel, tp);
   else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel, tp);
 
   _charts.set(areaKey, new Chart(canvas, config));
@@ -1054,6 +1231,128 @@ function _renderPieCharts(areaEl, result, axisCategories, areaKey) {
   _charts.set(areaKey, pies);
 }
 
+/** 折れ線グラフ（縦固定, orientation 不使用）
+ *  transpose=false → X=選択肢, lines=軸カテゴリ
+ *  transpose=true  → X=軸カテゴリ, lines=選択肢 */
+function _buildLineConfig(result, axisCategories, showPctLabel, transpose = false) {
+  let labels, datasets;
+  if (transpose) {
+    const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
+    labels   = axisCategories;
+    datasets = result.rows.map((row, ri) => ({
+      label:           row.label,
+      data:            axisCategories.map((_, ci) => row.percents[ci] ?? 0),
+      borderColor:     palette[ri],
+      backgroundColor: palette[ri] + "40",
+      fill:            false,
+      tension:         0.3,
+      pointRadius:     4,
+    }));
+  } else {
+    const palette = _getColorsForGraph(result.question_code, axisCategories);
+    labels   = result.rows.map(r => r.label);
+    datasets = axisCategories.map((cat, ci) => ({
+      label:           cat,
+      data:            result.rows.map(r => r.percents[ci] ?? 0),
+      borderColor:     palette[ci],
+      backgroundColor: palette[ci] + "40",
+      fill:            false,
+      tension:         0.3,
+      pointRadius:     4,
+    }));
+  }
+  return {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend:     { position: "bottom", labels: { font: { size: 11 } } },
+        tooltip:    { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? "N/A"}%` } },
+        datalabels: showPctLabel
+          ? { display: true, formatter: v => `${v.toFixed(1)}%`, font: { size: 9 }, color: "#555", anchor: "end", align: "top", clamp: true }
+          : { display: false },
+      },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+        y: { beginAtZero: true, ticks: { callback: v => `${v}%` } },
+      },
+    },
+  };
+}
+
+/** レーダーチャート
+ *  spokes = 選択肢, datasets = 軸カテゴリ */
+function _buildRadarConfig(result, axisCategories) {
+  const palette = _getColorsForGraph(result.question_code, axisCategories);
+  const labels  = result.rows.map(r => r.label);
+  const datasets = axisCategories.map((cat, ci) => ({
+    label:           cat,
+    data:            result.rows.map(r => r.percents[ci] ?? 0),
+    borderColor:     palette[ci],
+    backgroundColor: palette[ci] + "30",
+    fill:            true,
+    pointRadius:     3,
+  }));
+  return {
+    type: "radar",
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend:     { position: "bottom", labels: { font: { size: 11 } } },
+        datalabels: { display: false },
+      },
+      scales: {
+        r: {
+          beginAtZero: true,
+          ticks: { callback: v => `${v}%`, font: { size: 9 } },
+          pointLabels: { font: { size: 10 } },
+        },
+      },
+    },
+  };
+}
+
+/** 散布図: X=選択肢インデックス, Y=%, datasets=軸カテゴリ */
+function _buildScatterConfig(result, axisCategories) {
+  const palette  = _getColorsForGraph(result.question_code, axisCategories);
+  const datasets = axisCategories.map((cat, ci) => ({
+    label:           cat,
+    data:            result.rows.map((row, ri) => ({ x: ri, y: row.percents[ci] ?? 0 })),
+    backgroundColor: palette[ci],
+    pointRadius:     6,
+  }));
+  return {
+    type: "scatter",
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend:     { position: "bottom", labels: { font: { size: 11 } } },
+        tooltip:    {
+          callbacks: {
+            label: ctx => {
+              const choiceLabel = result.rows[ctx.parsed.x]?.label ?? String(ctx.parsed.x);
+              return `${ctx.dataset.label} / ${choiceLabel}: ${ctx.parsed.y.toFixed(1)}%`;
+            },
+          },
+        },
+        datalabels: { display: false },
+      },
+      scales: {
+        x: {
+          type:  "linear",
+          min:   -0.5,
+          max:   result.rows.length - 0.5,
+          ticks: { callback: v => result.rows[v]?.label ?? "", font: { size: 10 }, maxRotation: 45, stepSize: 1 },
+        },
+        y: { beginAtZero: true, ticks: { callback: v => `${v}%` } },
+      },
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 一括変更
 // ---------------------------------------------------------------------------
@@ -1079,8 +1378,8 @@ function _handleBulkChange(bulkKey) {
   data.results.forEach((result, idx) => {
     if (!targetTypeCodes.includes(result.type_code)) return;
     updates[result.question_code] = { chartType, orientation };
-    const sel = document.querySelector(`.step3-chart-type-select[data-q="${result.question_code}"]`);
-    if (sel) sel.value = chartType;
+    document.querySelectorAll(`.step3-chart-btn[data-q="${result.question_code}"]`)
+      .forEach(b => b.classList.toggle("active", b.dataset.chart === chartType));
     _toggleOrientCtrl(idx, chartType);
     _rerenderQuestion(idx);
   });
@@ -1108,13 +1407,43 @@ function _handleBulkTranspose(value) {
 }
 
 // ---------------------------------------------------------------------------
+// 表示選択肢パネル
+// ---------------------------------------------------------------------------
+
+function _buildChoicesPanel(result, idx, hiddenChoices) {
+  const qCode = result.question_code;
+  const checkboxes = result.rows.map(row => {
+    const checked = !(hiddenChoices ?? []).includes(row.label) ? "checked" : "";
+    return `<label class="step3-choice-row">
+      <input type="checkbox" class="step3-choice-cb"
+             data-q="${_esc(qCode)}" data-idx="${idx}"
+             data-label="${_esc(row.label)}" ${checked}>
+      ${_esc(row.label)}
+    </label>`;
+  }).join("");
+  return `<div id="step3-choices-panel-${idx}" class="step3-choices-panel" hidden>
+    <div class="step3-choices-actions">
+      <button class="btn btn-secondary btn-sm step3-choices-show-all-btn"
+              data-q="${_esc(qCode)}" data-idx="${idx}">すべて表示</button>
+      <button class="btn btn-secondary btn-sm step3-choices-reset-btn"
+              data-q="${_esc(qCode)}" data-idx="${idx}">初期状態に戻す</button>
+    </div>
+    <div class="step3-choices-list">${checkboxes}</div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
 // クロス表（タブ式: ％表 / N表）
 // ---------------------------------------------------------------------------
 
 function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
-  const pctId = `step3-tab-pct-${idx}`;
-  const nId   = `step3-tab-n-${idx}`;
-  const sorted = { ...result, rows: _sortedRows(result.rows, settings.sortOrder) };
+  const pctId  = `step3-tab-pct-${idx}`;
+  const nId    = `step3-tab-n-${idx}`;
+  const hidden = settings.hiddenChoices ?? [];
+  const sorted = {
+    ...result,
+    rows: _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), settings.sortOrder),
+  };
   const tp = settings.transpose ?? false;
 
   return `<div class="step3-tab-area">
@@ -1241,9 +1570,11 @@ function _getSettings(questionCode, typeCode) {
     collapsed:     s.collapsed     ?? false,
     excluded:      s.excluded      ?? false,
     transpose:     s.transpose     ?? false,
-    customColors:  s.customColors  ?? null,
-    hiddenChoices: s.hiddenChoices ?? [],
-    graphTitle:    s.graphTitle    ?? "",
+    customColors:           s.customColors           ?? null,
+    selectedPalette:        s.selectedPalette        ?? null,
+    overriddenSeriesColors: s.overriddenSeriesColors ?? {},
+    hiddenChoices:          s.hiddenChoices          ?? [],
+    graphTitle:             s.graphTitle             ?? "",
   };
 }
 
@@ -1259,10 +1590,6 @@ function _recommendedLabel(typeCode) {
     return base + (defaultH ? "（横）" : "（縦）");
   }
   return base;
-}
-
-function _allowedTypes(typeCode) {
-  return ALLOWED_CHARTS[typeCode] ?? ALLOWED_CHARTS_DEFAULT;
 }
 
 function _chartLabel(id) {
@@ -1315,6 +1642,18 @@ function _getColorSeriesLabels(result, settings, axisCategories) {
   return axisCategories;
 }
 
+// モーダル内での色を palette + overrides から計算
+function _deriveModalColors(labels) {
+  const palette = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey] : null;
+  return labels.map((l, i) => {
+    if (_colorModalOverrides[l]) return _colorModalOverrides[l];
+    const fc = _fixedColorFor(l);
+    if (fc) return fc;
+    if (palette) { const pc = palette.colorFor(l); if (pc) return pc; }
+    return COLORS[i % COLORS.length];
+  });
+}
+
 function _openColorModal(idx) {
   const data = _lastCrosstabData;
   if (!data) return;
@@ -1323,7 +1662,24 @@ function _openColorModal(idx) {
   const settings = _getSettings(result.question_code, result.type_code);
   const labels   = _getColorSeriesLabels(result, settings, data.axis_categories);
   _colorModalIdx    = idx;
-  _colorModalColors = [..._getColorsForGraph(result.question_code, labels)];
+  _colorModalLabels = labels;
+
+  const rawSettings = AppState.step3QuestionSettings[result.question_code] ?? {};
+  if ("selectedPalette" in rawSettings) {
+    // 新形式: そのまま復元
+    _colorModalPaletteKey = rawSettings.selectedPalette;
+    _colorModalOverrides  = { ...(rawSettings.overriddenSeriesColors ?? {}) };
+  } else if (rawSettings.customColors?.length > 0) {
+    // 旧形式: 全色を個別上書きとして変換
+    _colorModalPaletteKey = _getActiveFixedPaletteKey(labels);
+    _colorModalOverrides  = Object.fromEntries(
+      labels.map((l, i) => [l, rawSettings.customColors[i % rawSettings.customColors.length]])
+    );
+  } else {
+    // 未設定: 軸レベル or 自動検出
+    _colorModalPaletteKey = _getActiveFixedPaletteKey(labels);
+    _colorModalOverrides  = {};
+  }
 
   document.getElementById("step3-color-title").textContent =
     `${result.question_code}  ${result.question_text}`;
@@ -1334,51 +1690,68 @@ function _openColorModal(idx) {
 function _refreshColorModal(labels) {
   const paletteEl = document.getElementById("step3-palette-btns");
   if (paletteEl) {
-    const paletteKey = _getActiveFixedPaletteKey(labels);
-    const activePal  = paletteKey ? FIXED_PALETTES[paletteKey] : null;
-    const noticeHtml = activePal
-      ? `<div class="fixed-palette-notice">🎨 ${_esc(activePal.label)}が適用されています。</div>`
-      : "";
+    const activePal = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey] : null;
     const btns = FIXED_PALETTE_ORDER.map(key => {
       const p  = FIXED_PALETTES[key];
       const sw = p.preview.map(c => `<span style="background:${c}"></span>`).join("");
-      const active = key === paletteKey ? " active" : "";
+      const active = key === _colorModalPaletteKey ? " active" : "";
       return `<button class="step3-palette-swatch${active}" data-palette="${key}" title="${_esc(p.label)}">${sw}</button>`;
     }).join("");
-    const defSw  = COLORS.slice(0, 3).map(c => `<span style="background:${c}"></span>`).join("");
-    const noneBtn = `<button class="step3-palette-swatch${!paletteKey ? " active" : ""}" data-palette="__none__" title="デフォルト配色">${defSw}</button>`;
-    paletteEl.innerHTML = noticeHtml + btns + noneBtn;
+    const defSw   = COLORS.slice(0, 3).map(c => `<span style="background:${c}"></span>`).join("");
+    const noneBtn = `<button class="step3-palette-swatch${!_colorModalPaletteKey ? " active" : ""}" data-palette="__none__" title="デフォルト配色">${defSw}</button>`;
+    const userBtns = Object.values(AppState.userPalettes ?? {}).map(entry => {
+      const sw = entry.generatedColors.slice(0, 8).map(c => `<span style="background:${c}"></span>`).join("");
+      const active = entry.paletteId === _colorModalPaletteKey ? " active" : "";
+      return `<button class="step3-palette-swatch step3-user-palette-swatch${active}" data-palette="${entry.paletteId}" title="${_esc(entry.paletteName)}">${sw}</button>`;
+    }).join("");
+    const userRow = userBtns
+      ? `<div class="step3-user-palette-row">${userBtns}</div>`
+      : "";
+    paletteEl.innerHTML = btns + noneBtn + userRow;
   }
 
-  // 系列カラーピッカー
+  // 「このパレットを適用」ボタンのラベル更新
+  const applyPaletteBtn = document.getElementById("step3-palette-apply-btn");
+  if (applyPaletteBtn) {
+    const pal = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey] : null;
+    applyPaletteBtn.textContent = pal ? `「${pal.label}」を適用` : "デフォルト配色を適用";
+  }
+
+  // 系列カラーピッカー（ラベルベース、ドラッグ並び替えなし）
+  const colors = _deriveModalColors(labels);
   const rowsEl = document.getElementById("step3-color-rows");
   if (rowsEl) {
-    rowsEl.innerHTML = _colorModalColors.map((color, i) => `
-      <div class="step3-color-row" data-ci="${i}">
-        <span class="step3-drag-handle" draggable="true" data-ci="${i}" title="ドラッグして並び替え">☰</span>
-        <input type="color" class="step3-color-input" value="${color}" data-ci="${i}">
-        <span class="step3-color-label">${_esc(labels[i] ?? `系列${i + 1}`)}</span>
-      </div>`).join("");
+    rowsEl.innerHTML = colors.map((color, i) => {
+      const label     = labels[i] ?? `系列${i + 1}`;
+      const isCustom  = !!_colorModalOverrides[label];
+      const badge     = isCustom ? `<span class="step3-custom-badge">カスタム</span>` : "";
+      return `
+        <div class="step3-color-row" data-ci="${i}" data-label="${_esc(label)}">
+          <input type="color" class="step3-color-input" value="${color}" data-ci="${i}" data-label="${_esc(label)}">
+          <span class="step3-color-label">${_esc(label)}</span>
+          ${badge}
+        </div>`;
+    }).join("");
   }
 
-  _refreshDragPalette(labels);
+  _refreshDragPalette();
   _refreshColorPreview(labels);
 }
 
 function _refreshColorPreview(labels) {
   const previewEl = document.getElementById("step3-color-preview");
   if (!previewEl) return;
-  previewEl.innerHTML = _colorModalColors.map((c, i) => `
+  const colors = _deriveModalColors(labels);
+  previewEl.innerHTML = colors.map((c, i) => `
     <span class="step3-preview-chip">
       <span style="background:${c}"></span>${_esc(labels[i] ?? `系列${i + 1}`)}
     </span>`).join("");
 }
 
-function _refreshDragPalette(labels) {
+function _refreshDragPalette() {
   const el = document.getElementById("step3-drag-palette");
   if (!el) return;
-  const paletteKey = _getActiveFixedPaletteKey(labels);
-  const colors = paletteKey ? FIXED_PALETTES[paletteKey].preview : COLORS;
+  const colors = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey].preview : COLORS;
   el.innerHTML = colors.map(c =>
     `<span class="step3-drag-color-chip" draggable="true" data-color="${c}" style="background:${c}" title="${c}"></span>`
   ).join("");
@@ -1395,46 +1768,41 @@ function _reRenderCard(idx) {
 }
 
 function _initColorModal() {
-  const modal      = document.getElementById("step3-color-modal");
+  const modal     = document.getElementById("step3-color-modal");
   if (!modal) return;
-  const rowsEl     = document.getElementById("step3-color-rows");
-  const paletteEl  = document.getElementById("step3-drag-palette");
+  const rowsEl    = document.getElementById("step3-color-rows");
+  const paletteEl = document.getElementById("step3-drag-palette");
 
-  // パレット選択
+  // パレットボタンクリック → 選択状態だけ更新（即時適用しない）
   document.getElementById("step3-palette-btns")?.addEventListener("click", e => {
     const btn = e.target.closest(".step3-palette-swatch");
     if (!btn) return;
-    const data   = _lastCrosstabData;
-    const result = data?.results[_colorModalIdx];
-    if (!result) return;
-    const settings = _getSettings(result.question_code, result.type_code);
-    const labels   = _getColorSeriesLabels(result, settings, data.axis_categories);
     const key = btn.dataset.palette;
-    if (key === "__none__") {
-      _colorModalColors = labels.map((_, i) => COLORS[i % COLORS.length]);
-    } else {
-      const p = FIXED_PALETTES[key];
-      if (!p) return;
-      _colorModalColors = labels.map((l, i) => {
-        const fc = _fixedColorFor(l);
-        if (fc) return fc;
-        return p.colorFor(l) ?? COLORS[i % COLORS.length];
-      });
-    }
-    _refreshColorModal(labels);
+    _colorModalPaletteKey = key === "__none__" ? null : key;
+    _refreshColorModal(_colorModalLabels);
   });
 
-  // 個別色変更
+  // 「このパレットを適用」→ 全上書きをクリアしてパレット色を一括適用
+  document.getElementById("step3-palette-apply-btn")?.addEventListener("click", () => {
+    _colorModalOverrides = {};
+    _refreshColorModal(_colorModalLabels);
+  });
+
+  // 個別色変更 → 上書きに追加、カスタムバッジを動的付与
   rowsEl?.addEventListener("input", e => {
     const input = e.target.closest(".step3-color-input");
     if (!input) return;
-    const ci = parseInt(input.dataset.ci, 10);
-    _colorModalColors[ci] = input.value;
-    const data   = _lastCrosstabData;
-    const result = data?.results[_colorModalIdx];
-    if (!result) return;
-    const settings = _getSettings(result.question_code, result.type_code);
-    _refreshColorPreview(_getColorSeriesLabels(result, settings, data.axis_categories));
+    const label = input.dataset.label;
+    _colorModalOverrides[label] = input.value;
+    // バッジがなければ追加
+    const row = input.closest(".step3-color-row");
+    if (row && !row.querySelector(".step3-custom-badge")) {
+      const badge = document.createElement("span");
+      badge.className = "step3-custom-badge";
+      badge.textContent = "カスタム";
+      row.appendChild(badge);
+    }
+    _refreshColorPreview(_colorModalLabels);
   });
 
   // ドラッグ: パレットチップ
@@ -1446,18 +1814,9 @@ function _initColorModal() {
     e.dataTransfer.effectAllowed = "copy";
   });
 
-  // ドラッグ: 行ハンドル
-  rowsEl?.addEventListener("dragstart", e => {
-    const handle = e.target.closest(".step3-drag-handle");
-    if (!handle) return;
-    _dragType  = "row";
-    _dragValue = parseInt(handle.dataset.ci, 10);
-    e.dataTransfer.effectAllowed = "move";
-    handle.closest(".step3-color-row")?.classList.add("dragging");
-  });
-
+  // ドラッグオーバー: 系列行
   rowsEl?.addEventListener("dragover", e => {
-    if (!_dragType) return;
+    if (_dragType !== "color") return;
     const row = e.target.closest(".step3-color-row");
     if (!row) return;
     e.preventDefault();
@@ -1471,57 +1830,63 @@ function _initColorModal() {
     }
   });
 
+  // ドロップ: 色チップ → 系列行（個別上書き）
   rowsEl?.addEventListener("drop", e => {
     e.preventDefault();
     const row = e.target.closest(".step3-color-row");
-    rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("drag-over", "dragging"));
-    const data   = _lastCrosstabData;
-    const result = data?.results[_colorModalIdx];
-    if (!result || !row) { _dragType = null; _dragValue = null; return; }
-    const settings = _getSettings(result.question_code, result.type_code);
-    const labels   = _getColorSeriesLabels(result, settings, data.axis_categories);
-    const toIdx    = parseInt(row.dataset.ci, 10);
-    if (_dragType === "row" && _dragValue !== null && _dragValue !== toIdx) {
-      const [moved] = _colorModalColors.splice(_dragValue, 1);
-      _colorModalColors.splice(toIdx, 0, moved);
-      _refreshColorModal(labels);
-    } else if (_dragType === "color" && _dragValue) {
-      _colorModalColors[toIdx] = _dragValue;
-      _refreshColorModal(labels);
+    rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("drag-over"));
+    if (!row || _dragType !== "color" || !_dragValue) {
+      _dragType = null; _dragValue = null; return;
     }
+    const label = row.dataset.label;
+    _colorModalOverrides[label] = _dragValue;
     _dragType  = null;
     _dragValue = null;
+    _refreshColorModal(_colorModalLabels);
   });
 
   rowsEl?.addEventListener("dragend", () => {
-    rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("dragging", "drag-over"));
+    rowsEl.querySelectorAll(".step3-color-row").forEach(r => r.classList.remove("drag-over"));
     _dragType  = null;
     _dragValue = null;
   });
 
-  // STEP1設定に戻す
+  // 「個別変更を破棄」→ 上書きをクリア
+  document.getElementById("step3-color-clear-overrides")?.addEventListener("click", () => {
+    _colorModalOverrides = {};
+    _refreshColorModal(_colorModalLabels);
+  });
+
+  // 「STEP1設定に戻す」→ 全カラー設定をクリア
   document.getElementById("step3-color-reset")?.addEventListener("click", () => {
     const result = _lastCrosstabData?.results[_colorModalIdx];
     if (!result) return;
-    setStep3Setting(result.question_code, "customColors", null);
+    clearQuestionColorState(result.question_code);
     _reRenderCard(_colorModalIdx);
     modal.hidden = true;
   });
 
-  // 現在のグラフだけ変更
+  // 「現在のグラフだけ変更」→ 新形式で保存
   document.getElementById("step3-color-apply-one")?.addEventListener("click", () => {
     const result = _lastCrosstabData?.results[_colorModalIdx];
     if (!result) return;
-    setStep3Setting(result.question_code, "customColors", [..._colorModalColors]);
+    setStep3Setting(result.question_code, "selectedPalette",        _colorModalPaletteKey);
+    setStep3Setting(result.question_code, "overriddenSeriesColors",  { ..._colorModalOverrides });
+    setStep3Setting(result.question_code, "customColors",            null);
     _reRenderCard(_colorModalIdx);
     modal.hidden = true;
   });
 
-  // 同じ集計軸すべてに適用
+  // 「同じ集計軸すべてに適用」→ 全設問に新形式で保存
   document.getElementById("step3-color-apply-all")?.addEventListener("click", () => {
     const allResults = _lastCrosstabData?.results ?? [];
-    const colors = [..._colorModalColors];
-    allResults.forEach(r => setStep3Setting(r.question_code, "customColors", colors));
+    const palette    = _colorModalPaletteKey;
+    const overrides  = { ..._colorModalOverrides };
+    const updates    = {};
+    allResults.forEach(r => {
+      updates[r.question_code] = { selectedPalette: palette, overriddenSeriesColors: overrides, customColors: null };
+    });
+    setStep3SettingsBulk(updates);
     allResults.forEach((_, i) => _reRenderCard(i));
     modal.hidden = true;
   });
@@ -1530,6 +1895,141 @@ function _initColorModal() {
   document.getElementById("step3-color-cancel")?.addEventListener("click", () => { modal.hidden = true; });
   document.getElementById("step3-color-close")?.addEventListener("click",  () => { modal.hidden = true; });
   modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
+}
+
+// ---------------------------------------------------------------------------
+// 新規パレット生成セクション
+// ---------------------------------------------------------------------------
+
+function _initGenPaletteSection() {
+  const section = document.getElementById("step3-gen-palette-section");
+  if (!section) return;
+
+  // プレビュー更新ヘルパー
+  function _updateGenPreview() {
+    const keyColor  = document.getElementById("gen-key-color")?.value ?? "#0071BC";
+    const count     = parseInt(document.getElementById("gen-color-count")?.value ?? "6", 10);
+    const stepPct   = parseInt(document.getElementById("gen-brightness-step")?.value ?? "10", 10);
+    const pattern   = document.getElementById("gen-pattern")?.value ?? "center";
+    const finePct   = parseInt(document.getElementById("gen-brightness-fine")?.value ?? "0", 10);
+    const satPct    = parseInt(document.getElementById("gen-saturation")?.value ?? "0", 10);
+
+    const colors = _generatePaletteColors(keyColor, count, stepPct, pattern, finePct, satPct);
+    const previewEl = document.getElementById("gen-palette-preview");
+    if (previewEl) {
+      previewEl.innerHTML = colors
+        .map(c => `<span class="step3-gen-preview-chip" style="background:${c}" title="${c}"></span>`)
+        .join("");
+    }
+    return colors;
+  }
+
+  // スライダーの表示値同期ヘルパー
+  function _syncSliderVal(inputId, valId, suffix = "%") {
+    const input = document.getElementById(inputId);
+    const val   = document.getElementById(valId);
+    if (!input || !val) return;
+    input.addEventListener("input", () => { val.textContent = input.value + suffix; _updateGenPreview(); });
+  }
+
+  // カラーピッカーの hex 表示同期
+  const keyColorInput = document.getElementById("gen-key-color");
+  const keyColorHex   = document.getElementById("gen-key-color-hex");
+  keyColorInput?.addEventListener("input", () => {
+    if (keyColorHex) keyColorHex.textContent = keyColorInput.value;
+    _updateGenPreview();
+  });
+
+  // 色数・パターン変化でもプレビュー更新
+  document.getElementById("gen-color-count")?.addEventListener("input", _updateGenPreview);
+  document.getElementById("gen-pattern")?.addEventListener("change", _updateGenPreview);
+
+  _syncSliderVal("gen-brightness-step", "gen-brightness-step-val");
+  _syncSliderVal("gen-brightness-fine", "gen-brightness-fine-val");
+  _syncSliderVal("gen-saturation",      "gen-saturation-val");
+
+  // 初回プレビュー
+  _updateGenPreview();
+
+  // パレット追加（保存のみ）
+  document.getElementById("gen-palette-add-btn")?.addEventListener("click", () => {
+    const colors = _updateGenPreview();
+    if (!colors.length) return;
+    const entry = _buildUserPaletteEntry(colors);
+    addUserPalette(entry);
+    _refreshColorModal(_colorModalLabels);
+  });
+
+  // このグラフに適用（追加 + 選択 + 適用 + 保存）
+  document.getElementById("gen-palette-apply-one-btn")?.addEventListener("click", () => {
+    const result = _lastCrosstabData?.results[_colorModalIdx];
+    if (!result) return;
+    const colors = _updateGenPreview();
+    if (!colors.length) return;
+    const entry = _buildUserPaletteEntry(colors);
+    addUserPalette(entry);
+    _colorModalPaletteKey = entry.paletteId;
+    _colorModalOverrides  = {};
+    setStep3Setting(result.question_code, "selectedPalette",        entry.paletteId);
+    setStep3Setting(result.question_code, "overriddenSeriesColors",  {});
+    setStep3Setting(result.question_code, "customColors",            null);
+    _reRenderCard(_colorModalIdx);
+    _refreshColorModal(_colorModalLabels);
+  });
+
+  // 全グラフに適用
+  document.getElementById("gen-palette-apply-all-btn")?.addEventListener("click", () => {
+    const allResults = _lastCrosstabData?.results ?? [];
+    const colors = _updateGenPreview();
+    if (!colors.length) return;
+    const entry = _buildUserPaletteEntry(colors);
+    addUserPalette(entry);
+    _colorModalPaletteKey = entry.paletteId;
+    _colorModalOverrides  = {};
+    const updates = {};
+    allResults.forEach(r => {
+      updates[r.question_code] = { selectedPalette: entry.paletteId, overriddenSeriesColors: {}, customColors: null };
+    });
+    setStep3SettingsBulk(updates);
+    allResults.forEach((_, i) => _reRenderCard(i));
+    _refreshColorModal(_colorModalLabels);
+  });
+
+  // STEP1 設定に登録
+  document.getElementById("gen-palette-step1-btn")?.addEventListener("click", () => {
+    const colors = _updateGenPreview();
+    if (!colors.length) return;
+    const entry = _buildUserPaletteEntry(colors);
+    addUserPalette(entry);
+    if (AppState.step3ActiveAxisCode) {
+      setStep1FixedPalette(AppState.step3ActiveAxisCode, entry.paletteId);
+    }
+    _refreshColorModal(_colorModalLabels);
+  });
+}
+
+function _buildUserPaletteEntry(colors) {
+  const keyColor = document.getElementById("gen-key-color")?.value ?? "#0071BC";
+  const count    = parseInt(document.getElementById("gen-color-count")?.value ?? "6", 10);
+  const stepPct  = parseInt(document.getElementById("gen-brightness-step")?.value ?? "10", 10);
+  const pattern  = document.getElementById("gen-pattern")?.value ?? "center";
+  const finePct  = parseInt(document.getElementById("gen-brightness-fine")?.value ?? "0", 10);
+  const satPct   = parseInt(document.getElementById("gen-saturation")?.value ?? "0", 10);
+  const rawName  = (document.getElementById("gen-palette-name")?.value ?? "").trim();
+  const name     = rawName || `${keyColor}_${count}色`;
+  const paletteId = `custom_${Date.now()}`;
+  return {
+    paletteId,
+    paletteName:         name,
+    keyColor,
+    generatedColors:     colors,
+    colorCount:          count,
+    brightnessStepPct:   stepPct,
+    brightnessPattern:   pattern,
+    brightnessFinePct:   finePct,
+    satAdjPct:           satPct,
+    createdAt:           new Date().toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------------------

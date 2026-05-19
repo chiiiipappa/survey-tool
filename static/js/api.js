@@ -42,7 +42,7 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surv) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}) {
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}) {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -51,6 +51,7 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       project_name: projectName,
       step3_question_settings: step3QuestionSettings,
       step1_axis_colors: step1AxisColors,
+      user_palettes: userPalettes,
     }),
   });
   if (!res.ok) {

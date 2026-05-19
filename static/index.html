@@ -475,26 +475,81 @@
       <button id="step3-color-close" class="btn btn-secondary btn-sm">✕ 閉じる</button>
     </div>
     <div style="margin-bottom:12px">
-      <div style="font-size:.8rem; color:var(--color-text-muted); margin-bottom:6px">パレットプリセット</div>
+      <div style="font-size:.8rem; color:var(--color-text-muted); margin-bottom:6px">1. パレット選択 → 適用</div>
       <div id="step3-palette-btns" style="display:flex; gap:6px; flex-wrap:wrap"></div>
-      <div style="font-size:.8rem; color:var(--color-text-muted); margin-top:8px; margin-bottom:4px">色チップをドラッグ → 系列へドロップ</div>
+      <div style="margin-top:6px">
+        <button id="step3-palette-apply-btn" class="btn btn-primary btn-sm">このパレットを適用</button>
+      </div>
+    </div>
+    <!-- 新規パレット生成 -->
+    <details id="step3-gen-palette-section" style="margin-bottom:12px">
+      <summary style="cursor:pointer; font-size:.8rem; color:var(--color-text-muted); padding:4px 0; user-select:none">＋ 新規パレット生成（キーカラーから自動生成）</summary>
+      <div class="step3-gen-palette-body">
+        <div class="step3-gen-row">
+          <label>パレット名</label>
+          <input id="gen-palette-name" type="text" class="step3-gen-input" placeholder="省略時: #RRGGBB_N色">
+        </div>
+        <div class="step3-gen-row">
+          <label>キーカラー</label>
+          <input id="gen-key-color" type="color" value="#0071BC">
+          <span id="gen-key-color-hex" class="step3-gen-hex">#0071BC</span>
+        </div>
+        <div class="step3-gen-row">
+          <label>色数</label>
+          <input id="gen-color-count" type="number" class="step3-gen-input step3-gen-num" min="2" max="20" value="6">
+        </div>
+        <div class="step3-gen-row">
+          <label>明るさの差</label>
+          <input id="gen-brightness-step" type="range" min="2" max="25" value="10" style="flex:1">
+          <span id="gen-brightness-step-val" style="width:36px;text-align:right;font-size:.78rem">10%</span>
+        </div>
+        <div class="step3-gen-row">
+          <label>パターン</label>
+          <select id="gen-pattern" class="step3-gen-select">
+            <option value="center" selected>中央をキーカラーに</option>
+            <option value="light_to_dark">薄い → 濃い（キーが先頭）</option>
+            <option value="dark_to_light">濃い → 薄い（キーが末尾）</option>
+          </select>
+        </div>
+        <div class="step3-gen-row">
+          <label>明るさ微調整</label>
+          <input id="gen-brightness-fine" type="range" min="-20" max="20" value="0" style="flex:1">
+          <span id="gen-brightness-fine-val" style="width:36px;text-align:right;font-size:.78rem">0%</span>
+        </div>
+        <div class="step3-gen-row">
+          <label>鮮やかさ調整</label>
+          <input id="gen-saturation" type="range" min="-50" max="50" value="0" style="flex:1">
+          <span id="gen-saturation-val" style="width:36px;text-align:right;font-size:.78rem">0%</span>
+        </div>
+        <div id="gen-palette-preview" class="step3-gen-preview"></div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px">
+          <button id="gen-palette-add-btn"       class="btn btn-primary btn-sm">パレットを追加</button>
+          <button id="gen-palette-apply-one-btn" class="btn btn-secondary btn-sm">このグラフに適用</button>
+          <button id="gen-palette-apply-all-btn" class="btn btn-secondary btn-sm">全グラフに適用</button>
+          <button id="gen-palette-step1-btn"     class="btn btn-secondary btn-sm">STEP1設定に登録</button>
+        </div>
+      </div>
+    </details>
+    <div style="margin-bottom:12px">
+      <div style="font-size:.8rem; color:var(--color-text-muted); margin-bottom:4px">2. 個別上書き（色チップをドラッグ → 系列へドロップ）</div>
       <div id="step3-drag-palette" class="step3-drag-palette-area"></div>
     </div>
     <div style="margin-bottom:12px">
-      <div style="font-size:.8rem; color:var(--color-text-muted); margin-bottom:4px">系列ごとの色・順序（☰ でドラッグ並び替え）</div>
+      <div style="font-size:.8rem; color:var(--color-text-muted); margin-bottom:4px">系列ごとの色</div>
       <div id="step3-color-rows"></div>
     </div>
     <div style="margin-bottom:4px; font-size:.8rem; color:var(--color-text-muted)">プレビュー</div>
     <div id="step3-color-preview" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; min-height:26px; padding:6px; background:var(--color-surface-2,#f8f8f8); border-radius:4px"></div>
     <div style="display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid var(--color-border); padding-top:12px">
-      <button id="step3-color-reset"     class="btn btn-secondary btn-sm">STEP1設定に戻す</button>
-      <button id="step3-color-apply-one" class="btn btn-primary btn-sm">現在のグラフだけ変更</button>
-      <button id="step3-color-apply-all" class="btn btn-primary btn-sm">同じ集計軸すべてに適用</button>
-      <button id="step3-color-cancel"    class="btn btn-secondary btn-sm">キャンセル</button>
+      <button id="step3-color-clear-overrides" class="btn btn-secondary btn-sm">個別変更を破棄</button>
+      <button id="step3-color-reset"           class="btn btn-secondary btn-sm">STEP1設定に戻す</button>
+      <button id="step3-color-apply-one"       class="btn btn-primary btn-sm">現在のグラフだけ変更</button>
+      <button id="step3-color-apply-all"       class="btn btn-primary btn-sm">同じ集計軸すべてに適用</button>
+      <button id="step3-color-cancel"          class="btn btn-secondary btn-sm">キャンセル</button>
     </div>
   </div>
 </div>
 
-<script type="module" src="/static/js/app.js?v=8"></script>
+<script type="module" src="/static/js/app.js?v=11"></script>
 </body>
 </html>

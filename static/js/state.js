@@ -61,6 +61,8 @@ export const AppState = {
   isDirty: false,
   // STEP1 カラー設定
   step1AxisColors: {},  // { axis_question_code: { fixedPalette: string | null } }
+  // ユーザー生成パレット
+  userPalettes: {},  // { [paletteId]: UserPaletteEntry }
   // STEP3
   step3CrosstabConfigs: [],
   step3ActiveAxisCode: "",
@@ -141,6 +143,34 @@ export function clearStep1FixedPalette(axisCode) {
   _emit();
 }
 
+export function addUserPalette(entry) {
+  AppState.userPalettes = {
+    ...AppState.userPalettes,
+    [entry.paletteId]: entry,
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function deleteUserPalette(paletteId) {
+  const next = { ...AppState.userPalettes };
+  delete next[paletteId];
+  AppState.userPalettes = next;
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function clearQuestionColorState(questionCode) {
+  const { selectedPalette, overriddenSeriesColors, customColors, ...rest } =
+    AppState.step3QuestionSettings[questionCode] ?? {};
+  AppState.step3QuestionSettings = {
+    ...AppState.step3QuestionSettings,
+    [questionCode]: rest,
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
 export function setUploadResult(resp) {
   AppState.sessionToken    = resp.session_token;
   AppState.loadedAt        = new Date();
@@ -212,6 +242,7 @@ export function setLoadedProject(resp) {
   }
   AppState.step3QuestionSettings = { ..._migrated, ..._newSettings };
   AppState.step1AxisColors = resp.layout?.step1_axis_colors ?? {};
+  AppState.userPalettes    = resp.layout?.user_palettes ?? {};
   _emit();
 }
 
@@ -321,5 +352,6 @@ export function resetState() {
   AppState.step3ActiveAxisCode = "";
   AppState.step3LastGeneratedAxisCode = "";
   AppState.step3QuestionSettings = {};
+  AppState.userPalettes = {};
   _emit();
 }
