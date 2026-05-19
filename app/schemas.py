@@ -263,6 +263,7 @@ class Step2FaSettingsRequest(BaseModel):
 class Step1AxisSettingsRequest(BaseModel):
     session_token: str
     step1_axis_codes: List[str] = Field(default_factory=list)
+    step3_active_axis_code: str = ""
 
 
 class LayoutSaveData(BaseModel):
@@ -272,6 +273,7 @@ class LayoutSaveData(BaseModel):
     step1_axis_codes: List[str] = Field(default_factory=list)
     choice_column_mode: str = "none"
     all_type_codes: List[str] = Field(default_factory=list)
+    step3_active_axis_code: str = ""
 
 
 class Step2SaveData(BaseModel):
@@ -323,4 +325,37 @@ class FullProjectLoadResponse(BaseModel):
     has_step2: bool = False
     step2: Optional[Step2SaveData] = None
     step3_crosstab_configs: List[CrosstabConfig] = Field(default_factory=list)
+    step3_active_axis_code: str = ""
     load_warnings: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP3: クロス集計
+# ---------------------------------------------------------------------------
+
+class Step3CrosstabRequest(BaseModel):
+    session_token: str
+    axis_question_code: str
+    target_question_codes: List[str] = Field(default_factory=list)
+
+
+class CrosstabRow(BaseModel):
+    label: str
+    counts: List[int]
+    percents: List[float]
+
+
+class CrosstabResult(BaseModel):
+    question_code: str
+    question_text: str
+    type_code: str
+    rows: List[CrosstabRow]
+
+
+class Step3CrosstabResponse(BaseModel):
+    axis_question_code: str
+    axis_question_text: str
+    axis_categories: List[str]
+    axis_totals: List[int]
+    results: List[CrosstabResult]
+    warnings: List[str] = Field(default_factory=list)

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>調査票解析ツール</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -408,30 +409,37 @@
   <!-- ========== PANEL: STEP3 クロス集計 ========== -->
   <section id="panel-step3" class="panel">
 
+    <!-- 集計軸候補（STEP1で選択済み） -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">クロス集計・グラフ作成</span>
-        <span class="badge" style="margin-left:auto; background:var(--color-surface-2,#F8F8F8); color:var(--color-text-muted); border:1px solid var(--color-border)">準備中</span>
+        <span class="card-title">集計軸候補（STEP1 で選択済み）</span>
+      </div>
+      <div class="card-body" style="padding:12px 16px">
+        <div id="step3-axis-candidates" class="badge-list">
+          <span class="text-sm" style="color:var(--color-text-muted)">STEP1 で集計軸を選択してください。</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 現在の表示軸 + 実行ボタン -->
+    <div class="card" style="margin-top:12px">
+      <div class="card-header">
+        <span class="card-title">現在の表示軸を選択</span>
       </div>
       <div class="card-body">
-        <div style="text-align:center; padding:40px 0; color:var(--color-text-muted)">
-          <div style="font-size:2.5rem; margin-bottom:16px">📊</div>
-          <div style="font-weight:600; font-size:1.1rem; margin-bottom:8px; color:var(--color-text)">
-            クロス集計・グラフ作成
-          </div>
-          <div class="text-sm" style="margin-bottom:4px">
-            今後ここでクロス集計・グラフ作成を行う予定です。
-          </div>
-          <div class="text-sm">
-            STEP1 で選択した集計軸を使い、全設問とのクロス集計・グラフ生成を行います。
-          </div>
+        <div id="step3-axis-selector" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px">
+          <span class="text-sm" style="color:var(--color-text-muted)">集計軸候補がありません。</span>
         </div>
-
-        <div style="border-top:1px solid var(--color-border); padding-top:16px; margin-top:8px">
-          <div style="font-weight:600; margin-bottom:8px">STEP1 で選択された集計軸</div>
-          <div id="step3-axis-display" class="badge-list"></div>
-        </div>
+        <button id="step3-run-btn" class="btn btn-primary" disabled>
+          📊 クロス集計を生成
+        </button>
+        <span id="step3-run-note" class="text-sm" style="margin-left:12px; color:var(--color-text-muted)"></span>
       </div>
+    </div>
+
+    <!-- 結果エリア -->
+    <div id="step3-results" style="margin-top:12px; display:none">
+      <!-- JS で動的生成 -->
     </div>
 
   </section>

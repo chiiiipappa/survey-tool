@@ -13,6 +13,7 @@ from starlette.responses import Response
 
 from app.routers import questions, upload
 from app.routers import step2 as step2_router
+from app.routers import step3 as step3_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +55,7 @@ app = FastAPI(
 app.include_router(upload.router, prefix="/api", tags=["upload"])
 app.include_router(questions.router, prefix="/api", tags=["questions"])
 app.include_router(step2_router.router, prefix="/api", tags=["step2"])
+app.include_router(step3_router.router, prefix="/api", tags=["step3"])
 
 app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 

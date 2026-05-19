@@ -73,12 +73,16 @@ export async function loadProject(file) {
   return res.json();
 }
 
-/** STEP1 の集計軸コードをサーバーキャッシュに保存する。 */
-export async function saveStep1AxisSettings(token, axisCodes) {
+/** STEP1 の集計軸コードと STEP3 の選択軸をサーバーキャッシュに保存する。 */
+export async function saveStep1AxisSettings(token, axisCodes, step3ActiveAxisCode = "") {
   const res = await fetch(`${BASE}/step1/axis/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_token: token, step1_axis_codes: axisCodes }),
+    body: JSON.stringify({
+      session_token: token,
+      step1_axis_codes: axisCodes,
+      step3_active_axis_code: step3ActiveAxisCode,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -219,6 +223,28 @@ export async function exportFaData(token, {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// STEP3: クロス集計
+// ---------------------------------------------------------------------------
+
+/** クロス集計を実行する。 */
+export async function generateCrosstab(sessionToken, axisCode, targetCodes = []) {
+  const res = await fetch(`${BASE}/step3/crosstab`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: sessionToken,
+      axis_question_code: axisCode,
+      target_question_codes: targetCodes,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "クロス集計に失敗しました。");
+  }
+  return res.json();
 }
 
 /** ラベル変換済みデータを CSV としてダウンロードする。 */

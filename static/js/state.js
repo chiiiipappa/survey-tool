@@ -59,8 +59,10 @@ export const AppState = {
   projectName: "",
   projectSavedAt: null,   // Date | null
   isDirty: false,
-  // STEP3 プレースホルダー
+  // STEP3
   step3CrosstabConfigs: [],
+  step3ActiveAxisCode: "",
+  step3LastGeneratedAxisCode: "",
 };
 
 function _emit() {
@@ -90,6 +92,12 @@ export function setStep2FaCodes(codes) {
 
 export function setStep3Configs(configs) {
   AppState.step3CrosstabConfigs = Array.isArray(configs) ? [...configs] : [];
+  _emit();
+}
+
+export function setStep3ActiveAxis(code) {
+  AppState.step3ActiveAxisCode = code ?? "";
+  AppState.isDirty = true;
   _emit();
 }
 
@@ -149,6 +157,8 @@ export function setLoadedProject(resp) {
   }
 
   AppState.step3CrosstabConfigs = resp.step3_crosstab_configs ?? [];
+  AppState.step3ActiveAxisCode = resp.step3_active_axis_code ?? "";
+  AppState.step3LastGeneratedAxisCode = "";
   _emit();
 }
 
@@ -255,5 +265,7 @@ export function resetState() {
   AppState.projectSavedAt  = null;
   AppState.isDirty         = false;
   AppState.step3CrosstabConfigs = [];
+  AppState.step3ActiveAxisCode = "";
+  AppState.step3LastGeneratedAxisCode = "";
   _emit();
 }

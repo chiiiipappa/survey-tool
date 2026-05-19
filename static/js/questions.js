@@ -340,7 +340,7 @@ export function initProjectHeader() {
       return;
     }
     try {
-      await saveStep1AxisSettings(AppState.sessionToken, AppState.step1AxisCodes);
+      await saveStep1AxisSettings(AppState.sessionToken, AppState.step1AxisCodes, AppState.step3ActiveAxisCode);
       await saveProject(AppState.sessionToken, AppState.projectName);
       markClean(new Date());
       showToast("プロジェクトを保存しました。");

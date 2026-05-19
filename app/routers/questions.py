@@ -101,10 +101,11 @@ async def get_questions_json(
 
 @router.post("/step1/axis/settings", summary="STEP1 集計軸設定を保存")
 async def save_step1_axis_settings(body: Step1AxisSettingsRequest) -> dict:
-    """選択中の集計軸コードをセッションメタキャッシュに保存する。"""
+    """選択中の集計軸コードとSTEP3の選択軸をセッションメタキャッシュに保存する。"""
     questions = _require_session(body.session_token)
     meta = survey_cache.get_meta(body.session_token)
     meta["step1_axis_codes"] = body.step1_axis_codes
+    meta["step3_active_axis_code"] = body.step3_active_axis_code
     survey_cache.set(body.session_token, questions, meta)
     return {"status": "ok"}
 
@@ -137,6 +138,7 @@ async def save_project(
         step1_axis_codes=meta.get("step1_axis_codes", []),
         choice_column_mode=meta.get("choice_column_mode", "none"),
         all_type_codes=meta.get("all_type_codes", []),
+        step3_active_axis_code=meta.get("step3_active_axis_code", ""),
     )
 
     buf = io.BytesIO()
@@ -256,6 +258,7 @@ def _load_surv(raw: bytes, load_warnings: list[str]) -> FullProjectLoadResponse:
         layout=layout,
         has_step2=step2 is not None,
         step2=step2,
+        step3_active_axis_code=layout.step3_active_axis_code,
         load_warnings=load_warnings,
     )
 
