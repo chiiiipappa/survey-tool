@@ -105,10 +105,33 @@ export function initQuestionsPanel() {
     reloadLastCsvFile();
   });
 
-  document.getElementById("replace-csv-input")?.addEventListener("change", (e) => {
+  const replaceInput = document.getElementById("replace-csv-input");
+
+  replaceInput?.addEventListener("change", (e) => {
     if (e.target.files[0]) handleCsvFile(e.target.files[0]);
     e.target.value = "";
   });
+
+  document.getElementById("btn-csv-replace")?.addEventListener("click", () => {
+    replaceInput?.click();
+  });
+
+  const replaceDropZone = document.getElementById("csv-replace-drop-zone");
+  if (replaceDropZone && replaceInput) {
+    replaceDropZone.addEventListener("click", () => replaceInput.click());
+    replaceDropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      replaceDropZone.classList.add("dragover");
+    });
+    replaceDropZone.addEventListener("dragleave", () =>
+      replaceDropZone.classList.remove("dragover"));
+    replaceDropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      replaceDropZone.classList.remove("dragover");
+      const file = e.dataTransfer.files[0];
+      if (file) handleCsvFile(file);
+    });
+  }
 
   document.getElementById("btn-csv-unload")?.addEventListener("click", () => {
     resetState();

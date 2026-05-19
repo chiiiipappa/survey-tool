@@ -8,7 +8,8 @@ function deriveStep1AxisDefaults(questions) {
   return (questions ?? [])
     .filter(q =>
       _AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase()) &&
-      !q.has_children
+      !q.has_children &&
+      /[*＊]ファンラベル/.test(q.question_text ?? "")
     )
     .map(q => q.question_code);
 }

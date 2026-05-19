@@ -208,7 +208,7 @@ def convert_labels(
         def _convert_binary(v: str) -> str:
             key = _normalize_key(str(v))
             if v == "" or key == "0":
-                return "選択なし"
+                return "-"
             if key == "1":
                 return "選択あり"
             return v

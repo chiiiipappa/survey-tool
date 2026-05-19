@@ -9,11 +9,15 @@ import { showSpinner, hideSpinner, showToast, showError, activatePanel } from ".
 // 初期化
 // ---------------------------------------------------------------------------
 
+let _lastFile = null;
+
 export function initStep2Panel() {
   _initDropZone();
+  _initLoadedCard();
   _initTabSwitcher();
   _initExportButton();
   _initFaCard();
+  document.getElementById("step2-col-search")?.addEventListener("input", _applyColSearch);
 
   document.addEventListener("survey:statechange", () => {
     _updateAttrMultiSelect();
@@ -51,6 +55,7 @@ function _initDropZone() {
 }
 
 async function _handleFile(file) {
+  _lastFile = file;
   if (!AppState.sessionToken) {
     showError("STEP1 でレイアウト CSV を先にアップロードしてください。");
     return;
@@ -103,6 +108,54 @@ function _renderStep2LoadedInfo(resp) {
     <span>${resp.response_col_count.toLocaleString("ja-JP")} 列</span>
     <span>${(resp.file_size / 1024).toFixed(1)} KB</span>
   `;
+}
+
+function _resetStep2() {
+  _lastFile = null;
+  document.getElementById("step2-upload-card").style.display = "";
+  document.getElementById("step2-loaded-card").style.display = "none";
+  document.getElementById("step2-advanced-card").style.display = "none";
+  document.getElementById("step2-selected-axis-card").style.display = "none";
+  document.getElementById("step2-fa-form-card").style.display = "none";
+  document.getElementById("step2-fa-card").style.display = "none";
+  document.getElementById("step2-to-step3-card").style.display = "none";
+}
+
+function _initLoadedCard() {
+  const step2ReplaceInput    = document.getElementById("step2-replace-input");
+  const step2ReplaceDropZone = document.getElementById("step2-replace-drop-zone");
+
+  if (step2ReplaceDropZone && step2ReplaceInput) {
+    step2ReplaceDropZone.addEventListener("click", () => step2ReplaceInput.click());
+    step2ReplaceDropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      step2ReplaceDropZone.classList.add("dragover");
+    });
+    step2ReplaceDropZone.addEventListener("dragleave", () =>
+      step2ReplaceDropZone.classList.remove("dragover"));
+    step2ReplaceDropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      step2ReplaceDropZone.classList.remove("dragover");
+      const file = e.dataTransfer.files[0];
+      if (file) _handleFile(file);
+    });
+  }
+
+  step2ReplaceInput?.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) _handleFile(file);
+    e.target.value = "";
+  });
+
+  document.getElementById("btn-step2-reload")?.addEventListener("click", () => {
+    if (_lastFile) _handleFile(_lastFile);
+  });
+
+  document.getElementById("btn-step2-replace")?.addEventListener("click", () => {
+    step2ReplaceInput?.click();
+  });
+
+  document.getElementById("btn-step2-unload")?.addEventListener("click", _resetStep2);
 }
 
 // ---------------------------------------------------------------------------
@@ -302,40 +355,70 @@ function _missingTable(items) {
 // ラベル変換プレビューカード
 // ---------------------------------------------------------------------------
 
+let _rawRows = [];
+let _labeledRows = [];
+
 export function renderPreviewCard(resp) {
-  _renderPreviewTable("step2-preview-raw", resp.preview_rows ?? []);
-  _renderLabeledPreviewTable("step2-preview-labeled", resp.labeled_preview_rows ?? []);
+  _rawRows = resp.preview_rows ?? [];
+  _labeledRows = resp.labeled_preview_rows ?? [];
+  _applyColSearch();
   _renderUnmatchedTable("step2-preview-unmatched", resp.unmatched_values ?? []);
 }
 
-function _renderLabeledPreviewTable(containerId, rows) {
+function _applyColSearch() {
+  const q = (document.getElementById("step2-col-search")?.value ?? "").trim().toLowerCase();
+  _renderPreviewTable("step2-preview-raw", _rawRows, q);
+  _renderLabeledPreviewTable("step2-preview-labeled", _labeledRows, q);
+}
+
+function _renderLabeledPreviewTable(containerId, rows, colFilter = "") {
   const el = document.getElementById(containerId);
   if (!rows.length) {
     el.innerHTML = '<p class="text-sm text-muted" style="padding:16px">データがありません。</p>';
     return;
   }
   const questionMap = new Map(AppState.questions.map(q => [q.question_code, q.question_text]));
-  const cols = Object.keys(rows[0]);
-  const thead = `<tr>${cols.map(c => {
+  const allCols = Object.keys(rows[0]);
+  const cols = colFilter
+    ? allCols.filter((c, i) => {
+        if (i === 0) return true;
+        const text = (questionMap.get(c) ?? c).toLowerCase();
+        return c.toLowerCase().includes(colFilter) || text.includes(colFilter);
+      })
+    : allCols;
+  const numStyle = `style="width:40px;text-align:right;color:var(--color-text-muted)"`;
+  const thead = `<tr><th ${numStyle}>#</th>${cols.map(c => {
     const title = questionMap.get(c) ?? c;
     return `<th title="${_esc(c)}">${_esc(title)}</th>`;
   }).join("")}</tr>`;
-  const tbody = rows.map(row =>
-    `<tr>${cols.map(c => `<td>${_esc(String(row[c] ?? ""))}</td>`).join("")}</tr>`
+  const tbody = rows.map((row, i) =>
+    `<tr><td ${numStyle}>${i + 1}</td>${cols.map(c => `<td>${_esc(String(row[c] ?? ""))}</td>`).join("")}</tr>`
   ).join("");
   el.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
 }
 
-function _renderPreviewTable(containerId, rows) {
+function _renderPreviewTable(containerId, rows, colFilter = "") {
   const el = document.getElementById(containerId);
   if (!rows.length) {
     el.innerHTML = '<p class="text-sm text-muted" style="padding:16px">データがありません。</p>';
     return;
   }
-  const cols = Object.keys(rows[0]);
-  const thead = `<tr>${cols.map(c => `<th>${_esc(c)}</th>`).join("")}</tr>`;
-  const tbody = rows.map(row =>
-    `<tr>${cols.map(c => `<td>${_esc(String(row[c] ?? ""))}</td>`).join("")}</tr>`
+  const questionMap = new Map(AppState.questions.map(q => [q.question_code, q.question_text]));
+  const allCols = Object.keys(rows[0]);
+  const cols = colFilter
+    ? allCols.filter((c, i) => {
+        if (i === 0) return true;
+        const text = (questionMap.get(c) ?? "").toLowerCase();
+        return c.toLowerCase().includes(colFilter) || text.includes(colFilter);
+      })
+    : allCols;
+  const numStyle = `style="width:40px;text-align:right;color:var(--color-text-muted)"`;
+  const thead = `<tr><th ${numStyle}>#</th>${cols.map(c => {
+    const tip = questionMap.get(c);
+    return tip ? `<th title="${_esc(tip)}">${_esc(c)}</th>` : `<th>${_esc(c)}</th>`;
+  }).join("")}</tr>`;
+  const tbody = rows.map((row, i) =>
+    `<tr><td ${numStyle}>${i + 1}</td>${cols.map(c => `<td>${_esc(String(row[c] ?? ""))}</td>`).join("")}</tr>`
   ).join("");
   el.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
 }
@@ -419,6 +502,12 @@ function _initFaCard() {
 
   document.getElementById("fa-reselect-axis-btn")?.addEventListener("click", () => {
     activatePanel("questions");
+  });
+
+  document.getElementById("fa-attr-deselect-all")?.addEventListener("click", () => {
+    document.querySelectorAll('#fa-attr-cb-list input[type="checkbox"]').forEach(cb => {
+      cb.checked = false;
+    });
   });
 
   document.getElementById("fa-sort-select").addEventListener("change", (e) => {
@@ -508,16 +597,20 @@ function _renderAttrCheckboxes(options) {
   const container = document.getElementById("fa-attr-cb-list");
   if (!container) return;
   const prevSelected = new Set(_getAttrSelected());
+  const ctrlEl = document.getElementById("fa-attr-cb-ctrl");
   if (!options.length) {
     container.innerHTML = '<span class="text-sm text-muted">追加属性列の候補がありません</span>';
+    if (ctrlEl) ctrlEl.style.display = "none";
     return;
   }
+  const defaultAll = prevSelected.size === 0;
   container.innerHTML = options.map(o => `
     <label class="fa-attr-cb-item">
-      <input type="checkbox" value="${_esc(o.value)}" ${prevSelected.has(o.value) ? "checked" : ""}>
+      <input type="checkbox" value="${_esc(o.value)}" ${(defaultAll || prevSelected.has(o.value)) ? "checked" : ""}>
       <span>${_esc(o.label)}</span>
     </label>
   `).join("");
+  if (ctrlEl) ctrlEl.style.display = "";
 }
 
 function _getAttrSelected() {

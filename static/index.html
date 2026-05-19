@@ -89,10 +89,34 @@
   <!-- ========== PANEL 2: 設問構造確認 ========== -->
   <section id="panel-questions" class="panel">
 
-    <!-- 設問一覧テーブルカード -->
+    <!-- 設問一覧テーブルカード（検索・フィルタ統合） -->
     <div class="card">
       <div class="card-header">
         <span class="card-title">設問一覧</span>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
+          <div id="axis-summary" style="display:none; align-items:center; gap:4px; font-size:.8rem;">
+            <span style="color:var(--color-text-muted); white-space:nowrap;">集計軸:</span>
+            <div id="axis-summary-badges" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
+          </div>
+        </div>
+      </div>
+      <!-- 検索・フィルタ -->
+      <div class="card-body" style="border-bottom:1px solid var(--color-border); padding-top:12px; padding-bottom:12px">
+        <div class="filter-bar">
+          <input
+            type="text"
+            id="q-search"
+            placeholder="設問コード・質問文で検索…"
+          >
+          <select id="q-type-filter">
+            <option value="">すべての種別</option>
+          </select>
+          <label>
+            <input type="checkbox" id="q-include-children" checked>
+            子設問を含む
+          </label>
+          <button id="q-apply-btn" class="btn btn-primary btn-sm">適用</button>
+        </div>
       </div>
       <!-- 上部コントロールバー -->
       <div id="q-axis-ctrl-top" class="axis-ctrl-bar" style="display:none">
@@ -125,36 +149,6 @@
       <div id="questions-count-bar" class="count-bar">–</div>
     </div>
 
-    <!-- 検索・フィルタカード -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">検索・フィルタ</span>
-        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
-          <div id="axis-summary" style="display:none; align-items:center; gap:4px; font-size:.8rem;">
-            <span style="color:var(--color-text-muted); white-space:nowrap;">集計軸:</span>
-            <div id="axis-summary-badges" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
-          </div>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="filter-bar">
-          <input
-            type="text"
-            id="q-search"
-            placeholder="設問コード・質問文で検索…"
-          >
-          <select id="q-type-filter">
-            <option value="">すべての種別</option>
-          </select>
-          <label>
-            <input type="checkbox" id="q-include-children" checked>
-            子設問を含む
-          </label>
-          <button id="q-apply-btn" class="btn btn-primary btn-sm">適用</button>
-        </div>
-      </div>
-    </div>
-
     <!-- STEP2 ナビカード -->
     <div class="card">
       <div class="card-body" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
@@ -170,19 +164,23 @@
 
     <!-- 読込済みCSVカード（最下部・読込後に表示） -->
     <div class="card" id="csv-loaded-card" style="display:none">
-      <div class="card-body" style="padding:0">
-        <div class="drop-zone drop-zone-loaded">
-          <div class="drop-icon">📄</div>
-          <div id="csv-loaded-info" class="file-info-bar"
-               style="justify-content:center; margin-bottom:12px; margin-top:0"></div>
-          <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
-            <button id="btn-csv-reload" class="btn btn-secondary btn-sm">↺ 再読込</button>
-            <label class="btn btn-secondary btn-sm" style="cursor:pointer">
-              差し替え
-              <input type="file" id="replace-csv-input" accept=".csv" class="hidden">
-            </label>
-            <button id="btn-csv-unload" class="btn btn-secondary btn-sm">× 読込解除</button>
-          </div>
+      <div class="card-header">
+        <span class="card-title">レイアウトCSVを読み込む</span>
+      </div>
+      <div class="card-body">
+        <div id="csv-replace-drop-zone" class="drop-zone">
+          <div class="drop-icon">📂</div>
+          <p>
+            <strong>クリックしてファイルを選択</strong>、またはここにドラッグ&ドロップして差し替え<br>
+            <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8 自動判定）</span>
+          </p>
+        </div>
+        <input type="file" id="replace-csv-input" accept=".csv" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
+        <div id="csv-loaded-info" class="file-info-bar" style="margin-top:16px;"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
+          <button id="btn-csv-reload" class="btn btn-secondary btn-sm">↺ 再読込</button>
+          <button id="btn-csv-replace" class="btn btn-secondary btn-sm">差し替え</button>
+          <button id="btn-csv-unload" class="btn btn-secondary btn-sm">× 読込解除</button>
         </div>
       </div>
     </div>
@@ -234,6 +232,8 @@
         <div style="border-top:1px solid var(--color-border)">
           <div class="card-header" style="border-bottom:0; padding-bottom:0">
             <span class="card-title" style="font-size:.875rem">ラベル変換プレビュー</span>
+            <input id="step2-col-search" type="text" placeholder="設問コード・文言で検索…"
+                   style="width:180px; margin-left:12px; font-size:.8rem; padding:3px 8px; border:1px solid var(--color-border); border-radius:4px">
             <div class="tab-bar" id="step2-preview-tabs" style="margin-left:auto;">
               <button class="tab-btn active" data-tab="raw">元データ</button>
               <button class="tab-btn" data-tab="labeled">変換後</button>
@@ -283,7 +283,10 @@
 
           <!-- FA設問 -->
           <div class="step2-ctrl-row">
-            <div class="step2-ctrl-label">FA設問</div>
+            <div class="step2-ctrl-label">
+              FA設問
+              <span class="badge badge-unknown" style="font-size:.7rem;padding:1px 5px;margin-left:4px;vertical-align:middle">必須</span>
+            </div>
             <div class="step2-ctrl-widget">
               <div id="fa-question-ms" class="fa-multiselect"></div>
             </div>
@@ -296,6 +299,9 @@
               <span class="text-sm text-muted" style="font-weight:400">STEP1で選択した集計軸から選択</span>
             </div>
             <div class="step2-ctrl-widget">
+              <div id="fa-attr-cb-ctrl" style="display:none; margin-bottom:6px">
+                <button id="fa-attr-deselect-all" class="btn btn-secondary btn-sm">□ 全てのチェック解除</button>
+              </div>
               <div id="fa-attr-cb-list" class="fa-attr-cb-list"></div>
             </div>
           </div>
@@ -359,16 +365,23 @@
 
     <!-- 読込済み回答データカード（初回読込後に最下部に表示） -->
     <div class="card" id="step2-loaded-card" style="display:none">
-      <div class="card-body" style="padding:0">
-        <div class="drop-zone drop-zone-loaded">
-          <div class="drop-icon">📊</div>
-          <div id="step2-loaded-info" class="file-info-bar"
-               style="justify-content:center; margin-bottom:12px; margin-top:0"></div>
-          <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
-            <button class="btn btn-secondary btn-sm" disabled>↺ 差し替え</button>
-            <button class="btn btn-secondary btn-sm" disabled>＋ 追加読み込み</button>
-            <button class="btn btn-secondary btn-sm" disabled>× 読み込み解除</button>
-          </div>
+      <div class="card-header">
+        <span class="card-title">回答データ CSV / Excel を読み込む</span>
+      </div>
+      <div class="card-body">
+        <div id="step2-replace-drop-zone" class="drop-zone">
+          <div class="drop-icon">📂</div>
+          <p>
+            <strong>クリックしてファイルを選択</strong>、またはここにドラッグ&ドロップして差し替え<br>
+            <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8）・xlsx</span>
+          </p>
+        </div>
+        <input type="file" id="step2-replace-input" accept=".csv,.xlsx" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
+        <div id="step2-loaded-info" class="file-info-bar" style="margin-top:16px;"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
+          <button id="btn-step2-reload"  class="btn btn-secondary btn-sm">↺ 再読込</button>
+          <button id="btn-step2-replace" class="btn btn-secondary btn-sm">差し替え</button>
+          <button id="btn-step2-unload"  class="btn btn-secondary btn-sm">× 読込解除</button>
         </div>
       </div>
     </div>
