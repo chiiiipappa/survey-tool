@@ -60,22 +60,55 @@ def test_all_type_codes_returned(client, uploaded_token):
     assert "NU" in codes
 
 
-def test_project_save_returns_json(client, uploaded_token):
-    resp = client.post(f"/api/project/save?session_token={uploaded_token}")
+def test_project_save_returns_zip(client, uploaded_token):
+    resp = client.post(f"/api/project/save?session_token={uploaded_token}&project_name=test")
     assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.headers["content-type"].startswith("application/zip")
+    # ZIP ファイルとして読める
+    import io, zipfile
+    with zipfile.ZipFile(io.BytesIO(resp.content), "r") as zf:
+        names = zf.namelist()
+        assert "manifest.json" in names
+        assert "layout.json" in names
+        import json
+        manifest = json.loads(zf.read("manifest.json"))
+        assert manifest["version"] == "2.0"
+        layout = json.loads(zf.read("layout.json"))
+        assert len(layout["questions"]) == 6
+
+
+def test_project_load_surv(client, uploaded_token):
+    # .surv で保存
+    save_resp = client.post(
+        f"/api/project/save?session_token={uploaded_token}&project_name=test"
+    )
+    surv_bytes = save_resp.content
+
+    # .surv で復元
+    load_resp = client.post(
+        "/api/project/load",
+        files={"file": ("project.surv", surv_bytes, "application/zip")},
+    )
+    assert load_resp.status_code == 200
+    data = load_resp.json()
+    assert data["session_token"]
+    assert len(data["layout"]["questions"]) == 6
+    assert data["has_step2"] is False
+
+
+def test_project_load_legacy_json(client, uploaded_token):
+    """旧 JSON 形式でも読み込めることを確認する（後方互換）。"""
     import json
-    data = json.loads(resp.content)
-    assert data["version"] == "1.0"
-    assert len(data["questions"]) == 6
+    from app.schemas import ProjectData, LayoutFileInfo
+    legacy = ProjectData(
+        version="1.0",
+        saved_at="2026-01-01T00:00:00",
+        layout_file=LayoutFileInfo(name="old.csv", encoding="utf-8", size=0),
+        questions=[],
+        parse_warnings=[],
+    )
+    json_bytes = legacy.model_dump_json(indent=2).encode("utf-8")
 
-
-def test_project_load(client, uploaded_token):
-    # まず保存
-    save_resp = client.post(f"/api/project/save?session_token={uploaded_token}")
-    json_bytes = save_resp.content
-
-    # 復元
     load_resp = client.post(
         "/api/project/load",
         files={"file": ("project.json", json_bytes, "application/json")},
@@ -83,7 +116,8 @@ def test_project_load(client, uploaded_token):
     assert load_resp.status_code == 200
     data = load_resp.json()
     assert data["session_token"]
-    assert len(data["questions"]) == 6
+    assert data["has_step2"] is False
+    assert any("旧バージョン" in w for w in data["load_warnings"])
 
 
 def test_health(client):

@@ -34,6 +34,7 @@ from app.schemas import (
     Step2AxisSaveRequest,
     Step2FaMetaResponse,
     Step2FaResponse,
+    Step2FaSettingsRequest,
     Step2StateResponse,
     Step2UploadResponse,
     UnmatchedValueItem,
@@ -363,3 +364,15 @@ async def step2_fa_export(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{dl_filename}"'},
     )
+
+
+@router.post("/step2/fa/settings", summary="FA設定を保存")
+async def step2_save_fa_settings(body: Step2FaSettingsRequest) -> dict:
+    """選択中の FA 設問コードと付与属性列をセッションキャッシュに保存する。"""
+    data = survey_cache.get_step2(body.session_token)
+    if not data:
+        raise HTTPException(404, "STEP2 データが見つかりません。先に回答データをアップロードしてください。")
+    data["selected_fa_codes"] = body.selected_fa_codes
+    data["selected_attr_columns"] = body.selected_attr_columns
+    survey_cache.set_step2(body.session_token, data)
+    return {"status": "ok"}

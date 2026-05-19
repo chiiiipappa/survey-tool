@@ -1,8 +1,8 @@
 /**
  * STEP2: 回答データ読込・ラベル変換 パネル UI ロジック。
  */
-import { AppState, setStep2UploadResult, setStep2FaMeta } from "./state.js";
-import { uploadResponseFile, exportLabeledData, getFaData, exportFaData, getFaMeta } from "./api.js";
+import { AppState, setStep2UploadResult, setStep2FaMeta, setStep2FaCodes } from "./state.js";
+import { uploadResponseFile, exportLabeledData, getFaData, exportFaData, getFaMeta, saveFaSettings } from "./api.js";
 import { showSpinner, hideSpinner, showToast, showError, activatePanel } from "./app.js";
 
 // ---------------------------------------------------------------------------
@@ -488,14 +488,22 @@ const _faState = {
   _msQuestion:        null,
   hasData:            false,
   validatedStep1Axes: [],
+  _pendingFaCodes:    [],
+  _pendingAttrCols:   [],
 };
 
 function _initFaCard() {
   document.getElementById("fa-apply-btn").addEventListener("click", () => {
-    const faCodes = _faState._msQuestion?.getSelected() ?? [];
+    const faCodes  = _faState._msQuestion?.getSelected() ?? [];
+    const attrCols = _getAttrSelected();
     if (!faCodes.length) {
       showToast("FA設問を1つ以上選択してください。", true);
       return;
+    }
+    // FA設定をキャッシュに永続化（fire-and-forget）
+    if (AppState.sessionToken) {
+      saveFaSettings(AppState.sessionToken, faCodes, attrCols).catch(console.warn);
+      setStep2FaCodes(faCodes);
     }
     _loadFaData(_collectFaParams());
   });
@@ -550,6 +558,19 @@ async function _loadFaMeta() {
     _faState.faColumns = meta.fa_columns ?? [];
     setStep2FaMeta(meta);
     _initMultiSelects(meta);
+
+    // プロジェクト読込時: 保留中の FA 選択を復元する
+    if (_faState._pendingFaCodes?.length) {
+      _faState._msQuestion?.setSelected(_faState._pendingFaCodes);
+      _faState._pendingFaCodes = [];
+    }
+    if (_faState._pendingAttrCols?.length) {
+      const pending = new Set(_faState._pendingAttrCols);
+      document.querySelectorAll('#fa-attr-cb-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = pending.has(cb.value);
+      });
+      _faState._pendingAttrCols = [];
+    }
   } catch (err) {
     showError(err.message);
   } finally {
@@ -887,4 +908,43 @@ function _esc(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// ---------------------------------------------------------------------------
+// プロジェクト読込: STEP2 状態復元
+// ---------------------------------------------------------------------------
+
+/**
+ * AppState に格納済みの STEP2 データを使って UI を再描画する。
+ * プロジェクト読込後にヘッダーから呼び出される。
+ */
+export function restoreStep2FromState() {
+  const s = AppState;
+  if (!s.step2Filename) return;
+
+  // AppState から疑似 resp オブジェクトを構築（preview 行は空欄のまま）
+  const resp = {
+    filename:              s.step2Filename,
+    encoding_detected:     s.step2Encoding,
+    file_size:             s.step2FileSize,
+    response_row_count:    s.step2RowCount,
+    response_col_count:    s.step2ColCount,
+    preview_rows:          [],
+    labeled_preview_rows:  [],
+    matched_columns:       s.step2MatchedColumns,
+    missing_columns:       s.step2MissingColumns,
+    extra_columns:         s.step2ExtraColumns,
+    codebook:              s.step2Codebook,
+    axis_candidates:       s.step2AxisCandidates,
+    unmatched_values:      s.step2UnmatchedValues,
+    multi_select_columns:  s.step2MultiSelectColumns,
+    bracket_columns:       [],
+    missing_column_details: [],
+  };
+
+  _renderAll(resp);
+
+  // FA 選択を _loadFaMeta 完了後に復元するよう pending にセット
+  _faState._pendingFaCodes  = s.step2SelectedFaCodes?.length  ? [...s.step2SelectedFaCodes]  : [];
+  _faState._pendingAttrCols = s.step2SelectedAttrColumns?.length ? [...s.step2SelectedAttrColumns] : [];
 }

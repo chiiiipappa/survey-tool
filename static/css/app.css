@@ -55,6 +55,49 @@ a:hover { text-decoration: underline; }
 .app-header .version { font-size: .75rem; opacity: .75; }
 .app-header .header-save-btn { margin-left: auto; }
 
+/* ヘッダー: プロジェクト管理エリア */
+.header-project-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.header-project-label { font-size: .72rem; opacity: .75; white-space: nowrap; flex-shrink: 0; }
+.header-project-name {
+  font-size: .85rem;
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+}
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .8rem;
+  opacity: .75;
+  padding: 2px 4px;
+  color: inherit;
+  flex-shrink: 0;
+}
+.btn-icon:hover { opacity: 1; }
+.header-save-status { font-size: .72rem; white-space: nowrap; flex-shrink: 0; }
+.header-save-unsaved { color: #FFD0CC; }
+.header-save-saved   { color: #A8F0D8; }
+.header-last-saved   { font-size: .68rem; opacity: .70; white-space: nowrap; flex-shrink: 0; }
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .step-nav {
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);

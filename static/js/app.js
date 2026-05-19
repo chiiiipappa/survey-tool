@@ -3,7 +3,7 @@
  */
 import { AppState, setActivePanel } from "./state.js";
 import { initUploadPanel } from "./upload.js";
-import { initQuestionsPanel, refreshQuestions } from "./questions.js";
+import { initQuestionsPanel, refreshQuestions, initProjectHeader } from "./questions.js";
 import { initStep2Panel } from "./step2.js";
 import { initStep3Panel } from "./step3.js";
 
@@ -63,6 +63,17 @@ document.addEventListener("DOMContentLoaded", () => {
   initQuestionsPanel();
   initStep2Panel();
   initStep3Panel();
+  initProjectHeader();
+
+  // プロジェクト読込後のパネル遷移と STEP2 UI 復元
+  document.addEventListener("survey:projectloaded", async (e) => {
+    const resp = e.detail;
+    activatePanel(resp.has_step2 ? "step2" : "questions");
+    if (resp.has_step2) {
+      const { restoreStep2FromState } = await import("./step2.js");
+      restoreStep2FromState();
+    }
+  });
 
   // ステップナビボタン
   document.getElementById("btn-step-step1")?.addEventListener("click", () => {

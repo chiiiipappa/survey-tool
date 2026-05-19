@@ -12,7 +12,24 @@
 <header class="app-header">
   <h1>📋 調査票解析ツール</h1>
   <span class="version">v3.0</span>
-  <button id="btn-save-project" class="btn btn-secondary btn-sm header-save-btn">💾 プロジェクト保存</button>
+
+  <div class="header-project-area">
+    <span class="header-project-label">プロジェクト:</span>
+    <span id="header-project-name" class="header-project-name">未設定</span>
+    <button id="btn-rename-project" class="btn-icon" title="プロジェクト名を変更">✏️</button>
+    <span id="header-save-status" class="header-save-status header-save-unsaved" style="display:none">● 未保存</span>
+    <span id="header-last-saved" class="header-last-saved" style="display:none"></span>
+  </div>
+
+  <div class="header-actions">
+    <button id="btn-new-project" class="btn btn-secondary btn-sm">新規</button>
+    <label id="lbl-load-project" class="btn btn-secondary btn-sm" style="cursor:pointer">
+      読込
+      <input type="file" id="project-load-input" accept=".surv,.json"
+             style="position:absolute;width:0;height:0;opacity:0;overflow:hidden;">
+    </label>
+    <button id="btn-save-project" class="btn btn-primary btn-sm">💾 保存</button>
+  </div>
 </header>
 
 <!-- ===== ステップナビ ===== -->
@@ -56,7 +73,7 @@
           <span class="text-sm text-muted">または</span>
           <label class="btn btn-secondary btn-sm" style="cursor:pointer">
             プロジェクトを復元
-            <input type="file" id="project-input" accept=".json" class="hidden">
+            <input type="file" id="project-input" accept=".surv,.json" class="hidden">
           </label>
         </div>
       </div>

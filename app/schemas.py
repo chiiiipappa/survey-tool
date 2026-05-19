@@ -248,3 +248,79 @@ class Step2FaResponse(BaseModel):
     filtered_row_count: int
     empty_row_count: int = 0
     rows: List[FaRow]
+
+
+# ---------------------------------------------------------------------------
+# プロジェクト保存・復元 v2（ZIP/.surv 形式）
+# ---------------------------------------------------------------------------
+
+class Step2FaSettingsRequest(BaseModel):
+    session_token: str
+    selected_fa_codes: List[str] = Field(default_factory=list)
+    selected_attr_columns: List[str] = Field(default_factory=list)
+
+
+class Step1AxisSettingsRequest(BaseModel):
+    session_token: str
+    step1_axis_codes: List[str] = Field(default_factory=list)
+
+
+class LayoutSaveData(BaseModel):
+    layout_file: LayoutFileInfo
+    questions: List[QuestionItem] = Field(default_factory=list)
+    parse_warnings: List[str] = Field(default_factory=list)
+    step1_axis_codes: List[str] = Field(default_factory=list)
+    choice_column_mode: str = "none"
+    all_type_codes: List[str] = Field(default_factory=list)
+
+
+class Step2SaveData(BaseModel):
+    filename: str = ""
+    encoding: str = ""
+    file_size: int = 0
+    raw_data: dict = Field(default_factory=dict)
+    labeled_data: dict = Field(default_factory=dict)
+    codebook: dict = Field(default_factory=dict)
+    matched_columns: List[str] = Field(default_factory=list)
+    missing_columns: List[str] = Field(default_factory=list)
+    extra_columns: List[str] = Field(default_factory=list)
+    bracket_columns: List[dict] = Field(default_factory=list)
+    missing_column_details: List[dict] = Field(default_factory=list)
+    unmatched_values: List[dict] = Field(default_factory=list)
+    response_row_count: int = 0
+    response_col_count: int = 0
+    axis_candidates: List[dict] = Field(default_factory=list)
+    selected_axis_columns: List[str] = Field(default_factory=list)
+    selected_axis_labels: dict = Field(default_factory=dict)
+    axis_display_order: List[str] = Field(default_factory=list)
+    axis_filter_settings: dict = Field(default_factory=dict)
+    multi_select_columns: List[str] = Field(default_factory=list)
+    selected_fa_codes: List[str] = Field(default_factory=list)
+    selected_attr_columns: List[str] = Field(default_factory=list)
+
+
+class CrosstabConfig(BaseModel):
+    """STEP3 クロス集計設定（将来用）"""
+    config_id: str = ""
+    axis_question_code: str = ""
+    target_question_codes: List[str] = Field(default_factory=list)
+    crosstab_type: str = ""
+    graph_type: str = ""
+    display_order: List[str] = Field(default_factory=list)
+    show: bool = True
+    show_count: bool = True
+    show_percent: bool = True
+    sort_settings: dict = Field(default_factory=dict)
+    color_settings: dict = Field(default_factory=dict)
+    comment: str = ""
+
+
+class FullProjectLoadResponse(BaseModel):
+    session_token: str
+    project_name: str = ""
+    saved_at: str = ""
+    layout: LayoutSaveData
+    has_step2: bool = False
+    step2: Optional[Step2SaveData] = None
+    step3_crosstab_configs: List[CrosstabConfig] = Field(default_factory=list)
+    load_warnings: List[str] = Field(default_factory=list)

@@ -41,9 +41,9 @@ export async function getQuestionsJson(token) {
   return res.json();
 }
 
-/** プロジェクト JSON をダウンロードする。 */
-export async function saveProject(token) {
-  const params = new URLSearchParams({ session_token: token });
+/** プロジェクト (.surv) をダウンロードする。 */
+export async function saveProject(token, projectName = "") {
+  const params = new URLSearchParams({ session_token: token, project_name: projectName });
   const res = await fetch(`${BASE}/project/save?${params}`, { method: "POST" });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -52,7 +52,7 @@ export async function saveProject(token) {
   const blob = await res.blob();
   const cd = res.headers.get("Content-Disposition") ?? "";
   const match = cd.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : "survey_project.json";
+  const filename = match ? match[1] : "survey_project.surv";
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -61,7 +61,7 @@ export async function saveProject(token) {
   URL.revokeObjectURL(url);
 }
 
-/** プロジェクト JSON ファイルを復元する。 */
+/** プロジェクトファイル (.surv または .json) を復元する。 */
 export async function loadProject(file) {
   const form = new FormData();
   form.append("file", file);
@@ -69,6 +69,38 @@ export async function loadProject(file) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "プロジェクトの読み込みに失敗しました。");
+  }
+  return res.json();
+}
+
+/** STEP1 の集計軸コードをサーバーキャッシュに保存する。 */
+export async function saveStep1AxisSettings(token, axisCodes) {
+  const res = await fetch(`${BASE}/step1/axis/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: token, step1_axis_codes: axisCodes }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "集計軸設定の保存に失敗しました。");
+  }
+  return res.json();
+}
+
+/** FA 設問選択と属性列選択をサーバーキャッシュに保存する。 */
+export async function saveFaSettings(token, faCodes, attrCols) {
+  const res = await fetch(`${BASE}/step2/fa/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: token,
+      selected_fa_codes: faCodes,
+      selected_attr_columns: attrCols,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "FA 設定の保存に失敗しました。");
   }
   return res.json();
 }

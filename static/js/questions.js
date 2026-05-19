@@ -1,9 +1,9 @@
 /**
  * 設問一覧パネルの制御（テーブル描画・検索・フィルタ・軸/属性フラグ編集）。
  */
-import { getQuestions, saveProject } from "./api.js";
-import { AppState, setFilterState, setStep1AxisCodes, resetState } from "./state.js";
-import { showToast, showError, activatePanel } from "./app.js";
+import { getQuestions, saveProject, loadProject, saveStep1AxisSettings } from "./api.js";
+import { AppState, setFilterState, setStep1AxisCodes, resetState, setLoadedProject, setProjectName, markClean, markDirty } from "./state.js";
+import { showToast, showError, showSpinner, hideSpinner, activatePanel } from "./app.js";
 import { handleCsvFile, reloadLastCsvFile } from "./upload.js";
 
 const AXIS_TYPE_CODES = new Set(["SA", "S", "NU", "N", "ML"]);
@@ -139,17 +139,6 @@ export function initQuestionsPanel() {
   document.getElementById("btn-csv-unload")?.addEventListener("click", () => {
     resetState();
     activatePanel("upload");
-  });
-
-  // プロジェクト保存ボタン
-  document.getElementById("btn-save-project")?.addEventListener("click", async () => {
-    if (!AppState.sessionToken) return;
-    try {
-      await saveProject(AppState.sessionToken);
-      showToast("プロジェクトを保存しました。");
-    } catch (err) {
-      showError(err.message);
-    }
   });
 
   // 状態変化を監視して種別フィルターを更新
@@ -310,4 +299,116 @@ function escHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ---------------------------------------------------------------------------
+// ヘッダー: プロジェクト管理
+// ---------------------------------------------------------------------------
+
+export function initProjectHeader() {
+  // プロジェクト名変更ボタン
+  document.getElementById("btn-rename-project")?.addEventListener("click", () => {
+    const newName = prompt("プロジェクト名を入力してください:", AppState.projectName || "");
+    if (newName !== null) {
+      setProjectName(newName.trim());
+      markDirty();
+    }
+  });
+
+  // 新規プロジェクトボタン
+  document.getElementById("btn-new-project")?.addEventListener("click", () => {
+    if (AppState.isDirty) {
+      if (!confirm("未保存の変更があります。新規プロジェクトを作成しますか？")) return;
+    }
+    resetState();
+    activatePanel("upload");
+  });
+
+  // ヘッダーの読込ファイル入力
+  const headerLoadInput = document.getElementById("project-load-input");
+  headerLoadInput?.addEventListener("change", async () => {
+    const file = headerLoadInput.files[0];
+    if (!file) return;
+    headerLoadInput.value = "";
+    await _doLoadProject(file);
+  });
+
+  // 保存ボタン
+  document.getElementById("btn-save-project")?.addEventListener("click", async () => {
+    if (!AppState.sessionToken) {
+      showToast("先にレイアウトファイルを読み込んでください。");
+      return;
+    }
+    try {
+      await saveStep1AxisSettings(AppState.sessionToken, AppState.step1AxisCodes);
+      await saveProject(AppState.sessionToken, AppState.projectName);
+      markClean(new Date());
+      showToast("プロジェクトを保存しました。");
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  // 状態変化でヘッダーを更新
+  document.addEventListener("survey:statechange", _updateHeader);
+  _updateHeader();
+}
+
+async function _doLoadProject(file) {
+  showSpinner("プロジェクトを復元中…");
+  try {
+    const resp = await loadProject(file);
+    setLoadedProject(resp);
+
+    const warnings = [...(resp.load_warnings ?? [])];
+    if (warnings.length) {
+      showToast(warnings[0]);
+    }
+
+    if (resp.has_step2) {
+      document.dispatchEvent(new CustomEvent("survey:projectloaded", { detail: resp }));
+    } else {
+      activatePanel("questions");
+    }
+    showToast("プロジェクトを復元しました。");
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    hideSpinner();
+  }
+}
+
+function _updateHeader() {
+  const nameEl   = document.getElementById("header-project-name");
+  const statusEl = document.getElementById("header-save-status");
+  const lastEl   = document.getElementById("header-last-saved");
+
+  if (nameEl) {
+    nameEl.textContent = AppState.projectName || "未設定";
+  }
+
+  const hasSession = !!AppState.sessionToken;
+
+  if (statusEl) {
+    statusEl.style.display = hasSession ? "" : "none";
+    if (AppState.isDirty) {
+      statusEl.textContent = "● 未保存";
+      statusEl.className   = "header-save-status header-save-unsaved";
+    } else {
+      statusEl.textContent = "✓ 保存済み";
+      statusEl.className   = "header-save-status header-save-saved";
+    }
+  }
+
+  if (lastEl) {
+    if (AppState.projectSavedAt) {
+      const dt = AppState.projectSavedAt.toLocaleString("ja-JP", {
+        month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
+      });
+      lastEl.textContent   = `最終保存: ${dt}`;
+      lastEl.style.display = "";
+    } else {
+      lastEl.style.display = "none";
+    }
+  }
 }

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,13 +15,17 @@ from fastapi.responses import StreamingResponse
 
 from app.data_store import survey_cache
 from app.schemas import (
+    FullProjectLoadResponse,
     GraphConfig,
     LayoutFileInfo,
+    LayoutSaveData,
     ProjectData,
     ProjectLoadResponse,
     QuestionsJsonResponse,
     QuestionsResponse,
     QuestionItem,
+    Step1AxisSettingsRequest,
+    Step2SaveData,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,18 +99,34 @@ async def get_questions_json(
     return QuestionsJsonResponse(session_token=session_token, questions=questions)
 
 
-@router.post("/project/save", summary="プロジェクトJSON ダウンロード")
-async def save_project(session_token: str = Query(...)) -> StreamingResponse:
-    """
-    現在のセッション状態をプロジェクト JSON としてダウンロードする。
-    STEP1 ではレイアウト情報と設問構造のみ保存する。
-    """
+@router.post("/step1/axis/settings", summary="STEP1 集計軸設定を保存")
+async def save_step1_axis_settings(body: Step1AxisSettingsRequest) -> dict:
+    """選択中の集計軸コードをセッションメタキャッシュに保存する。"""
+    questions = _require_session(body.session_token)
+    meta = survey_cache.get_meta(body.session_token)
+    meta["step1_axis_codes"] = body.step1_axis_codes
+    survey_cache.set(body.session_token, questions, meta)
+    return {"status": "ok"}
+
+
+@router.post("/project/save", summary="プロジェクト ZIP (.surv) ダウンロード")
+async def save_project(
+    session_token: str = Query(...),
+    project_name: str = Query(""),
+) -> StreamingResponse:
+    """現在のセッション状態を .surv（ZIP）形式でダウンロードする。STEP1・STEP2 を含む。"""
     questions = _require_session(session_token)
     meta = survey_cache.get_meta(session_token)
+    step2 = survey_cache.get_step2(session_token)
 
-    project = ProjectData(
-        version="1.0",
-        saved_at=datetime.now(timezone.utc).isoformat(),
+    manifest = {
+        "version": "2.0",
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "project_name": project_name,
+        "has_step2": bool(step2),
+    }
+
+    layout_data = LayoutSaveData(
         layout_file=LayoutFileInfo(
             name=meta.get("filename", ""),
             encoding=meta.get("encoding", ""),
@@ -112,28 +134,134 @@ async def save_project(session_token: str = Query(...)) -> StreamingResponse:
         ),
         questions=questions,
         parse_warnings=meta.get("parse_warnings", []),
-        selected_question_codes=[],
-        graphs=[],
+        step1_axis_codes=meta.get("step1_axis_codes", []),
+        choice_column_mode=meta.get("choice_column_mode", "none"),
+        all_type_codes=meta.get("all_type_codes", []),
     )
 
-    json_bytes = project.model_dump_json(indent=2).encode("utf-8")
-    filename = f"survey_project_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        zf.writestr("layout.json", layout_data.model_dump_json(indent=2))
+        if step2:
+            step2_dict = {}
+            for k in Step2SaveData.model_fields:
+                val = step2.get(k)
+                if val is None:
+                    field_info = Step2SaveData.model_fields[k]
+                    val = field_info.default if field_info.default is not None else (
+                        [] if "List" in str(field_info.annotation) else
+                        {} if "dict" in str(field_info.annotation) else
+                        0 if field_info.annotation in (int,) else ""
+                    )
+                step2_dict[k] = val
+            step2_data = Step2SaveData(**step2_dict)
+            zf.writestr("step2.json", step2_data.model_dump_json(indent=2))
+    buf.seek(0)
+
+    safe_name = "".join(
+        c if (c.isascii() and (c.isalnum() or c in "-_")) else "_"
+        for c in (project_name or "project")
+    ) or "project"
+    filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.surv"
+
+    from urllib.parse import quote
+    encoded_name = quote(
+        f"{(project_name or 'project')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.surv",
+        safe=""
+    )
 
     return StreamingResponse(
-        iter([json_bytes]),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        iter([buf.read()]),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"; '
+                f"filename*=UTF-8''{encoded_name}"
+            )
+        },
     )
 
 
-@router.post("/project/load", response_model=ProjectLoadResponse, summary="プロジェクトJSON 復元")
-async def load_project(file: UploadFile = File(...)) -> ProjectLoadResponse:
+@router.post("/project/load", response_model=FullProjectLoadResponse, summary="プロジェクト (.surv / .json) 復元")
+async def load_project(file: UploadFile = File(...)) -> FullProjectLoadResponse:
     """
-    保存済みプロジェクト JSON を読み込み、セッションに復元する。
+    保存済みプロジェクトを読み込む。
+    ZIP (.surv) と旧 JSON (.json) の両形式に対応する。
     """
     raw = await file.read()
     load_warnings: list[str] = []
 
+    if raw[:2] == b"PK":
+        return _load_surv(raw, load_warnings)
+    else:
+        return _load_legacy_json(raw, load_warnings)
+
+
+def _load_surv(raw: bytes, load_warnings: list[str]) -> FullProjectLoadResponse:
+    """ZIP (.surv) 形式のプロジェクトを復元する。"""
+    try:
+        buf = io.BytesIO(raw)
+        with zipfile.ZipFile(buf, "r") as zf:
+            names = zf.namelist()
+            manifest = json.loads(zf.read("manifest.json"))
+            layout_raw = json.loads(zf.read("layout.json"))
+            step2_raw = json.loads(zf.read("step2.json")) if "step2.json" in names else None
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"プロジェクトファイルの読み込みに失敗しました: {e}")
+
+    version = manifest.get("version", "")
+    if version != "2.0":
+        load_warnings.append(f"バージョン {version} は現在 (2.0) と異なります。")
+
+    try:
+        layout = LayoutSaveData.model_validate(layout_raw)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"レイアウトデータの検証に失敗しました: {e}")
+
+    step2: Optional[Step2SaveData] = None
+    if step2_raw:
+        try:
+            step2 = Step2SaveData.model_validate(step2_raw)
+        except Exception as e:
+            load_warnings.append(f"STEP2 データの復元に失敗しました（スキップ）: {e}")
+
+    token = str(uuid.uuid4())
+    meta = {
+        "filename": layout.layout_file.name,
+        "encoding": layout.layout_file.encoding,
+        "file_size": layout.layout_file.size,
+        "raw": b"",
+        "column_names": [],
+        "choice_column_mode": layout.choice_column_mode,
+        "parse_warnings": layout.parse_warnings,
+        "unknown_types": [],
+        "all_type_codes": layout.all_type_codes,
+        "step1_axis_codes": layout.step1_axis_codes,
+    }
+    survey_cache.set(token, layout.questions, meta)
+
+    if step2:
+        survey_cache.set_step2(token, step2.model_dump())
+
+    logger.info(
+        "プロジェクト復元完了 (.surv): %s token=%s...",
+        layout.layout_file.name, token[:8],
+    )
+
+    return FullProjectLoadResponse(
+        session_token=token,
+        project_name=manifest.get("project_name", ""),
+        saved_at=manifest.get("saved_at", ""),
+        layout=layout,
+        has_step2=step2 is not None,
+        step2=step2,
+        load_warnings=load_warnings,
+    )
+
+
+def _load_legacy_json(raw: bytes, load_warnings: list[str]) -> FullProjectLoadResponse:
+    """旧 JSON 形式（v1.0）のプロジェクトを STEP1 のみ復元する。"""
     try:
         data = json.loads(raw.decode("utf-8"))
     except Exception as e:
@@ -144,9 +272,12 @@ async def load_project(file: UploadFile = File(...)) -> ProjectLoadResponse:
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"プロジェクトデータの検証に失敗しました: {e}")
 
-    # バージョンチェック
+    load_warnings.append("旧バージョン（JSON 形式）のプロジェクトです。STEP1 のみ復元されます。")
+
     if project.version != "1.0":
-        load_warnings.append(f"バージョン {project.version} は現在のバージョン (1.0) と異なります。")
+        load_warnings.append(f"バージョン {project.version} は未知です。")
+
+    all_type_codes = sorted(set(q.type_code for q in project.questions if q.type_code))
 
     token = str(uuid.uuid4())
     meta = {
@@ -158,16 +289,30 @@ async def load_project(file: UploadFile = File(...)) -> ProjectLoadResponse:
         "choice_column_mode": "none",
         "parse_warnings": project.parse_warnings,
         "unknown_types": [],
-        "all_type_codes": sorted(set(q.type_code for q in project.questions if q.type_code)),
+        "all_type_codes": all_type_codes,
+        "step1_axis_codes": [],
     }
     survey_cache.set(token, project.questions, meta)
 
-    logger.info(f"プロジェクト復元完了: {project.layout_file.name} token={token[:8]}...")
-
-    return ProjectLoadResponse(
-        session_token=token,
+    layout = LayoutSaveData(
+        layout_file=project.layout_file,
         questions=project.questions,
         parse_warnings=project.parse_warnings,
-        graphs=project.graphs,
+        step1_axis_codes=[],
+        choice_column_mode="none",
+        all_type_codes=all_type_codes,
+    )
+
+    logger.info(
+        "プロジェクト復元完了 (legacy JSON): %s token=%s...",
+        project.layout_file.name, token[:8],
+    )
+
+    return FullProjectLoadResponse(
+        session_token=token,
+        project_name="",
+        saved_at=project.saved_at,
+        layout=layout,
+        has_step2=False,
         load_warnings=load_warnings,
     )

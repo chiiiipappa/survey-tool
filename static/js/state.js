@@ -53,10 +53,44 @@ export const AppState = {
   step2MultiSelectColumns: [],
   step2AttrCandidates: [],
   step2SelectedAttrColumns: [],
+  // STEP2 FA 永続化
+  step2SelectedFaCodes: [],
+  // プロジェクト管理
+  projectName: "",
+  projectSavedAt: null,   // Date | null
+  isDirty: false,
+  // STEP3 プレースホルダー
+  step3CrosstabConfigs: [],
 };
 
 function _emit() {
   document.dispatchEvent(new CustomEvent("survey:statechange", { detail: { ...AppState } }));
+}
+
+export function markDirty() {
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function markClean(savedAt) {
+  AppState.isDirty = false;
+  AppState.projectSavedAt = savedAt ?? new Date();
+  _emit();
+}
+
+export function setProjectName(name) {
+  AppState.projectName = name ?? "";
+  _emit();
+}
+
+export function setStep2FaCodes(codes) {
+  AppState.step2SelectedFaCodes = Array.isArray(codes) ? [...codes] : [];
+  _emit();
+}
+
+export function setStep3Configs(configs) {
+  AppState.step3CrosstabConfigs = Array.isArray(configs) ? [...configs] : [];
+  _emit();
 }
 
 export function setUploadResult(resp) {
@@ -71,15 +105,50 @@ export function setUploadResult(resp) {
   AppState.allTypeCodes    = resp.all_type_codes ?? [];
   AppState.parseWarnings   = resp.parse_warnings ?? [];
   AppState.step1AxisCodes  = deriveStep1AxisDefaults(AppState.questions);
+  AppState.isDirty         = true;
   _emit();
 }
 
 export function setLoadedProject(resp) {
-  AppState.sessionToken   = resp.session_token;
-  AppState.questions      = resp.questions ?? [];
-  AppState.parseWarnings  = resp.parse_warnings ?? [];
-  AppState.allTypeCodes   = [...new Set((resp.questions ?? []).map(q => q.type_code).filter(Boolean))].sort();
-  AppState.step1AxisCodes = deriveStep1AxisDefaults(AppState.questions);
+  AppState.sessionToken    = resp.session_token;
+  AppState.projectName     = resp.project_name ?? "";
+  AppState.projectSavedAt  = resp.saved_at ? new Date(resp.saved_at) : null;
+  AppState.isDirty         = false;
+
+  const layout = resp.layout;
+  AppState.questions       = layout.questions ?? [];
+  AppState.parseWarnings   = layout.parse_warnings ?? [];
+  AppState.allTypeCodes    = layout.all_type_codes?.length
+    ? layout.all_type_codes
+    : [...new Set((layout.questions ?? []).map(q => q.type_code).filter(Boolean))].sort();
+  AppState.step1AxisCodes  = layout.step1_axis_codes?.length
+    ? layout.step1_axis_codes
+    : deriveStep1AxisDefaults(AppState.questions);
+  AppState.choiceColumnMode = layout.choice_column_mode ?? "";
+
+  if (resp.has_step2 && resp.step2) {
+    const s2 = resp.step2;
+    AppState.step2Filename            = s2.filename ?? null;
+    AppState.step2Encoding            = s2.encoding ?? "";
+    AppState.step2FileSize            = s2.file_size ?? 0;
+    AppState.step2RowCount            = s2.response_row_count ?? 0;
+    AppState.step2ColCount            = s2.response_col_count ?? 0;
+    AppState.step2MatchedColumns      = s2.matched_columns ?? [];
+    AppState.step2MissingColumns      = s2.missing_columns ?? [];
+    AppState.step2ExtraColumns        = s2.extra_columns ?? [];
+    AppState.step2Codebook            = s2.codebook ?? {};
+    AppState.step2AxisCandidates      = s2.axis_candidates ?? [];
+    AppState.step2SelectedAxisColumns = s2.selected_axis_columns ?? [];
+    AppState.step2UnmatchedValues     = s2.unmatched_values ?? [];
+    AppState.step2MultiSelectColumns  = s2.multi_select_columns ?? [];
+    AppState.step2SelectedFaCodes     = s2.selected_fa_codes ?? [];
+    AppState.step2SelectedAttrColumns = s2.selected_attr_columns ?? [];
+    // プレビュー行は保存対象外
+    AppState.step2PreviewRows         = [];
+    AppState.step2LabeledPreviewRows  = [];
+  }
+
+  AppState.step3CrosstabConfigs = resp.step3_crosstab_configs ?? [];
   _emit();
 }
 
@@ -119,11 +188,13 @@ export function setStep2UploadResult(resp) {
     .map(c => c.question_code);
   AppState.step2UnmatchedValues   = resp.unmatched_values ?? [];
   AppState.step2MultiSelectColumns = resp.multi_select_columns ?? [];
+  AppState.isDirty = true;
   _emit();
 }
 
 export function setStep2AxisSelection(cols) {
   AppState.step2SelectedAxisColumns = cols;
+  AppState.isDirty = true;
   _emit();
 }
 
@@ -137,11 +208,13 @@ export function setStep2FaMeta(meta) {
 
 export function setStep2AttrSelection(cols) {
   AppState.step2SelectedAttrColumns = cols;
+  AppState.isDirty = true;
   _emit();
 }
 
 export function setStep1AxisCodes(codes) {
   AppState.step1AxisCodes = Array.isArray(codes) ? [...codes] : [];
+  AppState.isDirty = true;
   _emit();
 }
 
@@ -177,5 +250,10 @@ export function resetState() {
   AppState.step2AttrCandidates = [];
   AppState.step2SelectedAttrColumns = [];
   AppState.step1AxisCodes = [];
+  AppState.step2SelectedFaCodes = [];
+  AppState.projectName     = "";
+  AppState.projectSavedAt  = null;
+  AppState.isDirty         = false;
+  AppState.step3CrosstabConfigs = [];
   _emit();
 }
