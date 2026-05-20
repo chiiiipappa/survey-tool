@@ -273,6 +273,10 @@ class ProjectSaveRequest(BaseModel):
     step3_question_settings: dict = Field(default_factory=dict)  # 新
     step1_axis_colors: dict = Field(default_factory=dict)
     user_palettes: dict = Field(default_factory=dict)
+    step3_secondary_axis_code: str = ""
+    step3_composite_display_mode: str = "split"
+    step3_color_priority: str = "axis1"
+    step3_min_sample_size: int = 0
 
 
 class LayoutSaveData(BaseModel):
@@ -287,6 +291,10 @@ class LayoutSaveData(BaseModel):
     step3_question_settings: dict = Field(default_factory=dict)  # 新
     step1_axis_colors: dict = Field(default_factory=dict)
     user_palettes: dict = Field(default_factory=dict)
+    step3_secondary_axis_code: str = ""
+    step3_composite_display_mode: str = "split"
+    step3_color_priority: str = "axis1"
+    step3_min_sample_size: int = 0
 
 
 class Step2SaveData(BaseModel):
@@ -349,6 +357,7 @@ class FullProjectLoadResponse(BaseModel):
 class Step3CrosstabRequest(BaseModel):
     session_token: str
     axis_question_code: str
+    secondary_axis_question_code: str = ""
     target_question_codes: List[str] = Field(default_factory=list)
 
 
@@ -372,6 +381,10 @@ class Step3CrosstabResponse(BaseModel):
     axis_totals: List[int]
     results: List[CrosstabResult]
     warnings: List[str] = Field(default_factory=list)
+    secondary_axis_question_code: str = ""
+    secondary_axis_question_text: str = ""
+    primary_axis_categories: List[str] = Field(default_factory=list)
+    secondary_axis_categories: List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

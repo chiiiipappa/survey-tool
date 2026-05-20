@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, addUserPalette } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
 import {
@@ -246,6 +246,12 @@ const FIXED_PALETTES = {
       return null;
     },
   },
+  "__none__": {
+    label: "なし（グレー）",
+    preview: ["#676767"],
+    generatedColors: ["#676767"],
+    colorFor: () => "#676767",
+  },
 };
 const FIXED_PALETTE_ORDER = ["fan_label","gender","age_gender","age_a","age_b","scale_67","scale_1011"];
 
@@ -273,6 +279,8 @@ function _getActiveFixedPaletteKey(labels) {
 const _charts = new Map();
 // 最後に取得したクロス集計データ（再描画用キャッシュ）
 let _lastCrosstabData = null;
+// 複合軸カラーモード: null ならデフォルト。配列を設定すると _getColorsForGraph のパレット検索に使用する
+let _compositeColorPaletteLookup = null;
 // カラーモーダル状態
 let _colorModalIdx       = null;
 let _colorModalLabels    = [];    // 現在の系列ラベル配列
@@ -283,6 +291,7 @@ let _dragType  = null;
 let _dragValue = null;
 
 // 色解決：個別上書き > 固定カラー > 選択パレット > STEP1軸パレット > COLORSデフォルト
+// _compositeColorPaletteLookup が設定されている場合、パレット検索にはそのラベルを使用する
 function _getColorsForGraph(questionCode, labels) {
   const s = AppState.step3QuestionSettings[questionCode] ?? {};
 
@@ -292,10 +301,10 @@ function _getColorsForGraph(questionCode, labels) {
   }
 
   const overrides = s.overriddenSeriesColors ?? {};
-  // 新形式: selectedPalette キーがあればそれを使用、なければ軸レベル or 自動検出
+  const lookupLabels = _compositeColorPaletteLookup ?? labels;
   const paletteKey = "selectedPalette" in s
     ? s.selectedPalette
-    : _getActiveFixedPaletteKey(labels);
+    : _getActiveFixedPaletteKey(lookupLabels);
   const palette = paletteKey
     ? (FIXED_PALETTES[paletteKey] ?? _getUserPaletteObj(paletteKey))
     : null;
@@ -308,9 +317,15 @@ function _getColorsForGraph(questionCode, labels) {
       if (palette.generatedColors) {
         return palette.generatedColors[i % palette.generatedColors.length];
       }
-      const pc = palette.colorFor(l);
+      const ll = lookupLabels[i] ?? l;
+      const pc = palette.colorFor(ll);
       if (pc) return pc;
     }
+    // 旧プロジェクト互換: fixedPalette:null / selectedPalette:null は "なし（グレー）" 扱い
+    const axisEntry = AppState.step1AxisColors?.[AppState.step3ActiveAxisCode];
+    const isStep1ExplicitNone = axisEntry && "fixedPalette" in axisEntry && axisEntry.fixedPalette === null;
+    const isStep3ExplicitNone = "selectedPalette" in s && s.selectedPalette === null;
+    if (isStep1ExplicitNone || isStep3ExplicitNone) return "#676767";
     return COLORS[i % COLORS.length];
   });
 }
@@ -349,35 +364,22 @@ export function initStep3Panel() {
 
 function _onStateChange() {
   if (AppState.activePanel !== "step3") return;
-  _renderAxisCandidates();
   _renderAxisSelector();
   _updateRunButton();
+  const nc = document.getElementById("step3-axis-ncount");
+  if (nc) { nc.style.display = "none"; nc.innerHTML = ""; }
 }
 
 // ---------------------------------------------------------------------------
-// セクション1: 集計軸候補バッジ
-// ---------------------------------------------------------------------------
-
-function _renderAxisCandidates() {
-  const el = document.getElementById("step3-axis-candidates");
-  if (!el) return;
-  const codes = AppState.step1AxisCodes;
-  if (!codes.length) {
-    el.innerHTML = '<span class="text-sm" style="color:var(--color-text-muted)">STEP1 で集計軸を選択してください。</span>';
-    return;
-  }
-  el.innerHTML = codes
-    .map(code => `<span class="badge">${_esc(_getAxisLabel(code))}</span>`)
-    .join("");
-}
-
-// ---------------------------------------------------------------------------
-// セクション2: ラジオボタン軸セレクター
+// セクション1: ラジオボタン軸セレクター
 // ---------------------------------------------------------------------------
 
 function _renderAxisSelector() {
-  const el = document.getElementById("step3-axis-selector");
+  const el  = document.getElementById("step3-axis-selector");
+  const el2 = document.getElementById("step3-secondary-axis-wrapper");
+  const compositeCtrl = document.getElementById("step3-composite-controls");
   if (!el) return;
+
   const candidates = _getAxisCandidates();
   if (!candidates.length) {
     const hasStep2 = Boolean(AppState.step2Filename);
@@ -385,9 +387,12 @@ function _renderAxisSelector() {
       ? "STEP1 で選択した集計軸がデータと一致しませんでした。"
       : "STEP2 で回答データをアップロードしてください。";
     el.innerHTML = `<span class="text-sm" style="color:var(--color-text-muted)">${_esc(msg)}</span>`;
+    if (el2) el2.innerHTML = "";
+    if (compositeCtrl) compositeCtrl.style.display = "none";
     return;
   }
 
+  // 集計軸① セレクター
   let currentCode = AppState.step3ActiveAxisCode;
   if (!candidates.includes(currentCode)) {
     currentCode = candidates[0];
@@ -409,9 +414,119 @@ function _renderAxisSelector() {
 
   el.querySelectorAll("input[name='step3-axis']").forEach(radio => {
     radio.addEventListener("change", () => {
-      if (radio.checked) setStep3ActiveAxis(radio.value);
+      if (!radio.checked) return;
+      setStep3ActiveAxis(radio.value);
+      if (AppState.step3SecondaryAxisCode === radio.value) {
+        setStep3SecondaryAxis("");
+      }
     });
   });
+
+  // 集計軸② セレクター
+  if (el2) {
+    const sec = AppState.step3SecondaryAxisCode;
+    const secCandidates = candidates.filter(c => c !== currentCode);
+
+    const radioStyle = (active) =>
+      `display:flex; align-items:center; gap:6px; cursor:pointer; padding:6px 12px; border-radius:6px; border:1px solid var(--color-border); background:${active ? "var(--color-primary-light, #EFF6FF)" : "var(--color-surface-1, #fff)"}`;
+
+    el2.innerHTML = `
+      <div class="step3-axis-section-title">集計軸②（任意）</div>
+      <div style="display:flex; flex-wrap:wrap; gap:10px">
+        <label class="step3-axis-radio-label" style="${radioStyle(!sec)}">
+          <input type="radio" name="step3-axis2" value="" ${!sec ? "checked" : ""} style="accent-color:var(--color-primary)">
+          <span style="font-size:.9rem">なし</span>
+        </label>
+        ${secCandidates.map(code => {
+          const label = _getAxisLabel(code);
+          const checked = code === sec ? "checked" : "";
+          return `<label class="step3-axis-radio-label" style="${radioStyle(code === sec)}">
+            <input type="radio" name="step3-axis2" value="${_esc(code)}" ${checked} style="accent-color:var(--color-primary)">
+            <span style="font-size:.9rem">${_esc(label)}</span>
+          </label>`;
+        }).join("")}
+      </div>`;
+
+    el2.querySelectorAll("input[name='step3-axis2']").forEach(radio => {
+      radio.addEventListener("change", () => {
+        if (radio.checked) setStep3SecondaryAxis(radio.value);
+      });
+    });
+  }
+
+  // 複合コントロール（axis② 選択時のみ表示）
+  if (compositeCtrl) {
+    const isComposite = Boolean(AppState.step3SecondaryAxisCode);
+    compositeCtrl.style.display = isComposite ? "" : "none";
+    if (isComposite) _renderCompositeControls(compositeCtrl);
+  }
+}
+
+function _renderCompositeControls(el) {
+  const mode     = AppState.step3CompositeDisplayMode;
+  const priority = AppState.step3ColorPriority;
+  const minN     = AppState.step3MinSampleSize;
+
+  const modes = [
+    { id: "split",  label: "小分け（推奨）" },
+    { id: "flat",   label: "フラット" },
+    { id: "nested", label: "ネスト" },
+  ];
+  const priorities = [
+    { id: "axis1", label: "軸①ベース" },
+    { id: "axis2", label: "軸②ベース" },
+    { id: "auto",  label: "自動" },
+  ];
+
+  el.innerHTML = `<div class="step3-composite-controls">
+    <span style="font-size:.82rem; font-weight:600; color:var(--color-text-muted)">表示モード：</span>
+    <div class="step3-composite-mode-btns">
+      ${modes.map(m => `<button class="step3-composite-mode-btn${m.id === mode ? " active" : ""}" data-mode="${m.id}">${_esc(m.label)}</button>`).join("")}
+    </div>
+    <span style="font-size:.82rem; font-weight:600; color:var(--color-text-muted); margin-left:8px">色基準：</span>
+    <select id="step3-color-priority-select" style="font-size:.82rem; padding:2px 6px; border:1px solid var(--color-border); border-radius:3px">
+      ${priorities.map(p => `<option value="${p.id}"${p.id === priority ? " selected" : ""}>${_esc(p.label)}</option>`).join("")}
+    </select>
+    <span style="font-size:.82rem; font-weight:600; color:var(--color-text-muted); margin-left:8px">N：</span>
+    <input type="number" id="step3-min-sample-input" value="${minN}" min="0"
+           style="width:60px; font-size:.82rem; padding:2px 6px; border:1px solid var(--color-border); border-radius:3px; text-align:right">
+    <span style="font-size:.82rem; color:var(--color-text-muted)">未満非表示</span>
+  </div>`;
+
+  el.querySelectorAll(".step3-composite-mode-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      setStep3CompositeDisplayMode(btn.dataset.mode);
+      _rerunIfComposite();
+    });
+  });
+
+  const prioritySel = el.querySelector("#step3-color-priority-select");
+  if (prioritySel) {
+    prioritySel.addEventListener("change", () => {
+      setStep3ColorPriority(prioritySel.value);
+      _rerenderCompositeIfNeeded();
+    });
+  }
+
+  const minNInput = el.querySelector("#step3-min-sample-input");
+  if (minNInput) {
+    minNInput.addEventListener("change", () => {
+      setStep3MinSampleSize(parseInt(minNInput.value, 10) || 0);
+      _rerenderCompositeIfNeeded();
+    });
+  }
+}
+
+function _rerunIfComposite() {
+  if (_lastCrosstabData?.secondary_axis_question_code) {
+    _runCrosstab();
+  }
+}
+
+function _rerenderCompositeIfNeeded() {
+  if (!_lastCrosstabData?.secondary_axis_question_code) return;
+  const container = document.getElementById("step3-results");
+  if (container) _renderResults(container, _lastCrosstabData);
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +565,9 @@ async function _runCrosstab() {
   _destroyAllCharts();
 
   try {
-    const data = await generateCrosstab(AppState.sessionToken, axisCode);
+    const data = await generateCrosstab(
+      AppState.sessionToken, axisCode, AppState.step3SecondaryAxisCode
+    );
     AppState.step3LastGeneratedAxisCode = axisCode;
     _lastCrosstabData = data;
     _renderResults(resultsEl, data);
@@ -470,42 +587,34 @@ async function _runCrosstab() {
 // ---------------------------------------------------------------------------
 
 function _renderResults(container, data) {
+  if (data.secondary_axis_question_code) {
+    _renderCompositeResults(container, data);
+  } else {
+    _renderSimpleResults(container, data);
+  }
+}
+
+function _updateAxisNcount(axisLabel, categories, totals, warningsHtml) {
+  const el = document.getElementById("step3-axis-ncount");
+  if (!el) return;
+  const cats = categories.map((cat, i) =>
+    `<span style="white-space:nowrap">${_esc(cat)} <span style="color:var(--color-text-muted)">n=${totals[i] ?? 0}</span></span>`
+  ).join("");
+  el.innerHTML = `
+    <div style="font-size:.85rem; font-weight:600; margin-bottom:4px">${_esc(axisLabel)}</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px 16px; font-size:.85rem">${cats}</div>
+    ${warningsHtml ? `<div style="margin-top:6px; color:var(--color-warning,#c05621); font-size:.8rem">${warningsHtml}</div>` : ""}
+  `;
+  el.style.display = "block";
+}
+
+function _renderSimpleResults(container, data) {
   const { axis_question_text, axis_categories, axis_totals, results, warnings } = data;
 
   let html = "";
 
-  // 軸サマリー
-  html += `<div class="card" style="margin-bottom:8px">
-    <div class="card-body" style="padding:12px 16px">
-      <div style="font-weight:600; margin-bottom:8px">${_esc(axis_question_text)}（表側）</div>
-      <div style="display:flex; flex-wrap:wrap; gap:8px">`;
-  const _axisCatColors = _getColorsForGraph("__axis__", axis_categories);
-  axis_categories.forEach((cat, i) => {
-    const color = _axisCatColors[i];
-    html += `<span style="display:inline-flex; align-items:center; gap:4px; font-size:.85rem">
-      <span style="display:inline-block; width:12px; height:12px; border-radius:2px; background:${color}"></span>
-      ${_esc(cat)} <span style="color:var(--color-text-muted)">n=${axis_totals[i] ?? 0}</span>
-    </span>`;
-  });
-  html += `</div>`;
-  if (warnings.length) {
-    html += `<div style="margin-top:8px; color:var(--color-warning,#c05621); font-size:.8rem">${warnings.map(w => _esc(w)).join("<br>")}</div>`;
-  }
-  html += `</div></div>`;
-
   // 一括変更バー
-  html += `<div class="card" style="margin-bottom:8px">
-    <div class="card-body" style="padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px">
-      <span style="font-size:.85rem; font-weight:600; color:var(--color-text-muted)">一括変更：</span>
-      <button data-bulk="sa-bar-v"       class="btn btn-secondary btn-sm step3-bulk-btn">SA → 縦棒</button>
-      <button data-bulk="sa-stacked100-v" class="btn btn-secondary btn-sm step3-bulk-btn">SA → 100%積み上げ</button>
-      <button data-bulk="ma-bar-h"        class="btn btn-secondary btn-sm step3-bulk-btn">MA → 横棒</button>
-      <button data-bulk="nu-avg_bar-v"    class="btn btn-secondary btn-sm step3-bulk-btn">数値 → 平均棒</button>
-      <span style="width:1px; height:18px; background:var(--color-border,#E2E8F0); margin:0 4px"></span>
-      <button data-bulk-transpose="true"  class="btn btn-secondary btn-sm step3-bulk-transpose-btn">全て行列入替</button>
-      <button data-bulk-transpose="false" class="btn btn-secondary btn-sm step3-bulk-transpose-btn">全て通常に戻す</button>
-    </div>
-  </div>`;
+  html += _buildBulkBar();
 
   // 一括エクスポートバー
   html += `<div class="card" style="margin-bottom:8px">
@@ -652,16 +761,255 @@ function _renderResults(container, data) {
 
   container.innerHTML = html;
 
+  // 軸N数をシンプル表示
+  const warningsHtml = warnings.length
+    ? warnings.map(w => _esc(w)).join("<br>")
+    : "";
+  _updateAxisNcount(axis_question_text, axis_categories, axis_totals, warningsHtml);
+
   // 各設問のグラフを描画（折りたたまれていないもののみ）
+  const isCompositeSimple = Boolean(data.secondary_axis_question_code);
   results.forEach((result, idx) => {
     const settings = _getSettings(result.question_code, result.type_code);
     if (settings.collapsed) return;
     const areaEl = document.getElementById(`step3-chart-area-${idx}`);
     if (!areaEl) return;
+    if (isCompositeSimple) _applyCompositeColorLookup(axis_categories);
     _renderChartInArea(areaEl, result, settings, axis_categories, axis_totals);
+    _compositeColorPaletteLookup = null;
   });
 
   // 一括エクスポートボタンにイベントを登録
+  initStep3ExportBulkButtons();
+}
+
+// ---------------------------------------------------------------------------
+// 複合集計結果描画
+// ---------------------------------------------------------------------------
+
+function _renderCompositeResults(container, data) {
+  const minN = AppState.step3MinSampleSize;
+
+  // N数フィルター
+  const keepIndices = data.axis_totals
+    .map((n, i) => ({ n, i }))
+    .filter(({ n }) => n >= minN)
+    .map(({ i }) => i);
+
+  const filteredCats   = keepIndices.map(i => data.axis_categories[i]);
+  const filteredTotals = keepIndices.map(i => data.axis_totals[i]);
+  const filteredResults = data.results.map(result => ({
+    ...result,
+    rows: result.rows.map(row => ({
+      ...row,
+      counts:   keepIndices.map(i => row.counts[i]),
+      percents: keepIndices.map(i => row.percents[i]),
+    })),
+  }));
+
+  const filteredData = {
+    ...data,
+    axis_categories: filteredCats,
+    axis_totals: filteredTotals,
+    results: filteredResults,
+  };
+
+  const mode = AppState.step3CompositeDisplayMode;
+  if (mode === "split") {
+    _renderSplitResults(container, filteredData);
+  } else {
+    // flat / nested: 複合ラベルそのままでシンプル描画
+    // nested は flat と同じ Chart.js 表示（ラベル順に視覚的グループが生まれる）
+    _renderSimpleResults(container, filteredData);
+  }
+}
+
+const _COMPOSITE_SEP = " × ";
+
+function _renderSplitResults(container, data) {
+  const {
+    axis_question_text, axis_categories, axis_totals,
+    primary_axis_categories, secondary_axis_categories, results, warnings,
+  } = data;
+
+  // 複合カテゴリーを primary ごとにグループ化
+  const groupData = primary_axis_categories
+    .map(primaryCat => {
+      const prefix = primaryCat + _COMPOSITE_SEP;
+      const indices = axis_categories
+        .map((cat, i) => ({ cat, i }))
+        .filter(({ cat }) => cat.startsWith(prefix))
+        .map(({ i }) => i);
+      if (!indices.length) return null;
+      const groupCats   = indices.map(i => axis_categories[i].slice(prefix.length));
+      const groupTotals = indices.map(i => axis_totals[i]);
+      return { primaryCat, indices, groupCats, groupTotals };
+    })
+    .filter(Boolean);
+
+  if (!groupData.length) {
+    container.innerHTML = `<div class="card"><div class="card-body" style="color:var(--color-text-muted); text-align:center; padding:32px">
+      N数フィルターにより全データが除外されました。N未満非表示の閾値を下げてください。
+    </div></div>`;
+    return;
+  }
+
+  // 一括変更バー
+  let html = _buildBulkBar();
+
+  // 一括エクスポートバー
+  html += `<div class="card" style="margin-bottom:8px">
+    <div class="card-body" style="padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px">
+      <span style="font-size:.85rem; font-weight:600; color:var(--color-text-muted)">一括出力：</span>
+      <button id="step3-export-all-excel" class="btn btn-secondary btn-sm">📥 すべてExcel</button>
+      <button id="step3-export-all-csv"   class="btn btn-secondary btn-sm">📥 すべてCSV (ZIP)</button>
+      <button id="step3-export-all-png"   class="btn btn-secondary btn-sm">📥 すべてPNG</button>
+    </div>
+  </div>`;
+
+  // 設問ごとのカード（split グループを内包）
+  results.forEach((result, idx) => {
+    const settings = _getSettings(result.question_code, result.type_code);
+    const recommended     = _recommendedType(result.type_code);
+    const recommendedLabel = _recommendedLabel(result.type_code);
+
+    const chartBtnGroup = `<div class="step3-chart-type-btns">${
+      CHART_TYPES.map(t => {
+        const suit  = _chartSuitability(t.id, result.type_code);
+        const active = t.id === settings.chartType ? " active" : "";
+        const cls   = suit === "not_recommended" ? " not-recommended" : "";
+        const title = suit === "not_recommended" ? `${t.label}（非推奨）` : t.label;
+        return `<button class="step3-chart-btn${active}${cls}" data-q="${_esc(result.question_code)}" data-idx="${idx}" data-chart="${t.id}" title="${_esc(title)}">${_esc(t.label)}</button>`;
+      }).join("")
+    }</div>`;
+
+    const showOrient = ORIENTATION_TYPES.has(settings.chartType);
+    const orientHtml = showOrient ? `
+      <span class="step3-orient-ctrl">
+        向き：
+        <label style="font-size:.82rem; cursor:pointer"><input type="radio" class="step3-orient-radio" name="step3-orient-${idx}" value="v" data-q="${_esc(result.question_code)}" data-idx="${idx}" ${settings.orientation === "v" ? "checked" : ""}> 縦</label>
+        <label style="font-size:.82rem; cursor:pointer"><input type="radio" class="step3-orient-radio" name="step3-orient-${idx}" value="h" data-q="${_esc(result.question_code)}" data-idx="${idx}" ${settings.orientation === "h" ? "checked" : ""}> 横</label>
+      </span>` : "";
+    const transposeHtml = showOrient ? `
+      <span class="step3-transpose-ctrl">
+        表示方向：
+        <label style="font-size:.82rem; cursor:pointer"><input type="radio" class="step3-transpose-radio" name="step3-transpose-${idx}" value="false" data-q="${_esc(result.question_code)}" data-idx="${idx}" ${!settings.transpose ? "checked" : ""}> 通常</label>
+        <label style="font-size:.82rem; cursor:pointer"><input type="radio" class="step3-transpose-radio" name="step3-transpose-${idx}" value="true"  data-q="${_esc(result.question_code)}" data-idx="${idx}" ${settings.transpose ? "checked" : ""}> 行列入替</label>
+      </span>` : "";
+
+    const excludedBadge = `<span id="step3-excluded-badge-${idx}" class="badge-excluded"${settings.excluded ? "" : " hidden"}>除外</span>`;
+
+    // split グループ内の各グラフエリアを生成
+    const splitGroupsHtml = groupData.map((g, gIdx) => `
+      <div class="step3-split-group">
+        <div class="step3-split-group-title">${_esc(g.primaryCat)}</div>
+        <div class="step3-split-n-row">
+          ${g.groupCats.map((cat, ci) => `<span>n=${g.groupTotals[ci]}</span>`).join(" ")}
+        </div>
+        <div id="step3-chart-area-${idx}-${gIdx}" class="step3-chart-area" style="margin-bottom:4px"></div>
+      </div>`).join("");
+
+    html += `
+    <div id="step3-card-${idx}" class="card${settings.excluded ? " step3-excluded-card" : ""}" style="margin-bottom:8px">
+      <div class="card-header" style="padding:10px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px">
+        <div>
+          <span class="text-sm" style="color:var(--color-text-muted); margin-right:4px">${_esc(result.question_code)}</span>
+          <span style="font-weight:600; font-size:.95rem">${_esc(result.question_text)}</span>
+          ${excludedBadge}
+        </div>
+        <div style="display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm step3-choices-toggle-btn"
+                  data-q="${_esc(result.question_code)}" data-idx="${idx}">
+            🔧 表示選択肢
+          </button>
+          <button class="btn btn-secondary btn-sm step3-color-btn"
+                  data-q="${_esc(result.question_code)}" data-idx="${idx}">
+            🎨 カラー設定
+          </button>
+          <button class="btn btn-secondary btn-sm step3-exclude-btn" data-q="${_esc(result.question_code)}" data-idx="${idx}" data-excluded="${settings.excluded}">
+            ${settings.excluded ? "出力対象に戻す" : "除外する"}
+          </button>
+          <button class="btn btn-secondary btn-sm step3-collapse-btn" data-q="${_esc(result.question_code)}" data-idx="${idx}">
+            ${settings.collapsed ? "展開 ▼" : "折りたたむ ▲"}
+          </button>
+          <button class="btn btn-secondary btn-sm step3-export-excel-btn" data-idx="${idx}" title="Excelとして保存">📊 Excel</button>
+          <button class="btn btn-secondary btn-sm step3-export-csv-btn"   data-idx="${idx}" title="CSVとして保存">📄 CSV</button>
+          <button class="btn btn-secondary btn-sm step3-export-png-btn"   data-idx="${idx}" title="PNGとして保存">🖼 PNG</button>
+        </div>
+      </div>
+      <div id="step3-body-${idx}"${settings.collapsed ? " hidden" : ""}>
+        <div class="step3-controls-bar">
+          <span style="font-size:.78rem; color:var(--color-text-muted)">推奨: ${_esc(recommendedLabel)}</span>
+          ${chartBtnGroup}
+          <button class="btn btn-secondary btn-sm step3-chart-reset-btn" data-q="${_esc(result.question_code)}" data-type="${_esc(recommended)}" data-idx="${idx}">推奨に戻す</button>
+          ${orientHtml}
+          <label class="step3-pct-label-wrap">
+            <input type="checkbox" class="step3-pct-label-cb" data-q="${_esc(result.question_code)}" data-idx="${idx}" ${settings.showPctLabel ? "checked" : ""}> ％ラベル
+          </label>
+          <span style="font-size:.82rem; color:var(--color-text-muted)">ソート：</span>
+          <select class="step3-sort-select" data-q="${_esc(result.question_code)}" data-idx="${idx}">
+            <option value="original"${settings.sortOrder === "original" ? " selected" : ""}>元の順番</option>
+            <option value="desc"${settings.sortOrder === "desc" ? " selected" : ""}>降順</option>
+            <option value="asc"${settings.sortOrder === "asc" ? " selected" : ""}>昇順</option>
+          </select>
+          ${transposeHtml}
+        </div>
+        <div class="card-body" style="padding:16px">
+          ${splitGroupsHtml}
+        </div>
+      </div>
+    </div>`;
+  });
+
+  if (!results.length) {
+    html += `<div class="card"><div class="card-body" style="color:var(--color-text-muted); text-align:center; padding:32px">
+      クロス集計できる設問がありませんでした。
+    </div></div>`;
+  }
+
+  container.innerHTML = html;
+
+  // 軸N数をシンプル表示（split: primary軸ごとに合計n数）
+  {
+    const splitCats   = groupData.map(g => g.primaryCat);
+    const splitTotals = groupData.map(g => g.groupTotals.reduce((s, n) => s + n, 0));
+    const warningsHtml = warnings?.length ? warnings.map(w => _esc(w)).join("<br>") : "";
+    _updateAxisNcount(axis_question_text, splitCats, splitTotals, warningsHtml);
+  }
+
+  // split グループごとにグラフを描画
+  const colorPriority = AppState.step3ColorPriority;
+  results.forEach((result, idx) => {
+    const settings = _getSettings(result.question_code, result.type_code);
+    if (settings.collapsed) return;
+    groupData.forEach((g, gIdx) => {
+      const areaEl = document.getElementById(`step3-chart-area-${idx}-${gIdx}`);
+      if (!areaEl) return;
+
+      const groupResult = {
+        ...result,
+        rows: result.rows.map(row => ({
+          ...row,
+          counts:   g.indices.map(i => row.counts[i]),
+          percents: g.indices.map(i => row.percents[i]),
+        })),
+      };
+
+      // 色基準の設定
+      if (colorPriority === "axis1") {
+        _compositeColorPaletteLookup = g.groupCats; // secondary labels でパレット判定
+      } else if (colorPriority === "axis2") {
+        // 全棒を primary カテゴリの単色に統一
+        _compositeColorPaletteLookup = g.groupCats.map(() => g.primaryCat);
+      } else {
+        _compositeColorPaletteLookup = null;
+      }
+
+      _renderChartInArea(areaEl, groupResult, settings, g.groupCats, g.groupTotals);
+      _compositeColorPaletteLookup = null;
+    });
+  });
+
   initStep3ExportBulkButtons();
 }
 
@@ -835,17 +1183,9 @@ function _onResultsClick(e) {
   const pngBtn = e.target.closest(".step3-export-png-btn");
   if (pngBtn)   { exportSinglePng(parseInt(pngBtn.dataset.idx, 10));   return; }
 
-  // 一括変更（グラフ種別・向き）
-  const bulkBtn = e.target.closest(".step3-bulk-btn");
-  if (bulkBtn) {
-    _handleBulkChange(bulkBtn.dataset.bulk);
-    return;
-  }
-
-  // 一括行列入替
-  const bulkTransposeBtn = e.target.closest(".step3-bulk-transpose-btn");
-  if (bulkTransposeBtn) {
-    _handleBulkTranspose(bulkTransposeBtn.dataset.bulkTranspose === "true");
+  // 一括適用
+  if (e.target.closest(".step3-bulk-apply-btn")) {
+    _handleBulkApply();
   }
 }
 
@@ -855,26 +1195,45 @@ function _onResultsClick(e) {
 
 function _rerenderQuestion(idx) {
   if (!_lastCrosstabData) return;
+  // split モードの場合は全体再描画
+  if (_lastCrosstabData.secondary_axis_question_code && AppState.step3CompositeDisplayMode === "split") {
+    _rerenderCompositeAll();
+    return;
+  }
   const result = _lastCrosstabData.results[idx];
   if (!result) return;
   const areaEl = document.getElementById(`step3-chart-area-${idx}`);
   if (!areaEl) return;
   const settings = _getSettings(result.question_code, result.type_code);
+  // flat/nested モードでも compositeColorPaletteLookup を適用
+  if (_lastCrosstabData.secondary_axis_question_code) {
+    _applyCompositeColorLookup(_lastCrosstabData.axis_categories);
+  }
   _renderChartInArea(areaEl, result, settings,
     _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
+  _compositeColorPaletteLookup = null;
 }
 
 // グラフ + 表の両方を再描画（ソート変更時）
 function _rerenderQuestionFull(idx) {
   if (!_lastCrosstabData) return;
+  // split モードの場合は全体再描画
+  if (_lastCrosstabData.secondary_axis_question_code && AppState.step3CompositeDisplayMode === "split") {
+    _rerenderCompositeAll();
+    return;
+  }
   const result = _lastCrosstabData.results[idx];
   if (!result) return;
   const settings = _getSettings(result.question_code, result.type_code);
 
   const areaEl = document.getElementById(`step3-chart-area-${idx}`);
   if (areaEl) {
+    if (_lastCrosstabData.secondary_axis_question_code) {
+      _applyCompositeColorLookup(_lastCrosstabData.axis_categories);
+    }
     _renderChartInArea(areaEl, result, settings,
       _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
+    _compositeColorPaletteLookup = null;
   }
 
   const hidden = settings.hiddenChoices ?? [];
@@ -889,6 +1248,27 @@ function _rerenderQuestionFull(idx) {
     _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals, tp);
   if (nPanel) nPanel.innerHTML = _buildNTable(sortedResult,
     _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals, tp);
+}
+
+// flat/nested 用: composite ラベルから色解決ラベルを設定
+function _applyCompositeColorLookup(compositeLabels) {
+  const priority = AppState.step3ColorPriority;
+  const SEP = _COMPOSITE_SEP;
+  if (priority === "axis1") {
+    _compositeColorPaletteLookup = compositeLabels.map(l => l.split(SEP)[1] ?? l);
+  } else if (priority === "axis2") {
+    _compositeColorPaletteLookup = compositeLabels.map(l => l.split(SEP)[0] ?? l);
+  } else {
+    _compositeColorPaletteLookup = null;
+  }
+}
+
+// split モード全体再描画
+function _rerenderCompositeAll() {
+  const container = document.getElementById("step3-results");
+  if (container && _lastCrosstabData) {
+    _renderResults(container, _lastCrosstabData);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1357,52 +1737,88 @@ function _buildScatterConfig(result, axisCategories) {
 // 一括変更
 // ---------------------------------------------------------------------------
 
-function _handleBulkChange(bulkKey) {
+function _buildBulkBar() {
+  const chartOptions = CHART_TYPES.map(t =>
+    `<option value="${t.id}">${_esc(t.label)}</option>`
+  ).join("");
+
+  const colorOptions = [
+    `<option value="__step1__">STEP1設定</option>`,
+    `<option value="__none__">単色化（グレー）</option>`,
+    ...FIXED_PALETTE_ORDER.map(key => {
+      const p = FIXED_PALETTES[key];
+      return `<option value="${_esc(key)}">${_esc(p.label)}</option>`;
+    }),
+    ...(AppState.userPalettes ? Object.values(AppState.userPalettes).map(p =>
+      `<option value="${_esc(p.paletteId)}">${_esc(p.name)}</option>`
+    ) : []),
+  ].join("");
+
+  return `<div class="card step3-bulk-card" style="margin-bottom:8px">
+    <div class="card-body" style="padding:10px 16px">
+      <div style="font-size:.82rem; font-weight:600; color:var(--color-text-muted); margin-bottom:8px">一括変更</div>
+      <div class="step3-bulk-form">
+        <span class="step3-bulk-label">グラフ：</span>
+        <select id="step3-bulk-chart" class="step3-bulk-field">${chartOptions}</select>
+
+        <span class="step3-bulk-label">方向：</span>
+        <label style="font-size:.85rem; cursor:pointer"><input type="radio" name="step3-bulk-orient" value="v" checked> 縦</label>
+        <label style="font-size:.85rem; cursor:pointer"><input type="radio" name="step3-bulk-orient" value="h"> 横</label>
+
+        <span class="step3-bulk-label">ソート：</span>
+        <select id="step3-bulk-sort" class="step3-bulk-field">
+          <option value="original">元順</option>
+          <option value="desc">降順</option>
+          <option value="asc">昇順</option>
+        </select>
+
+        <label style="font-size:.85rem; cursor:pointer"><input type="checkbox" id="step3-bulk-pct" checked> ％ラベル</label>
+
+        <span class="step3-bulk-label">カラー：</span>
+        <select id="step3-bulk-color" class="step3-bulk-field">${colorOptions}</select>
+
+        <span class="step3-bulk-label">表示方向：</span>
+        <label style="font-size:.85rem; cursor:pointer"><input type="radio" name="step3-bulk-transpose" value="false" checked> 通常</label>
+        <label style="font-size:.85rem; cursor:pointer"><input type="radio" name="step3-bulk-transpose" value="true"> 行列入替</label>
+
+        <button class="btn btn-primary btn-sm step3-bulk-apply-btn" style="margin-left:auto">一括適用</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _handleBulkApply() {
   const data = _lastCrosstabData;
   if (!data) return;
 
-  // bulkKey 形式: "{typePrefix}-{chartType}-{orientation}"
-  // 例: "sa-stacked100-v", "ma-bar-h"
-  const parts       = bulkKey.split("-");
-  const typePrefix  = parts[0];
-  const chartType   = parts[1];
-  const orientation = parts[2] ?? "v";
+  if (!confirm("現在の個別設定をすべて上書きします。\nよろしいですか？")) return;
 
-  const targetTypeCodes = {
-    sa: ["SA", "S"],
-    ma: ["MA", "ML", "M"],
-    nu: ["NU", "N"],
-  }[typePrefix] ?? [];
+  const chartType    = document.getElementById("step3-bulk-chart")?.value ?? "bar";
+  const orientation  = document.querySelector('[name="step3-bulk-orient"]:checked')?.value ?? "v";
+  const sortOrder    = document.getElementById("step3-bulk-sort")?.value ?? "original";
+  const showPctLabel = document.getElementById("step3-bulk-pct")?.checked ?? true;
+  const colorKey     = document.getElementById("step3-bulk-color")?.value ?? "__step1__";
+  const transpose    = document.querySelector('[name="step3-bulk-transpose"]:checked')?.value === "true";
 
   const updates = {};
   data.results.forEach((result, idx) => {
-    if (!targetTypeCodes.includes(result.type_code)) return;
-    updates[result.question_code] = { chartType, orientation };
+    const update = { chartType, orientation, sortOrder, showPctLabel, transpose };
+    if (colorKey !== "__step1__") {
+      update.selectedPalette = colorKey;
+      update.customColors = null;
+      update.overriddenSeriesColors = {};
+    }
+    updates[result.question_code] = update;
+
     document.querySelectorAll(`.step3-chart-btn[data-q="${result.question_code}"]`)
       .forEach(b => b.classList.toggle("active", b.dataset.chart === chartType));
     _toggleOrientCtrl(idx, chartType);
-    _rerenderQuestion(idx);
-  });
-
-  if (Object.keys(updates).length > 0) setStep3SettingsBulk(updates);
-}
-
-function _handleBulkTranspose(value) {
-  const data = _lastCrosstabData;
-  if (!data) return;
-
-  const updates = {};
-  data.results.forEach((result, idx) => {
-    const settings = _getSettings(result.question_code, result.type_code);
-    // 向き選択が有効なチャート種別のみ対象（pie / avg_bar / table_only は非対象）
-    if (!ORIENTATION_TYPES.has(settings.chartType)) return;
-    updates[result.question_code] = { transpose: value };
-    // ラジオボタンの DOM を更新
-    const radios = document.querySelectorAll(`.step3-transpose-radio[data-q="${result.question_code}"]`);
-    radios.forEach(r => { r.checked = (r.value === "true") === value; });
     _rerenderQuestionFull(idx);
   });
 
+  if (colorKey === "__step1__") {
+    clearQuestionColorStateBulk(data.results.map(r => r.question_code));
+  }
   if (Object.keys(updates).length > 0) setStep3SettingsBulk(updates);
 }
 

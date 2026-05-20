@@ -270,6 +270,15 @@ a:hover { text-decoration: underline; }
 .btn-secondary:hover:not(:disabled) { background: var(--color-surface-alt); }
 .btn-sm { padding: 5px 10px; font-size: .8rem; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-next-step {
+  width: 50%;
+  min-width: 280px;
+  justify-content: center;
+  padding: 14px 24px;
+  font-size: 1rem;
+  font-weight: 700;
+  border-radius: 8px;
+}
 
 /* ===== 検索・フィルタバー ===== */
 .filter-bar {
@@ -755,7 +764,7 @@ pre.json-pre {
 
 /* ===== STEP1 軸カラー設定 ===== */
 .step1-axis-color-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 7px 0; font-size: .88rem;
   border-bottom: 1px solid var(--color-border);
 }
@@ -764,6 +773,17 @@ pre.json-pre {
 .step1-axis-palette-swatches { display: flex; gap: 2px; }
 .step1-axis-palette-swatches span {
   display: inline-block; width: 13px; height: 13px; border-radius: 2px;
+}
+
+/* ===== STEP1 パレット管理モーダル ===== */
+.step1-palette-dialog {
+  background: #fff; border-radius: 8px; padding: 16px;
+  max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto;
+}
+.step1-palette-tab-active { background: var(--color-primary) !important; color: #fff !important; }
+.step1-edit-color-chip { display: inline-flex; align-items: center; gap: 4px; }
+.step1-edit-color-chip input[type=color] {
+  width: 32px; height: 32px; border: none; border-radius: 4px; cursor: pointer; padding: 0;
 }
 
 /* ===== 固定パレット通知 ===== */
@@ -907,4 +927,91 @@ pre.json-pre {
 }
 .step3-choice-row input[type="checkbox"] {
   cursor: pointer;
+}
+
+/* ===== 複合集計軸コントロール ===== */
+.step3-axis-section-title {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #718096);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.step3-composite-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--color-surface-2, #F8F8F8);
+  border: 1px solid var(--color-border, #E2E8F0);
+  border-radius: 6px;
+}
+.step3-composite-mode-btns {
+  display: flex;
+  gap: 3px;
+}
+.step3-composite-mode-btn {
+  font-size: .78rem;
+  padding: 2px 9px;
+  border: 1px solid var(--color-border, #CBD5E0);
+  border-radius: 3px;
+  cursor: pointer;
+  background: var(--color-surface-1, #fff);
+  color: var(--color-text, #2D3748);
+  transition: background .12s, color .12s;
+}
+.step3-composite-mode-btn:hover {
+  background: var(--color-primary-light, #EFF6FF);
+}
+.step3-composite-mode-btn.active {
+  background: var(--color-primary, #DF0515);
+  color: #fff;
+  border-color: var(--color-primary, #DF0515);
+}
+
+/* 一括変更フォーム */
+.step3-bulk-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.step3-bulk-label {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.step3-bulk-field {
+  font-size: .85rem;
+  padding: 3px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg, #fff);
+}
+
+/* split グループ */
+.step3-split-group {
+  margin-bottom: 20px;
+}
+.step3-split-group-title {
+  font-size: .85rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  background: var(--color-surface-2, #F8F8F8);
+  border-left: 3px solid var(--color-primary, #DF0515);
+  margin-bottom: 4px;
+  border-radius: 0 4px 4px 0;
+}
+.step3-split-n-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: .78rem;
+  color: var(--color-text-muted, #718096);
+  margin-bottom: 4px;
+  padding-left: 12px;
 }

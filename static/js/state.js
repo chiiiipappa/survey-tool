@@ -68,6 +68,10 @@ export const AppState = {
   step3ActiveAxisCode: "",
   step3LastGeneratedAxisCode: "",
   step3QuestionSettings: {},  // { question_code: QuestionSettings }
+  step3SecondaryAxisCode: "",
+  step3CompositeDisplayMode: "split",   // "nested" | "flat" | "split"
+  step3ColorPriority: "axis1",          // "axis1" | "axis2" | "auto"
+  step3MinSampleSize: 0,
 };
 
 function _emit() {
@@ -102,6 +106,30 @@ export function setStep3Configs(configs) {
 
 export function setStep3ActiveAxis(code) {
   AppState.step3ActiveAxisCode = code ?? "";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3SecondaryAxis(code) {
+  AppState.step3SecondaryAxisCode = code ?? "";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3CompositeDisplayMode(mode) {
+  AppState.step3CompositeDisplayMode = mode ?? "split";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3ColorPriority(priority) {
+  AppState.step3ColorPriority = priority ?? "axis1";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3MinSampleSize(n) {
+  AppState.step3MinSampleSize = typeof n === "number" ? n : (parseInt(n, 10) || 0);
   AppState.isDirty = true;
   _emit();
 }
@@ -171,6 +199,17 @@ export function clearQuestionColorState(questionCode) {
   _emit();
 }
 
+export function clearQuestionColorStateBulk(questionCodes) {
+  const next = { ...AppState.step3QuestionSettings };
+  for (const qCode of questionCodes) {
+    const { selectedPalette, overriddenSeriesColors, customColors, ...rest } = next[qCode] ?? {};
+    next[qCode] = rest;
+  }
+  AppState.step3QuestionSettings = next;
+  AppState.isDirty = true;
+  _emit();
+}
+
 export function setUploadResult(resp) {
   AppState.sessionToken    = resp.session_token;
   AppState.loadedAt        = new Date();
@@ -229,6 +268,10 @@ export function setLoadedProject(resp) {
   AppState.step3CrosstabConfigs = resp.step3_crosstab_configs ?? [];
   AppState.step3ActiveAxisCode = resp.step3_active_axis_code ?? "";
   AppState.step3LastGeneratedAxisCode = "";
+  AppState.step3SecondaryAxisCode    = resp.layout?.step3_secondary_axis_code ?? "";
+  AppState.step3CompositeDisplayMode = resp.layout?.step3_composite_display_mode ?? "split";
+  AppState.step3ColorPriority        = resp.layout?.step3_color_priority ?? "axis1";
+  AppState.step3MinSampleSize        = resp.layout?.step3_min_sample_size ?? 0;
   // 旧 step3_chart_type_map からのマイグレーション + 新 step3_question_settings の復元
   const _oldMap = resp.layout?.step3_chart_type_map ?? {};
   const _newSettings = resp.layout?.step3_question_settings ?? {};

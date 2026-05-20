@@ -42,7 +42,7 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surv) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}) {
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}) {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -52,6 +52,10 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       step3_question_settings: step3QuestionSettings,
       step1_axis_colors: step1AxisColors,
       user_palettes: userPalettes,
+      step3_secondary_axis_code: compositeSettings.secondaryAxisCode ?? "",
+      step3_composite_display_mode: compositeSettings.displayMode ?? "split",
+      step3_color_priority: compositeSettings.colorPriority ?? "axis1",
+      step3_min_sample_size: compositeSettings.minSampleSize ?? 0,
     }),
   });
   if (!res.ok) {
@@ -239,13 +243,14 @@ export async function exportFaData(token, {
 // ---------------------------------------------------------------------------
 
 /** クロス集計を実行する。 */
-export async function generateCrosstab(sessionToken, axisCode, targetCodes = []) {
+export async function generateCrosstab(sessionToken, axisCode, secondaryAxisCode = "", targetCodes = []) {
   const res = await fetch(`${BASE}/step3/crosstab`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       session_token: sessionToken,
       axis_question_code: axisCode,
+      secondary_axis_question_code: secondaryAxisCode,
       target_question_codes: targetCodes,
     }),
   });

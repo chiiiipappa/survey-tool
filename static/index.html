@@ -68,11 +68,10 @@
         <div id="parse-warnings-box" class="warning-box hidden"></div>
 
         <!-- 次へボタン -->
-        <div style="margin-top: 20px; display: flex; gap: 12px; align-items: center;">
-          <button id="btn-to-questions" class="btn btn-primary" disabled>
-            設問確認へ →
+        <div style="margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+          <button id="btn-to-questions" class="btn btn-primary btn-next-step" disabled>
+            次のステップへ →
           </button>
-          <span class="text-sm text-muted">または</span>
           <label class="btn btn-secondary btn-sm" style="cursor:pointer">
             プロジェクトを復元
             <input type="file" id="project-input" accept=".surv,.json" class="hidden">
@@ -181,13 +180,9 @@
 
     <!-- STEP2 ナビカード -->
     <div class="card">
-      <div class="card-body" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-        <div style="flex:1; min-width:200px;">
-          <div style="font-weight:600; margin-bottom:4px">次のステップ</div>
-          <div class="text-sm text-muted">集計軸を選択したら、回答データを読み込んでFA表を作成します。</div>
-        </div>
-        <button id="btn-to-step2" class="btn btn-primary" disabled>
-          回答データ読込へ →
+      <div class="card-body" style="display:flex; flex-direction:column; align-items:center; padding: 24px 20px;">
+        <button id="btn-to-step2" class="btn btn-primary btn-next-step" disabled>
+          次のステップへ →
         </button>
       </div>
     </div>
@@ -382,13 +377,9 @@
 
     <!-- STEP3 ナビカード -->
     <div class="card" id="step2-to-step3-card" style="display:none">
-      <div class="card-body" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-        <div style="flex:1; min-width:200px;">
-          <div style="font-weight:600; margin-bottom:4px">次のステップ</div>
-          <div class="text-sm text-muted">クロス集計・グラフ作成（準備中）へ進みます。</div>
-        </div>
-        <button id="btn-to-step3" class="btn btn-primary">
-          クロス集計へ →
+      <div class="card-body" style="display:flex; flex-direction:column; align-items:center; padding: 24px 20px;">
+        <button id="btn-to-step3" class="btn btn-primary btn-next-step">
+          次のステップへ →
         </button>
       </div>
     </div>
@@ -421,31 +412,25 @@
   <!-- ========== PANEL: STEP3 クロス集計 ========== -->
   <section id="panel-step3" class="panel">
 
-    <!-- 集計軸候補（STEP1で選択済み） -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">集計軸候補（STEP1 で選択済み）</span>
-      </div>
-      <div class="card-body" style="padding:12px 16px">
-        <div id="step3-axis-candidates" class="badge-list">
-          <span class="text-sm" style="color:var(--color-text-muted)">STEP1 で集計軸を選択してください。</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- 現在の表示軸 + 実行ボタン -->
+    <!-- 集計軸① + 集計軸② + 複合コントロール + 実行ボタン -->
     <div class="card" style="margin-top:12px">
       <div class="card-header">
-        <span class="card-title">現在の表示軸を選択</span>
+        <span class="card-title">集計軸を選択</span>
       </div>
       <div class="card-body">
-        <div id="step3-axis-selector" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px">
+        <div class="step3-axis-section-title">集計軸①</div>
+        <div id="step3-axis-selector" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:4px">
           <span class="text-sm" style="color:var(--color-text-muted)">集計軸候補がありません。</span>
         </div>
-        <button id="step3-run-btn" class="btn btn-primary" disabled>
-          📊 クロス集計を生成
-        </button>
-        <span id="step3-run-note" class="text-sm" style="margin-left:12px; color:var(--color-text-muted)"></span>
+        <div id="step3-secondary-axis-wrapper"></div>
+        <div id="step3-composite-controls" style="display:none"></div>
+        <div style="margin-top:16px">
+          <button id="step3-run-btn" class="btn btn-primary" disabled>
+            📊 クロス集計を生成
+          </button>
+          <span id="step3-run-note" class="text-sm" style="margin-left:12px; color:var(--color-text-muted)"></span>
+        </div>
+        <div id="step3-axis-ncount" style="margin-top:12px; display:none"></div>
       </div>
     </div>
 
@@ -550,6 +535,81 @@
   </div>
 </div>
 
-<script type="module" src="/static/js/app.js?v=11"></script>
+<!-- ===== STEP1 パレット管理モーダル ===== -->
+<div id="step1-palette-modal" class="step3-color-overlay" hidden>
+  <div class="step1-palette-dialog">
+    <div class="step3-color-dialog-header">
+      <span id="step1-palette-modal-title" style="font-weight:600; font-size:.95rem">パレット管理</span>
+      <button id="step1-palette-close" class="btn btn-secondary btn-sm">✕ 閉じる</button>
+    </div>
+
+    <!-- タブ -->
+    <div style="display:flex; gap:6px; margin-bottom:12px; border-bottom:1px solid var(--color-border); padding-bottom:8px;">
+      <button class="btn btn-sm step1-palette-tab step1-palette-tab-active" data-tab="create">＋ 新規作成</button>
+      <button class="btn btn-secondary btn-sm step1-palette-tab" data-tab="edit">✎ 既存編集</button>
+    </div>
+
+    <!-- 新規作成パネル -->
+    <div id="step1-create-panel">
+      <div class="step3-gen-row">
+        <label>パレット名</label>
+        <input id="step1-gen-name" type="text" class="step3-gen-input" placeholder="省略時: キーカラー_N色">
+      </div>
+      <div class="step3-gen-row">
+        <label>キーカラー</label>
+        <input id="step1-gen-key-color" type="color" value="#0071BC">
+        <span id="step1-gen-key-color-hex" class="step3-gen-hex">#0071BC</span>
+      </div>
+      <div class="step3-gen-row">
+        <label>色数</label>
+        <input id="step1-gen-count" type="number" class="step3-gen-input step3-gen-num" min="2" max="20" value="6">
+      </div>
+      <div class="step3-gen-row">
+        <label>明るさの差</label>
+        <input id="step1-gen-brightness-step" type="range" min="2" max="25" value="10" style="flex:1">
+        <span id="step1-gen-brightness-step-val" style="width:36px;text-align:right;font-size:.78rem">10%</span>
+      </div>
+      <div class="step3-gen-row">
+        <label>パターン</label>
+        <select id="step1-gen-pattern" class="step3-gen-select">
+          <option value="center" selected>中央をキーカラーに</option>
+          <option value="light_to_dark">薄い → 濃い（キーが先頭）</option>
+          <option value="dark_to_light">濃い → 薄い（キーが末尾）</option>
+        </select>
+      </div>
+      <div class="step3-gen-row">
+        <label>明るさ微調整</label>
+        <input id="step1-gen-brightness-fine" type="range" min="-20" max="20" value="0" style="flex:1">
+        <span id="step1-gen-brightness-fine-val" style="width:36px;text-align:right;font-size:.78rem">0%</span>
+      </div>
+      <div class="step3-gen-row">
+        <label>鮮やかさ調整</label>
+        <input id="step1-gen-saturation" type="range" min="-50" max="50" value="0" style="flex:1">
+        <span id="step1-gen-saturation-val" style="width:36px;text-align:right;font-size:.78rem">0%</span>
+      </div>
+      <div id="step1-gen-preview" class="step3-gen-preview" style="margin:8px 0;"></div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+        <button id="step1-gen-save-btn" class="btn btn-secondary btn-sm">保存のみ</button>
+        <button id="step1-gen-apply-btn" class="btn btn-primary btn-sm">作成してこの軸に適用</button>
+      </div>
+    </div>
+
+    <!-- 既存編集パネル -->
+    <div id="step1-edit-panel" hidden>
+      <div class="step3-gen-row" style="margin-bottom:10px; flex-wrap:wrap; gap:6px;">
+        <label>編集するパレット</label>
+        <select id="step1-edit-palette-select" class="step3-gen-select" style="flex:1; min-width:160px;"></select>
+        <button id="step1-edit-delete-btn" class="btn btn-secondary btn-sm" style="color:#DF0515;">削除</button>
+      </div>
+      <div id="step1-edit-colors-area" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; min-height:40px;"></div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button id="step1-edit-add-color" class="btn btn-secondary btn-sm">＋ 色を追加</button>
+        <button id="step1-edit-save-btn" class="btn btn-primary btn-sm">変更を保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/js/app.js?v=12"></script>
 </body>
 </html>
