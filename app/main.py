@@ -38,7 +38,9 @@ class _NoCacheStaticFiles(StaticFiles):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("=== 調査票レイアウト確認ツール起動 ===")
+    from app.parquet_cache import cleanup_old_sessions
+    removed = cleanup_old_sessions(max_age_seconds=7200)
+    logger.info("=== 調査票レイアウト確認ツール起動 === (古い Parquet %d 件削除)", removed)
     logger.info("=== http://localhost:8002 をブラウザで開いてください ===")
     yield
     logger.info("=== アプリケーション終了 ===")

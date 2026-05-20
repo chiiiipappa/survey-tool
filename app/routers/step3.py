@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
+from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from app.data_store import survey_cache
+from app.parquet_cache import load_parquet
 from app.schemas import (
     CrosstabResult,
     CrosstabRow,
@@ -116,6 +118,32 @@ def _build_axis_cats(df: pd.DataFrame, col: str, q) -> list[str]:
     return cats
 
 
+def _resolve_needed_columns(
+    body: Step3CrosstabRequest,
+    step2_data: dict,
+) -> list[str] | None:
+    """クロス集計に必要な列名リストを返す。target_question_codes が空なら None（全列読込）。"""
+    if not body.target_question_codes:
+        return None
+
+    # bracket列: base_code → [display_header, ...]（MA設問の展開列名）
+    bracket_map: dict[str, list[str]] = {}
+    for bc in step2_data.get("bracket_columns", []):
+        bracket_map.setdefault(bc["base_code"], []).append(bc["display_header"])
+
+    needed: set[str] = {body.axis_question_code}
+    if body.secondary_axis_question_code:
+        needed.add(body.secondary_axis_question_code)
+
+    for code in body.target_question_codes:
+        if code in bracket_map:
+            needed.update(bracket_map[code])
+        else:
+            needed.add(code)
+
+    return list(needed)
+
+
 @router.post("/step3/crosstab", response_model=Step3CrosstabResponse, summary="クロス集計実行")
 async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
     """STEP2のラベル変換済みデータを使ってクロス集計を行う。"""
@@ -127,11 +155,15 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
     if questions is None:
         raise HTTPException(404, "セッションが見つかりません。")
 
-    labeled_data = step2_data.get("labeled_data", {})
-    if not labeled_data:
+    parquet_path = step2_data.get("labeled_parquet_path")
+    if not parquet_path:
         raise HTTPException(422, "ラベル変換済みデータがありません。")
 
-    df = pd.DataFrame(labeled_data)
+    columns_needed = _resolve_needed_columns(body, step2_data)
+    try:
+        df = load_parquet(Path(parquet_path), columns=columns_needed)
+    except FileNotFoundError:
+        raise HTTPException(422, "データが失われています。再アップロードしてください。")
     axis_col = body.axis_question_code
 
     if axis_col not in df.columns:

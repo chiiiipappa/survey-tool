@@ -423,6 +423,18 @@ def _detect_key_column(df: "pd.DataFrame") -> str:
     return ""
 
 
+def _load_df_from_parquet(labeled_parquet_path: Optional[str]) -> pd.DataFrame:
+    """Parquet パスから DataFrame を読み込む。パス未指定または読込失敗時は空 DataFrame を返す。"""
+    if not labeled_parquet_path:
+        return pd.DataFrame()
+    from pathlib import Path
+    from app.parquet_cache import load_parquet
+    try:
+        return load_parquet(Path(labeled_parquet_path))
+    except FileNotFoundError:
+        return pd.DataFrame()
+
+
 def _build_attr_candidates(
     axis_candidates: List[AxisCandidateItem],
     selected_axis_columns: List[str],
@@ -449,7 +461,7 @@ def _build_attr_candidates(
 
 def build_fa_meta(
     questions: List[QuestionItem],
-    labeled_data: dict,
+    labeled_parquet_path: Optional[str],
     matched_columns: List[str],
     axis_candidates: List[AxisCandidateItem],
     selected_axis_columns: List[str],
@@ -470,7 +482,7 @@ def build_fa_meta(
         for q in fa_questions
     ]
     attr_candidates = _build_attr_candidates(axis_candidates, selected_axis_columns)
-    df = pd.DataFrame(labeled_data) if labeled_data else pd.DataFrame()
+    df = _load_df_from_parquet(labeled_parquet_path)
     key_col = _detect_key_column(df) if not df.empty else ""
     return {
         "fa_columns": fa_columns_info,
@@ -481,7 +493,7 @@ def build_fa_meta(
 
 def build_fa_data(
     questions: List[QuestionItem],
-    labeled_data: dict,
+    labeled_parquet_path: Optional[str],
     matched_columns: List[str],
     axis_candidates: List[AxisCandidateItem],
     selected_axis_columns: List[str],
@@ -512,7 +524,7 @@ def build_fa_data(
 
     attr_candidates = _build_attr_candidates(axis_candidates, selected_axis_columns)
 
-    if not fa_questions or not labeled_data:
+    if not fa_questions or not labeled_parquet_path:
         return {
             "fa_columns": fa_columns_info,
             "attr_candidates": attr_candidates,
@@ -522,7 +534,16 @@ def build_fa_data(
             "rows": [],
         }
 
-    df = pd.DataFrame(labeled_data)
+    df = _load_df_from_parquet(labeled_parquet_path)
+    if df.empty:
+        return {
+            "fa_columns": fa_columns_info,
+            "attr_candidates": attr_candidates,
+            "key_column_name": "",
+            "total_fa_rows": 0,
+            "filtered_row_count": 0,
+            "rows": [],
+        }
     key_col = _detect_key_column(df)
     fa_filter_set = set(fa_codes) if fa_codes else None
     valid_attr_cols = [c for c in attr_columns if c in df.columns]

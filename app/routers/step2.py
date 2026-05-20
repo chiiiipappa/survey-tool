@@ -5,12 +5,14 @@ from __future__ import annotations
 import io
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.data_store import survey_cache
+from app.parquet_cache import load_parquet, save_parquet
 from app.parser.response_csv import (
     build_axis_candidates,
     build_codebook,
@@ -20,7 +22,6 @@ from app.parser.response_csv import (
     convert_labels,
     detect_multi_select,
     df_preview,
-    df_to_serializable,
     match_columns,
     parse_response_file,
 )
@@ -44,7 +45,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 
 
 @router.post("/step2/upload", response_model=Step2UploadResponse, summary="回答データアップロード・ラベル変換")
@@ -87,8 +88,7 @@ async def step2_upload(
     multi_select_cols = detect_multi_select(df, questions, matched)
     axis_candidates = build_axis_candidates(questions, matched)
 
-    raw_data = df_to_serializable(df)
-    labeled_data = df_to_serializable(labeled_df)
+    labeled_parquet_path = save_parquet(session_token, labeled_df, "labeled_data")
 
     survey_cache.set_step2(
         session_token,
@@ -96,8 +96,7 @@ async def step2_upload(
             "filename": filename,
             "encoding": encoding,
             "file_size": len(raw_bytes),
-            "raw_data": raw_data,
-            "labeled_data": labeled_data,
+            "labeled_parquet_path": str(labeled_parquet_path),
             "codebook": codebook,
             "matched_columns": matched,
             "missing_columns": missing,
@@ -186,11 +185,13 @@ async def step2_export(session_token: str) -> StreamingResponse:
     if not data:
         raise HTTPException(404, "STEP2 データが見つかりません。")
 
-    labeled_data = data.get("labeled_data", {})
-    if not labeled_data:
+    parquet_path = data.get("labeled_parquet_path")
+    if not parquet_path:
         raise HTTPException(422, "ラベル変換済みデータがありません。")
-
-    df = pd.DataFrame(labeled_data)
+    try:
+        df = load_parquet(Path(parquet_path))
+    except FileNotFoundError:
+        raise HTTPException(422, "データが失われています。再アップロードしてください。")
     buffer = io.StringIO()
     df.to_csv(buffer, index=False, encoding="utf-8-sig")
     content = buffer.getvalue()
@@ -219,7 +220,7 @@ async def step2_fa_meta(session_token: str) -> Step2FaMetaResponse:
 
     result = build_fa_meta(
         questions=questions,
-        labeled_data=data.get("labeled_data", {}),
+        labeled_parquet_path=data.get("labeled_parquet_path"),
         matched_columns=data.get("matched_columns", []),
         axis_candidates=axis_candidates,
         selected_axis_columns=selected_axis,
@@ -257,7 +258,7 @@ async def step2_fa(
 
     result = build_fa_data(
         questions=questions,
-        labeled_data=data.get("labeled_data", {}),
+        labeled_parquet_path=data.get("labeled_parquet_path"),
         matched_columns=data.get("matched_columns", []),
         axis_candidates=axis_candidates,
         selected_axis_columns=selected_axis,
@@ -307,7 +308,7 @@ async def step2_fa_export(
 
     result = build_fa_data(
         questions=questions,
-        labeled_data=data.get("labeled_data", {}),
+        labeled_parquet_path=data.get("labeled_parquet_path"),
         matched_columns=data.get("matched_columns", []),
         axis_candidates=axis_candidates,
         selected_axis_columns=selected_axis,
