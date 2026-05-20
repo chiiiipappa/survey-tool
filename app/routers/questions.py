@@ -147,6 +147,8 @@ async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
         step3_composite_display_mode=req.step3_composite_display_mode,
         step3_color_priority=req.step3_color_priority,
         step3_min_sample_size=req.step3_min_sample_size,
+        question_sets=req.question_sets,
+        step3_crosstab_cache=req.step3_crosstab_cache,
     )
 
     buf = io.BytesIO()

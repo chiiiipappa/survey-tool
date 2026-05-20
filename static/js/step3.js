@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
 import {
@@ -290,6 +290,46 @@ let _colorModalOverrides  = {};   // { label: hex } 個別上書き
 let _dragType  = null;
 let _dragValue = null;
 
+// ---------------------------------------------------------------------------
+// 設問セット段階的生成: キャッシュ・遅延描画
+// ---------------------------------------------------------------------------
+
+const _crosstabCache = {};              // { cacheKey: CrosstabResponse }
+const _pendingChartRenders = new Map(); // { DOMElement: renderFn }
+let   _chartObserver = null;
+let   _currentCacheKey = "";            // 現在表示中のキャッシュキー
+
+export function getCrosstabCache() { return { ..._crosstabCache }; }
+export function setCrosstabCache(cache) { Object.assign(_crosstabCache, cache ?? {}); }
+
+function _getCacheKey(axisCode, secAxisCode, setId) {
+  return `${axisCode}||${secAxisCode || ""}||${setId}`;
+}
+
+function _initLazyChartObserver() {
+  _chartObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const fn = _pendingChartRenders.get(entry.target);
+      if (fn) { fn(); _pendingChartRenders.delete(entry.target); }
+      _chartObserver.unobserve(entry.target);
+    }
+  }, { rootMargin: "200px" });
+}
+
+function _scheduleChartRender(areaEl, renderFn) {
+  if (!_chartObserver) { renderFn(); return; }
+  _pendingChartRenders.set(areaEl, renderFn);
+  _chartObserver.observe(areaEl);
+}
+
+function _clearPendingChartRenders() {
+  if (_chartObserver) {
+    _pendingChartRenders.forEach((_, el) => _chartObserver.unobserve(el));
+  }
+  _pendingChartRenders.clear();
+}
+
 // 色解決：個別上書き > 固定カラー > 選択パレット > STEP1軸パレット > COLORSデフォルト
 // _compositeColorPaletteLookup が設定されている場合、パレット検索にはそのラベルを使用する
 function _getColorsForGraph(questionCode, labels) {
@@ -343,8 +383,9 @@ export function initStep3Panel() {
     }
   }
 
+  _initLazyChartObserver();
   document.addEventListener("survey:statechange", _onStateChange);
-  document.getElementById("step3-run-btn")?.addEventListener("click", _runCrosstab);
+  document.getElementById("step3-set-generate-btn")?.addEventListener("click", _runCrosstab);
 
   // イベント委譲: results コンテナに1度だけ登録
   const resultsEl = document.getElementById("step3-results");
@@ -365,7 +406,8 @@ export function initStep3Panel() {
 function _onStateChange() {
   if (AppState.activePanel !== "step3") return;
   _renderAxisSelector();
-  _updateRunButton();
+  _renderSetSelector();
+  _updateGenerateButton();
   const nc = document.getElementById("step3-axis-ncount");
   if (nc) { nc.style.display = "none"; nc.innerHTML = ""; }
 }
@@ -518,31 +560,35 @@ function _renderCompositeControls(el) {
 }
 
 function _rerunIfComposite() {
-  if (_lastCrosstabData?.secondary_axis_question_code) {
+  const currentData = _currentCacheKey ? _crosstabCache[_currentCacheKey] : _lastCrosstabData;
+  if (currentData?.secondary_axis_question_code) {
     _runCrosstab();
   }
 }
 
 function _rerenderCompositeIfNeeded() {
-  if (!_lastCrosstabData?.secondary_axis_question_code) return;
+  const currentData = _currentCacheKey ? _crosstabCache[_currentCacheKey] : _lastCrosstabData;
+  if (!currentData?.secondary_axis_question_code) return;
   const container = document.getElementById("step3-results");
-  if (container) _renderResults(container, _lastCrosstabData);
+  if (container) _renderResults(container, currentData);
 }
 
 // ---------------------------------------------------------------------------
-// 実行ボタン制御
+// 生成ボタン制御
 // ---------------------------------------------------------------------------
 
-function _updateRunButton() {
-  const btn  = document.getElementById("step3-run-btn");
+function _updateGenerateButton() {
+  const btn  = document.getElementById("step3-set-generate-btn");
   const note = document.getElementById("step3-run-note");
   if (!btn) return;
   const hasStep2 = Boolean(AppState.step2Filename);
   const hasAxis  = Boolean(AppState.step3ActiveAxisCode) && _getAxisCandidates().length > 0;
-  btn.disabled = !hasStep2 || !hasAxis;
+  const hasSet   = Boolean(AppState.step3ActiveSetId);
+  btn.disabled = !hasStep2 || !hasAxis || !hasSet;
   if (note) {
     note.textContent = !hasStep2 ? "STEP2 で回答データをアップロードすると実行できます。"
                      : !hasAxis  ? "STEP1 で集計軸を選択してください。"
+                     : !hasSet   ? "設問セットを選択してください。"
                      : "";
   }
 }
@@ -553,33 +599,131 @@ function _updateRunButton() {
 
 async function _runCrosstab() {
   const axisCode = AppState.step3ActiveAxisCode;
+  const setId    = AppState.step3ActiveSetId;
   if (!axisCode || !AppState.sessionToken) return;
 
-  const btn       = document.getElementById("step3-run-btn");
-  const resultsEl = document.getElementById("step3-results");
+  const secAxisCode = AppState.step3SecondaryAxisCode;
+  const set = AppState.questionSets.find(s => s.setId === setId);
+  const targetCodes = set?.questionCodes ?? [];
+  const key = setId ? _getCacheKey(axisCode, secAxisCode, setId) : "";
+
+  const btn        = document.getElementById("step3-set-generate-btn");
+  const progressEl = document.getElementById("step3-progress");
+  const progressMsg = document.getElementById("step3-progress-msg");
+  const resultsEl  = document.getElementById("step3-results");
+  const placeholder = document.getElementById("step3-placeholder");
   if (!resultsEl) return;
 
-  btn.disabled    = true;
-  btn.textContent = "⏳ 集計中…";
-  resultsEl.style.display = "none";
+  // キャッシュヒット → 即時表示
+  if (key && _crosstabCache[key]) {
+    _currentCacheKey = key;
+    _destroyAllCharts();
+    _clearPendingChartRenders();
+    if (placeholder) placeholder.style.display = "none";
+    _renderResults(resultsEl, _crosstabCache[key]);
+    _renderGeneratedSetsNav();
+    return;
+  }
+
+  // キャッシュミス → API 呼び出し
+  if (btn) btn.disabled = true;
+  if (progressEl) progressEl.style.display = "";
+  if (progressMsg) progressMsg.textContent = `⏳ 集計中… (${targetCodes.length || "全"}問)`;
   _destroyAllCharts();
+  _clearPendingChartRenders();
 
   try {
     const data = await generateCrosstab(
-      AppState.sessionToken, axisCode, AppState.step3SecondaryAxisCode
+      AppState.sessionToken, axisCode, secAxisCode, targetCodes
     );
+    if (key) _crosstabCache[key] = data;
+    _currentCacheKey = key;
     AppState.step3LastGeneratedAxisCode = axisCode;
     _lastCrosstabData = data;
+    if (placeholder) placeholder.style.display = "none";
     _renderResults(resultsEl, data);
-    resultsEl.style.display = "";
+    _renderGeneratedSetsNav();
   } catch (err) {
-    resultsEl.style.display = "";
+    if (placeholder) placeholder.style.display = "none";
     resultsEl.innerHTML = `<div class="card"><div class="card-body" style="color:var(--color-danger,#e53e3e)">エラー: ${_esc(err.message)}</div></div>`;
   } finally {
-    btn.disabled    = false;
-    btn.textContent = "📊 クロス集計を生成";
-    _updateRunButton();
+    if (btn) btn.disabled = false;
+    if (progressEl) progressEl.style.display = "none";
+    _updateGenerateButton();
   }
+}
+
+// ---------------------------------------------------------------------------
+// 設問セット選択 UI / 生成済みセット一覧
+// ---------------------------------------------------------------------------
+
+function _renderSetSelector() {
+  const el = document.getElementById("step3-set-selector");
+  if (!el) return;
+  const sets = AppState.questionSets;
+  if (!sets.length) {
+    el.innerHTML = `<span class="text-sm" style="color:var(--color-text-muted)">設問セット候補がありません。STEP1 で調査票をアップロードしてください。</span>`;
+    return;
+  }
+  const active = AppState.step3ActiveSetId;
+  el.innerHTML = sets.map(s => `
+    <label class="step3-set-radio-label${s.setId === active ? " active" : ""}">
+      <input type="radio" name="step3-set" value="${_esc(s.setId)}" ${s.setId === active ? "checked" : ""}
+             style="accent-color:var(--color-primary)">
+      <span>${_esc(s.setName)}</span>
+      <span class="step3-set-count">(${s.questionCodes.length}問)</span>
+    </label>`).join("");
+  el.querySelectorAll("input[name='step3-set']").forEach(radio => {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      setStep3ActiveSetId(radio.value);
+      _updateGenerateButton();
+      // ラジオラベルのアクティブスタイルを更新
+      el.querySelectorAll(".step3-set-radio-label").forEach(lbl => {
+        lbl.classList.toggle("active", lbl.querySelector("input")?.value === radio.value);
+      });
+    });
+  });
+}
+
+function _renderGeneratedSetsNav() {
+  const section = document.getElementById("step3-generated-sets-section");
+  const nav     = document.getElementById("step3-generated-sets-nav");
+  if (!nav) return;
+  const keys = Object.keys(_crosstabCache);
+  if (!keys.length) {
+    if (section) section.style.display = "none";
+    return;
+  }
+  if (section) section.style.display = "";
+  nav.innerHTML = keys.map(key => {
+    const [axisCode, secAxisCode, setId] = key.split("||");
+    const data = _crosstabCache[key];
+    const set = AppState.questionSets.find(s => s.setId === setId);
+    const setName = set?.setName ?? setId;
+    const axisLabel = _getAxisLabel(axisCode);
+    const secLabel = secAxisCode ? ` × ${_getAxisLabel(secAxisCode)}` : "";
+    const label = `${setName} × ${axisLabel}${secLabel}`;
+    const isActive = key === _currentCacheKey;
+    return `<button class="step3-generated-set-btn${isActive ? " active" : ""}" data-cache-key="${_esc(key)}">${_esc(label)} <small class="step3-set-count">(${data.results?.length ?? 0}問)</small></button>`;
+  }).join("");
+  nav.querySelectorAll(".step3-generated-set-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.cacheKey;
+      if (!_crosstabCache[key]) return;
+      _currentCacheKey = key;
+      _lastCrosstabData = _crosstabCache[key];
+      const resultsEl = document.getElementById("step3-results");
+      if (resultsEl) {
+        _destroyAllCharts();
+        _clearPendingChartRenders();
+        const placeholder = document.getElementById("step3-placeholder");
+        if (placeholder) placeholder.style.display = "none";
+        _renderResults(resultsEl, _crosstabCache[key]);
+      }
+      _renderGeneratedSetsNav();
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -767,16 +911,18 @@ function _renderSimpleResults(container, data) {
     : "";
   _updateAxisNcount(axis_question_text, axis_categories, axis_totals, warningsHtml);
 
-  // 各設問のグラフを描画（折りたたまれていないもののみ）
+  // 各設問のグラフを遅延描画（折りたたまれていないもののみ）
   const isCompositeSimple = Boolean(data.secondary_axis_question_code);
   results.forEach((result, idx) => {
     const settings = _getSettings(result.question_code, result.type_code);
     if (settings.collapsed) return;
     const areaEl = document.getElementById(`step3-chart-area-${idx}`);
     if (!areaEl) return;
-    if (isCompositeSimple) _applyCompositeColorLookup(axis_categories);
-    _renderChartInArea(areaEl, result, settings, axis_categories, axis_totals);
-    _compositeColorPaletteLookup = null;
+    _scheduleChartRender(areaEl, () => {
+      if (isCompositeSimple) _applyCompositeColorLookup(axis_categories);
+      _renderChartInArea(areaEl, result, settings, axis_categories, axis_totals);
+      _compositeColorPaletteLookup = null;
+    });
   });
 
   // 一括エクスポートボタンにイベントを登録
@@ -977,7 +1123,7 @@ function _renderSplitResults(container, data) {
     _updateAxisNcount(axis_question_text, splitCats, splitTotals, warningsHtml);
   }
 
-  // split グループごとにグラフを描画
+  // split グループごとにグラフを遅延描画
   const colorPriority = AppState.step3ColorPriority;
   results.forEach((result, idx) => {
     const settings = _getSettings(result.question_code, result.type_code);
@@ -986,27 +1132,25 @@ function _renderSplitResults(container, data) {
       const areaEl = document.getElementById(`step3-chart-area-${idx}-${gIdx}`);
       if (!areaEl) return;
 
-      const groupResult = {
-        ...result,
-        rows: result.rows.map(row => ({
-          ...row,
-          counts:   g.indices.map(i => row.counts[i]),
-          percents: g.indices.map(i => row.percents[i]),
-        })),
-      };
-
-      // 色基準の設定
-      if (colorPriority === "axis1") {
-        _compositeColorPaletteLookup = g.groupCats; // secondary labels でパレット判定
-      } else if (colorPriority === "axis2") {
-        // 全棒を primary カテゴリの単色に統一
-        _compositeColorPaletteLookup = g.groupCats.map(() => g.primaryCat);
-      } else {
+      _scheduleChartRender(areaEl, () => {
+        const groupResult = {
+          ...result,
+          rows: result.rows.map(row => ({
+            ...row,
+            counts:   g.indices.map(i => row.counts[i]),
+            percents: g.indices.map(i => row.percents[i]),
+          })),
+        };
+        if (colorPriority === "axis1") {
+          _compositeColorPaletteLookup = g.groupCats;
+        } else if (colorPriority === "axis2") {
+          _compositeColorPaletteLookup = g.groupCats.map(() => g.primaryCat);
+        } else {
+          _compositeColorPaletteLookup = null;
+        }
+        _renderChartInArea(areaEl, groupResult, settings, g.groupCats, g.groupTotals);
         _compositeColorPaletteLookup = null;
-      }
-
-      _renderChartInArea(areaEl, groupResult, settings, g.groupCats, g.groupTotals);
-      _compositeColorPaletteLookup = null;
+      });
     });
   });
 
@@ -1148,12 +1292,12 @@ function _onResultsClick(e) {
     setStep3Setting(collapseBtn.dataset.q, "collapsed", newCollapsed);
     // 展開時にグラフを描画（まだ描画されていない場合）
     if (!newCollapsed) {
-      const result = _lastCrosstabData?.results[idx];
+      const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
+      const result = d?.results[idx];
       const areaEl = document.getElementById(`step3-chart-area-${idx}`);
       if (result && areaEl && !_charts.has(areaEl.id)) {
         const settings = _getSettings(result.question_code, result.type_code);
-        _renderChartInArea(areaEl, result, settings,
-          _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
+        _renderChartInArea(areaEl, result, settings, d.axis_categories, d.axis_totals);
       }
     }
     return;
@@ -1194,45 +1338,40 @@ function _onResultsClick(e) {
 // ---------------------------------------------------------------------------
 
 function _rerenderQuestion(idx) {
-  if (!_lastCrosstabData) return;
+  const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
+  if (!d) return;
   // split モードの場合は全体再描画
-  if (_lastCrosstabData.secondary_axis_question_code && AppState.step3CompositeDisplayMode === "split") {
+  if (d.secondary_axis_question_code && AppState.step3CompositeDisplayMode === "split") {
     _rerenderCompositeAll();
     return;
   }
-  const result = _lastCrosstabData.results[idx];
+  const result = d.results[idx];
   if (!result) return;
   const areaEl = document.getElementById(`step3-chart-area-${idx}`);
   if (!areaEl) return;
   const settings = _getSettings(result.question_code, result.type_code);
-  // flat/nested モードでも compositeColorPaletteLookup を適用
-  if (_lastCrosstabData.secondary_axis_question_code) {
-    _applyCompositeColorLookup(_lastCrosstabData.axis_categories);
-  }
-  _renderChartInArea(areaEl, result, settings,
-    _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
+  if (d.secondary_axis_question_code) _applyCompositeColorLookup(d.axis_categories);
+  _renderChartInArea(areaEl, result, settings, d.axis_categories, d.axis_totals);
   _compositeColorPaletteLookup = null;
 }
 
 // グラフ + 表の両方を再描画（ソート変更時）
 function _rerenderQuestionFull(idx) {
-  if (!_lastCrosstabData) return;
+  const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
+  if (!d) return;
   // split モードの場合は全体再描画
-  if (_lastCrosstabData.secondary_axis_question_code && AppState.step3CompositeDisplayMode === "split") {
+  if (d.secondary_axis_question_code && AppState.step3CompositeDisplayMode === "split") {
     _rerenderCompositeAll();
     return;
   }
-  const result = _lastCrosstabData.results[idx];
+  const result = d.results[idx];
   if (!result) return;
   const settings = _getSettings(result.question_code, result.type_code);
 
   const areaEl = document.getElementById(`step3-chart-area-${idx}`);
   if (areaEl) {
-    if (_lastCrosstabData.secondary_axis_question_code) {
-      _applyCompositeColorLookup(_lastCrosstabData.axis_categories);
-    }
-    _renderChartInArea(areaEl, result, settings,
-      _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals);
+    if (d.secondary_axis_question_code) _applyCompositeColorLookup(d.axis_categories);
+    _renderChartInArea(areaEl, result, settings, d.axis_categories, d.axis_totals);
     _compositeColorPaletteLookup = null;
   }
 
@@ -1244,10 +1383,8 @@ function _rerenderQuestionFull(idx) {
   const tp = settings.transpose ?? false;
   const pctPanel = document.getElementById(`step3-tab-pct-${idx}`);
   const nPanel   = document.getElementById(`step3-tab-n-${idx}`);
-  if (pctPanel) pctPanel.innerHTML = _buildPctTable(sortedResult,
-    _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals, tp);
-  if (nPanel) nPanel.innerHTML = _buildNTable(sortedResult,
-    _lastCrosstabData.axis_categories, _lastCrosstabData.axis_totals, tp);
+  if (pctPanel) pctPanel.innerHTML = _buildPctTable(sortedResult, d.axis_categories, d.axis_totals, tp);
+  if (nPanel) nPanel.innerHTML = _buildNTable(sortedResult, d.axis_categories, d.axis_totals, tp);
 }
 
 // flat/nested 用: composite ラベルから色解決ラベルを設定
@@ -1265,9 +1402,12 @@ function _applyCompositeColorLookup(compositeLabels) {
 
 // split モード全体再描画
 function _rerenderCompositeAll() {
+  const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
   const container = document.getElementById("step3-results");
-  if (container && _lastCrosstabData) {
-    _renderResults(container, _lastCrosstabData);
+  if (container && d) {
+    _destroyAllCharts();
+    _clearPendingChartRenders();
+    _renderResults(container, d);
   }
 }
 
@@ -1788,7 +1928,7 @@ function _buildBulkBar() {
 }
 
 function _handleBulkApply() {
-  const data = _lastCrosstabData;
+  const data = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
   if (!data) return;
 
   if (!confirm("現在の個別設定をすべて上書きします。\nよろしいですか？")) return;
@@ -2071,7 +2211,7 @@ function _deriveModalColors(labels) {
 }
 
 function _openColorModal(idx) {
-  const data = _lastCrosstabData;
+  const data = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
   if (!data) return;
   const result   = data.results[idx];
   if (!result) return;
@@ -2174,7 +2314,7 @@ function _refreshDragPalette() {
 }
 
 function _reRenderCard(idx) {
-  const data = _lastCrosstabData;
+  const data = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
   if (!data) return;
   const result   = data.results[idx];
   if (!result) return;
@@ -2275,7 +2415,8 @@ function _initColorModal() {
 
   // 「STEP1設定に戻す」→ 全カラー設定をクリア
   document.getElementById("step3-color-reset")?.addEventListener("click", () => {
-    const result = _lastCrosstabData?.results[_colorModalIdx];
+    const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
+    const result = d?.results[_colorModalIdx];
     if (!result) return;
     clearQuestionColorState(result.question_code);
     _reRenderCard(_colorModalIdx);
@@ -2284,7 +2425,8 @@ function _initColorModal() {
 
   // 「現在のグラフだけ変更」→ 新形式で保存
   document.getElementById("step3-color-apply-one")?.addEventListener("click", () => {
-    const result = _lastCrosstabData?.results[_colorModalIdx];
+    const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
+    const result = d?.results[_colorModalIdx];
     if (!result) return;
     setStep3Setting(result.question_code, "selectedPalette",        _colorModalPaletteKey);
     setStep3Setting(result.question_code, "overriddenSeriesColors",  { ..._colorModalOverrides });
@@ -2295,7 +2437,7 @@ function _initColorModal() {
 
   // 「同じ集計軸すべてに適用」→ 全設問に新形式で保存
   document.getElementById("step3-color-apply-all")?.addEventListener("click", () => {
-    const allResults = _lastCrosstabData?.results ?? [];
+    const allResults = ((_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData)?.results ?? [];
     const palette    = _colorModalPaletteKey;
     const overrides  = { ..._colorModalOverrides };
     const updates    = {};
@@ -2378,7 +2520,8 @@ function _initGenPaletteSection() {
 
   // このグラフに適用（追加 + 選択 + 適用 + 保存）
   document.getElementById("gen-palette-apply-one-btn")?.addEventListener("click", () => {
-    const result = _lastCrosstabData?.results[_colorModalIdx];
+    const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
+    const result = d?.results[_colorModalIdx];
     if (!result) return;
     const colors = _updateGenPreview();
     if (!colors.length) return;
@@ -2395,7 +2538,7 @@ function _initGenPaletteSection() {
 
   // 全グラフに適用
   document.getElementById("gen-palette-apply-all-btn")?.addEventListener("click", () => {
-    const allResults = _lastCrosstabData?.results ?? [];
+    const allResults = ((_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData)?.results ?? [];
     const colors = _updateGenPreview();
     if (!colors.length) return;
     const entry = _buildUserPaletteEntry(colors);

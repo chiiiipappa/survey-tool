@@ -2,7 +2,8 @@
  * 設問一覧パネルの制御（テーブル描画・検索・フィルタ・軸/属性フラグ編集）。
  */
 import { getQuestions, saveProject, loadProject, saveStep1AxisSettings } from "./api.js";
-import { AppState, setFilterState, setStep1AxisCodes, resetState, setLoadedProject, setProjectName, markClean, markDirty, setStep1FixedPalette, clearStep1FixedPalette, addUserPalette, deleteUserPalette } from "./state.js";
+import { AppState, setFilterState, setStep1AxisCodes, resetState, setLoadedProject, setProjectName, markClean, markDirty, setStep1FixedPalette, clearStep1FixedPalette, addUserPalette, deleteUserPalette, setQuestionSets, setStep3ActiveSetId } from "./state.js";
+import { getCrosstabCache, setCrosstabCache } from "./step3.js";
 import { showToast, showError, showSpinner, hideSpinner, activatePanel } from "./app.js";
 import { handleCsvFile, reloadLastCsvFile } from "./upload.js";
 
@@ -28,6 +29,186 @@ const FIXED_PALETTE_PREVIEWS = {
 };
 const DEFAULT_COLORS_PREVIEW = ["#4299E1","#F6AD55","#68D391","#F687B3","#9F7AEA"];
 const FIXED_PALETTE_ORDER_Q = ["fan_label","gender","age_gender","age_a","age_b","scale_67","scale_1011"];
+
+// ---------------------------------------------------------------------------
+// 設問セット 自動推定・管理
+// ---------------------------------------------------------------------------
+
+const _FA_TYPES = new Set(["FA","OA","OE","FT","FN"]);
+
+export function autoDetectQuestionSets(questions) {
+  if (!questions || questions.length === 0) return [];
+  const groups = {};
+  for (const q of questions) {
+    const tc = (q.type_code ?? "").toUpperCase();
+    // FA 系も含めてグループ化（「全設問(FA除く)」は別途作成）
+    const m = q.question_code.match(/^([A-Za-z]+\d+)/);
+    const prefix = m ? m[1] : q.question_code;
+    if (!groups[prefix]) groups[prefix] = [];
+    groups[prefix].push(q.question_code);
+  }
+  const sets = Object.entries(groups).map(([prefix, codes]) => ({
+    setId: `auto_${prefix.toLowerCase()}`,
+    setName: `${prefix}系`,
+    questionCodes: codes,
+    isCustom: false,
+  }));
+  // 先頭に「全設問（FA除く）」
+  const allCodes = questions
+    .filter(q => !_FA_TYPES.has((q.type_code ?? "").toUpperCase()))
+    .map(q => q.question_code);
+  if (allCodes.length > 0) {
+    sets.unshift({
+      setId: "auto_all",
+      setName: "全設問（FA除く）",
+      questionCodes: allCodes,
+      isCustom: false,
+    });
+  }
+  return sets;
+}
+
+function _maybeAutoDetect() {
+  if (AppState.questions.length > 0 && AppState.questionSets.length === 0) {
+    setQuestionSets(autoDetectQuestionSets(AppState.questions));
+  }
+}
+
+function _renderSetSummary() {
+  const card = document.getElementById("step1-set-card");
+  const summary = document.getElementById("step1-set-summary");
+  if (!card || !summary) return;
+
+  if (!AppState.sessionToken || AppState.questionSets.length === 0) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+  summary.innerHTML = AppState.questionSets
+    .map(s => `<span class="step3-set-badge" title="${escHtml(s.questionCodes.join(", "))}">${escHtml(s.setName)} <small style="opacity:.7">(${s.questionCodes.length}問)</small></span>`)
+    .join("");
+}
+
+// ---------------------------------------------------------------------------
+// 設問セット管理モーダル
+// ---------------------------------------------------------------------------
+
+let _setEditingId = null;
+
+function _initSetModal() {
+  const modal   = document.getElementById("step1-set-modal");
+  const closeBtn = document.getElementById("step1-set-modal-close");
+  if (!modal) return;
+
+  closeBtn?.addEventListener("click", () => { modal.hidden = true; });
+  modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
+
+  // タブ切り替え
+  modal.querySelectorAll(".step1-set-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      modal.querySelectorAll(".step1-set-tab").forEach(t => {
+        t.classList.toggle("step1-set-tab-active", t === tab);
+        t.classList.toggle("btn-secondary", t !== tab);
+      });
+      const active = tab.dataset.tab;
+      document.getElementById("step1-set-tab-list").style.display    = active === "list"   ? "" : "none";
+      document.getElementById("step1-set-tab-custom").style.display  = active === "custom" ? "" : "none";
+      if (active === "custom") _refreshSetCreatePanel();
+    });
+  });
+
+  // カスタムセット作成
+  document.getElementById("step1-set-create-btn")?.addEventListener("click", _createCustomSet);
+  document.getElementById("step1-set-select-all-btn")?.addEventListener("click", () => {
+    document.querySelectorAll(".step1-set-q-chip").forEach(c => c.classList.add("selected"));
+  });
+  document.getElementById("step1-set-deselect-all-btn")?.addEventListener("click", () => {
+    document.querySelectorAll(".step1-set-q-chip").forEach(c => c.classList.remove("selected"));
+  });
+  document.getElementById("step1-set-q-chips")?.addEventListener("click", e => {
+    const chip = e.target.closest(".step1-set-q-chip");
+    if (chip) chip.classList.toggle("selected");
+  });
+
+  // セット一覧イベント委譲
+  document.getElementById("step1-set-list-container")?.addEventListener("click", e => {
+    const delBtn    = e.target.closest("[data-set-delete]");
+    const renameBtn = e.target.closest("[data-set-rename]");
+    if (delBtn) {
+      const id = delBtn.dataset.setDelete;
+      const sets = AppState.questionSets.filter(s => s.setId !== id);
+      setQuestionSets(sets);
+      _refreshSetList();
+      _renderSetSummary();
+    }
+    if (renameBtn) {
+      const id = renameBtn.dataset.setRename;
+      const s = AppState.questionSets.find(s => s.setId === id);
+      if (!s) return;
+      const newName = prompt("セット名を変更:", s.setName);
+      if (newName && newName.trim()) {
+        const sets = AppState.questionSets.map(x => x.setId === id ? { ...x, setName: newName.trim() } : x);
+        setQuestionSets(sets);
+        _refreshSetList();
+        _renderSetSummary();
+      }
+    }
+  });
+
+  document.getElementById("btn-manage-sets")?.addEventListener("click", () => {
+    _refreshSetList();
+    modal.hidden = false;
+    // デフォルト「セット一覧」タブを表示
+    const listTab = modal.querySelector(".step1-set-tab[data-tab='list']");
+    if (listTab) listTab.click();
+  });
+}
+
+function _refreshSetList() {
+  const container = document.getElementById("step1-set-list-container");
+  if (!container) return;
+  const sets = AppState.questionSets;
+  if (sets.length === 0) {
+    container.innerHTML = `<p style="color:var(--color-text-muted); font-size:.9rem">設問セットがありません。</p>`;
+    return;
+  }
+  container.innerHTML = sets.map(s => `
+    <div class="step1-set-item">
+      <span style="font-weight:600; font-size:.9rem">${escHtml(s.setName)}</span>
+      <span class="step3-set-count">(${s.questionCodes.length}問)</span>
+      ${s.isCustom ? `<span style="font-size:.72rem; color:var(--color-primary)">カスタム</span>` : ""}
+      <div style="margin-left:auto; display:flex; gap:6px">
+        <button class="btn btn-secondary btn-sm" data-set-rename="${escHtml(s.setId)}">✎ 名称変更</button>
+        ${s.isCustom ? `<button class="btn btn-secondary btn-sm" style="color:var(--color-danger,#e53e3e)" data-set-delete="${escHtml(s.setId)}">削除</button>` : ""}
+      </div>
+    </div>`).join("");
+}
+
+function _refreshSetCreatePanel() {
+  const chipsEl = document.getElementById("step1-set-q-chips");
+  if (!chipsEl) return;
+  const questions = AppState.questions.filter(q => !_FA_TYPES.has((q.type_code ?? "").toUpperCase()));
+  chipsEl.innerHTML = questions.map(q =>
+    `<span class="step1-set-q-chip" data-code="${escHtml(q.question_code)}" title="${escHtml(q.question_text)}">${escHtml(q.question_code)}</span>`
+  ).join("");
+  const nameInput = document.getElementById("step1-set-name-input");
+  if (nameInput) nameInput.value = "";
+}
+
+function _createCustomSet() {
+  const nameInput = document.getElementById("step1-set-name-input");
+  const name = nameInput?.value.trim();
+  if (!name) { alert("セット名を入力してください。"); return; }
+  const selected = [...document.querySelectorAll(".step1-set-q-chip.selected")].map(c => c.dataset.code);
+  if (selected.length === 0) { alert("設問を1つ以上選択してください。"); return; }
+  const setId = `custom_${Date.now()}`;
+  const newSets = [...AppState.questionSets, { setId, setName: name, questionCodes: selected, isCustom: true }];
+  setQuestionSets(newSets);
+  _renderSetSummary();
+  // リストタブへ切り替え
+  const listTab = document.querySelector(".step1-set-tab[data-tab='list']");
+  if (listTab) listTab.click();
+}
 
 // STEP1 パレット管理モーダル用
 let _step1PaletteTargetAxis = null;
@@ -244,12 +425,15 @@ export function initQuestionsPanel() {
   });
 
   _initStep1PaletteModal();
+  _initSetModal();
 }
 
 function onStateChange() {
   updateCsvInfoCard();
   updateAxisSummary();
   updateAxisColorSection();
+  _maybeAutoDetect();
+  _renderSetSummary();
   if (AppState.activePanel !== "questions") return;
   updateTypeDropdown();
 }
@@ -711,6 +895,8 @@ export function initProjectHeader() {
           colorPriority: AppState.step3ColorPriority,
           minSampleSize: AppState.step3MinSampleSize,
         },
+        AppState.questionSets,
+        getCrosstabCache(),
       );
       markClean(new Date());
       showToast("プロジェクトを保存しました。");
@@ -729,6 +915,11 @@ async function _doLoadProject(file) {
   try {
     const resp = await loadProject(file);
     setLoadedProject(resp);
+    setCrosstabCache(resp.layout?.step3_crosstab_cache ?? {});
+    // 設問セットが空ならフォールバックで自動推定
+    if ((resp.layout?.question_sets ?? []).length === 0 && (resp.layout?.questions ?? []).length > 0) {
+      setQuestionSets(autoDetectQuestionSets(resp.layout.questions));
+    }
 
     const warnings = [...(resp.load_warnings ?? [])];
     if (warnings.length) {

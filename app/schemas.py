@@ -277,6 +277,8 @@ class ProjectSaveRequest(BaseModel):
     step3_composite_display_mode: str = "split"
     step3_color_priority: str = "axis1"
     step3_min_sample_size: int = 0
+    question_sets: List[dict] = Field(default_factory=list)
+    step3_crosstab_cache: dict = Field(default_factory=dict)
 
 
 class LayoutSaveData(BaseModel):
@@ -295,6 +297,8 @@ class LayoutSaveData(BaseModel):
     step3_composite_display_mode: str = "split"
     step3_color_priority: str = "axis1"
     step3_min_sample_size: int = 0
+    question_sets: List[dict] = Field(default_factory=list)
+    step3_crosstab_cache: dict = Field(default_factory=dict)
 
 
 class Step2SaveData(BaseModel):

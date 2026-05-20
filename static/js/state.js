@@ -72,6 +72,9 @@ export const AppState = {
   step3CompositeDisplayMode: "split",   // "nested" | "flat" | "split"
   step3ColorPriority: "axis1",          // "axis1" | "axis2" | "auto"
   step3MinSampleSize: 0,
+  // 設問セット
+  questionSets: [],      // QuestionSet[] — { setId, setName, questionCodes, isCustom }
+  step3ActiveSetId: "",  // STEP3 で現在選択中のセットID
 };
 
 function _emit() {
@@ -131,6 +134,17 @@ export function setStep3ColorPriority(priority) {
 export function setStep3MinSampleSize(n) {
   AppState.step3MinSampleSize = typeof n === "number" ? n : (parseInt(n, 10) || 0);
   AppState.isDirty = true;
+  _emit();
+}
+
+export function setQuestionSets(sets) {
+  AppState.questionSets = Array.isArray(sets) ? [...sets] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3ActiveSetId(id) {
+  AppState.step3ActiveSetId = id ?? "";
   _emit();
 }
 
@@ -272,6 +286,8 @@ export function setLoadedProject(resp) {
   AppState.step3CompositeDisplayMode = resp.layout?.step3_composite_display_mode ?? "split";
   AppState.step3ColorPriority        = resp.layout?.step3_color_priority ?? "axis1";
   AppState.step3MinSampleSize        = resp.layout?.step3_min_sample_size ?? 0;
+  AppState.questionSets   = resp.layout?.question_sets ?? [];
+  AppState.step3ActiveSetId = "";
   // 旧 step3_chart_type_map からのマイグレーション + 新 step3_question_settings の復元
   const _oldMap = resp.layout?.step3_chart_type_map ?? {};
   const _newSettings = resp.layout?.step3_question_settings ?? {};
@@ -396,5 +412,7 @@ export function resetState() {
   AppState.step3LastGeneratedAxisCode = "";
   AppState.step3QuestionSettings = {};
   AppState.userPalettes = {};
+  AppState.questionSets    = [];
+  AppState.step3ActiveSetId = "";
   _emit();
 }

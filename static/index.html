@@ -178,6 +178,18 @@
       </div>
     </div>
 
+    <!-- 設問セット管理カード -->
+    <div class="card" id="step1-set-card" style="display:none; margin-top:12px">
+      <div class="card-header">
+        <span class="card-title">設問セット</span>
+        <span style="font-size:.8rem; color:var(--color-text-muted); margin-left:8px">STEP3 でセット単位にクロス集計を生成するためのグループ定義</span>
+        <button id="btn-manage-sets" class="btn btn-secondary btn-sm" style="margin-left:auto">設問セット管理</button>
+      </div>
+      <div class="card-body" id="step1-set-summary" style="padding:10px 16px; display:flex; flex-wrap:wrap; gap:6px">
+        <!-- questions.js で動的生成 -->
+      </div>
+    </div>
+
     <!-- STEP2 ナビカード -->
     <div class="card">
       <div class="card-body" style="display:flex; flex-direction:column; align-items:center; padding: 24px 20px;">
@@ -424,19 +436,52 @@
         </div>
         <div id="step3-secondary-axis-wrapper"></div>
         <div id="step3-composite-controls" style="display:none"></div>
-        <div style="margin-top:16px">
-          <button id="step3-run-btn" class="btn btn-primary" disabled>
-            📊 クロス集計を生成
-          </button>
-          <span id="step3-run-note" class="text-sm" style="margin-left:12px; color:var(--color-text-muted)"></span>
+
+        <!-- 設問セット選択 -->
+        <div id="step3-set-selector-section" style="margin-top:14px">
+          <div class="step3-axis-section-title">設問セット</div>
+          <div id="step3-set-selector" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px">
+            <span class="text-sm" style="color:var(--color-text-muted)">設問セット候補がありません。STEP1 で調査票をアップロードしてください。</span>
+          </div>
+          <div id="step3-set-generate-area" style="margin-top:10px; display:flex; align-items:center; gap:12px">
+            <button id="step3-set-generate-btn" class="btn btn-primary" disabled>
+              📊 このセットを生成
+            </button>
+            <span id="step3-run-note" class="text-sm" style="color:var(--color-text-muted)"></span>
+          </div>
         </div>
+
         <div id="step3-axis-ncount" style="margin-top:12px; display:none"></div>
       </div>
     </div>
 
+    <!-- 生成済みセット一覧 -->
+    <div id="step3-generated-sets-section" style="display:none; margin-top:12px">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">生成済みセット</span>
+        </div>
+        <div class="card-body" style="padding-top:8px">
+          <div id="step3-generated-sets-nav" style="display:flex; flex-wrap:wrap; gap:8px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 進捗表示 -->
+    <div id="step3-progress" style="display:none; margin-top:12px">
+      <div class="card">
+        <div class="card-body" style="text-align:center; padding:24px 16px">
+          <div class="spinner" style="display:inline-block; width:28px; height:28px; margin-bottom:8px"></div>
+          <div id="step3-progress-msg" style="font-size:.9rem; color:var(--color-text-muted)">集計中…</div>
+        </div>
+      </div>
+    </div>
+
     <!-- 結果エリア -->
-    <div id="step3-results" style="margin-top:12px; display:none">
-      <!-- JS で動的生成 -->
+    <div id="step3-results" style="margin-top:12px">
+      <div id="step3-placeholder" style="text-align:center; padding:56px 0; color:var(--color-text-muted); font-size:1rem">
+        集計軸と設問セットを選択してください
+      </div>
     </div>
 
   </section>
@@ -531,6 +576,47 @@
       <button id="step3-color-apply-one"       class="btn btn-primary btn-sm">現在のグラフだけ変更</button>
       <button id="step3-color-apply-all"       class="btn btn-primary btn-sm">同じ集計軸すべてに適用</button>
       <button id="step3-color-cancel"          class="btn btn-secondary btn-sm">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== STEP1 設問セット管理モーダル ===== -->
+<div id="step1-set-modal" class="step3-color-overlay" hidden>
+  <div class="step1-set-dialog">
+    <div class="step3-color-dialog-header">
+      <span style="font-weight:600; font-size:.95rem">設問セット管理</span>
+      <button id="step1-set-modal-close" class="btn btn-secondary btn-sm">✕ 閉じる</button>
+    </div>
+
+    <!-- タブ -->
+    <div style="display:flex; gap:6px; margin-bottom:12px; border-bottom:1px solid var(--color-border); padding-bottom:8px;">
+      <button class="btn btn-sm step1-set-tab step1-set-tab-active" data-tab="list">セット一覧</button>
+      <button class="btn btn-secondary btn-sm step1-set-tab" data-tab="custom">＋ カスタムセット作成</button>
+    </div>
+
+    <!-- セット一覧タブ -->
+    <div id="step1-set-tab-list">
+      <div id="step1-set-list-container">
+        <!-- JS 動的生成 -->
+      </div>
+    </div>
+
+    <!-- カスタムセット作成タブ -->
+    <div id="step1-set-tab-custom" style="display:none">
+      <div style="margin-bottom:10px">
+        <label style="font-size:.85rem; font-weight:600">セット名</label>
+        <input id="step1-set-name-input" type="text" class="form-control"
+               placeholder="例：レポート用セット1" style="margin-top:4px">
+      </div>
+      <div style="margin-bottom:10px; font-size:.85rem; font-weight:600">含める設問</div>
+      <div id="step1-set-q-chips" style="display:flex; flex-wrap:wrap; gap:4px; max-height:300px; overflow-y:auto; border:1px solid var(--color-border); border-radius:6px; padding:8px">
+        <!-- JS 動的生成 -->
+      </div>
+      <div style="margin-top:12px; display:flex; gap:8px">
+        <button id="step1-set-create-btn" class="btn btn-primary btn-sm">このセットを作成</button>
+        <button id="step1-set-select-all-btn" class="btn btn-secondary btn-sm">全選択</button>
+        <button id="step1-set-deselect-all-btn" class="btn btn-secondary btn-sm">全解除</button>
+      </div>
     </div>
   </div>
 </div>

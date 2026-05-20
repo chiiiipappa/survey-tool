@@ -1015,3 +1015,104 @@ pre.json-pre {
   margin-bottom: 4px;
   padding-left: 12px;
 }
+
+/* ===== 設問セット UI ===== */
+.step3-set-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #E2E8F0);
+  font-size: .9rem;
+  background: var(--color-surface-1, #fff);
+  transition: background .15s, border-color .15s;
+  user-select: none;
+}
+.step3-set-radio-label:hover {
+  border-color: var(--color-primary, #DF0515);
+}
+.step3-set-radio-label.active {
+  background: var(--color-primary-light, #EFF6FF);
+  border-color: var(--color-primary, #DF0515);
+  font-weight: 600;
+}
+.step3-set-count {
+  font-size: .75rem;
+  color: var(--color-text-muted, #718096);
+  margin-left: 2px;
+}
+.step3-set-badge {
+  display: inline-block;
+  font-size: .72rem;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--color-primary-light, #EFF6FF);
+  color: var(--color-primary, #DF0515);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.step3-generated-set-btn {
+  padding: 5px 14px;
+  border-radius: 14px;
+  font-size: .85rem;
+  border: 1px solid var(--color-border, #E2E8F0);
+  cursor: pointer;
+  background: var(--color-surface-1, #fff);
+  transition: background .15s, border-color .15s, color .15s;
+}
+.step3-generated-set-btn:hover {
+  border-color: var(--color-primary, #DF0515);
+}
+.step3-generated-set-btn.active {
+  background: var(--color-primary, #DF0515);
+  color: #fff;
+  border-color: var(--color-primary, #DF0515);
+}
+.step3-placeholder {
+  color: var(--color-text-muted, #718096);
+  text-align: center;
+  padding: 56px 0;
+  font-size: 1rem;
+}
+
+/* 設問セット管理モーダル */
+.step1-set-dialog {
+  background: var(--color-surface-1, #fff);
+  border-radius: 10px;
+  padding: 20px 24px;
+  width: min(680px, 96vw);
+  max-height: 82vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+}
+.step1-set-tab-active {
+  border-bottom: 2px solid var(--color-primary, #DF0515);
+  font-weight: 700;
+  color: var(--color-primary, #DF0515);
+}
+.step1-set-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, #E2E8F0);
+  margin-bottom: 6px;
+}
+.step1-set-q-chip {
+  display: inline-block;
+  font-size: .7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-surface-2, #F8F8F8);
+  border: 1px solid var(--color-border, #E2E8F0);
+  margin: 1px;
+  cursor: pointer;
+}
+.step1-set-q-chip.selected {
+  background: var(--color-primary-light, #EFF6FF);
+  border-color: var(--color-primary, #DF0515);
+  color: var(--color-primary, #DF0515);
+}
