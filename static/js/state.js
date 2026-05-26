@@ -3,6 +3,7 @@
  * カスタムイベント "survey:statechange" で変更を通知する。
  */
 const _AXIS_TYPE_CODES = new Set(["SA", "S", "NU", "N"]);
+const _AUTO_EXCLUDE_TYPES = new Set(["OA_AUX", "FLAG", "DERIVED"]);
 
 function deriveStep1AxisDefaults(questions) {
   return (questions ?? [])
@@ -11,6 +12,12 @@ function deriveStep1AxisDefaults(questions) {
       !q.has_children &&
       /[*＊]ファンラベル/.test(q.question_text ?? "")
     )
+    .map(q => q.question_code);
+}
+
+function _deriveExcludedDefaults(questions) {
+  return (questions ?? [])
+    .filter(q => _AUTO_EXCLUDE_TYPES.has(q.question_type ?? ""))
     .map(q => q.question_code);
 }
 
@@ -75,6 +82,10 @@ export const AppState = {
   // 設問セット
   questionSets: [],      // QuestionSet[] — { setId, setName, questionCodes, isCustom }
   step3ActiveSetId: "",  // STEP3 で現在選択中のセットID
+  // 設問分類
+  hiddenQuestionTypes: ["OA_AUX", "FLAG", "DERIVED"],  // STEP3 で初期非表示にする question_type
+  // 分析対象
+  excludedQuestionCodes: [],  // 分析対象 OFF（STEP3 集計・分析セット候補から除外）の設問コード
 };
 
 function _emit() {
@@ -203,7 +214,7 @@ export function deleteUserPalette(paletteId) {
 }
 
 export function clearQuestionColorState(questionCode) {
-  const { selectedPalette, overriddenSeriesColors, customColors, ...rest } =
+  const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } =
     AppState.step3QuestionSettings[questionCode] ?? {};
   AppState.step3QuestionSettings = {
     ...AppState.step3QuestionSettings,
@@ -216,7 +227,7 @@ export function clearQuestionColorState(questionCode) {
 export function clearQuestionColorStateBulk(questionCodes) {
   const next = { ...AppState.step3QuestionSettings };
   for (const qCode of questionCodes) {
-    const { selectedPalette, overriddenSeriesColors, customColors, ...rest } = next[qCode] ?? {};
+    const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } = next[qCode] ?? {};
     next[qCode] = rest;
   }
   AppState.step3QuestionSettings = next;
@@ -235,8 +246,9 @@ export function setUploadResult(resp) {
   AppState.questions       = resp.questions ?? [];
   AppState.allTypeCodes    = resp.all_type_codes ?? [];
   AppState.parseWarnings   = resp.parse_warnings ?? [];
-  AppState.step1AxisCodes  = deriveStep1AxisDefaults(AppState.questions);
-  AppState.isDirty         = true;
+  AppState.step1AxisCodes        = deriveStep1AxisDefaults(AppState.questions);
+  AppState.excludedQuestionCodes = _deriveExcludedDefaults(AppState.questions);
+  AppState.isDirty               = true;
   _emit();
 }
 
@@ -286,7 +298,18 @@ export function setLoadedProject(resp) {
   AppState.step3CompositeDisplayMode = resp.layout?.step3_composite_display_mode ?? "split";
   AppState.step3ColorPriority        = resp.layout?.step3_color_priority ?? "axis1";
   AppState.step3MinSampleSize        = resp.layout?.step3_min_sample_size ?? 0;
-  AppState.questionSets   = resp.layout?.question_sets ?? [];
+  AppState.questionSets   = (resp.layout?.question_sets ?? []).map(s => {
+    const isCustom = s.isCustom === true || (typeof s.setId === "string" && s.setId.startsWith("custom_"));
+    if (!isCustom) return { ...s, isCustom: false };
+    // 旧フラット型カスタムセット（isParent なし + questionCodes あり + children なし）を親子構造へマイグレーション
+    if (!s.isParent && (s.questionCodes?.length ?? 0) > 0 && !(s.children?.length)) {
+      return {
+        ...s, isCustom: true, isParent: true, questionCodes: [],
+        children: [{ setId: s.setId + "_ch0", setName: "（未分類）", questionCodes: s.questionCodes ?? [] }],
+      };
+    }
+    return { ...s, isCustom };
+  });
   AppState.step3ActiveSetId = "";
   // 旧 step3_chart_type_map からのマイグレーション + 新 step3_question_settings の復元
   const _oldMap = resp.layout?.step3_chart_type_map ?? {};
@@ -302,6 +325,14 @@ export function setLoadedProject(resp) {
   AppState.step3QuestionSettings = { ..._migrated, ..._newSettings };
   AppState.step1AxisColors = resp.layout?.step1_axis_colors ?? {};
   AppState.userPalettes    = resp.layout?.user_palettes ?? {};
+  // 設問分類: 保存済みがあれば復元、なければデフォルト
+  AppState.hiddenQuestionTypes = resp.layout?.hidden_question_types?.length
+    ? resp.layout.hidden_question_types
+    : ["OA_AUX", "FLAG", "DERIVED"];
+  // 分析対象: 保存済みがあれば復元、なければ question_type から自動初期化
+  AppState.excludedQuestionCodes = resp.layout?.excluded_questions?.length
+    ? resp.layout.excluded_questions
+    : _deriveExcludedDefaults(AppState.questions);
   _emit();
 }
 
@@ -371,6 +402,12 @@ export function setStep1AxisCodes(codes) {
   _emit();
 }
 
+export function setExcludedQuestionCodes(codes) {
+  AppState.excludedQuestionCodes = Array.isArray(codes) ? [...codes] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
 export function resetState() {
   AppState.sessionToken    = null;
   AppState.loadedAt        = null;
@@ -412,7 +449,9 @@ export function resetState() {
   AppState.step3LastGeneratedAxisCode = "";
   AppState.step3QuestionSettings = {};
   AppState.userPalettes = {};
-  AppState.questionSets    = [];
-  AppState.step3ActiveSetId = "";
+  AppState.questionSets          = [];
+  AppState.step3ActiveSetId      = "";
+  AppState.hiddenQuestionTypes   = ["OA_AUX", "FLAG", "DERIVED"];
+  AppState.excludedQuestionCodes = [];
   _emit();
 }

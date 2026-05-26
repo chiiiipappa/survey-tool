@@ -11,7 +11,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_EXTENSIONS = {".csv"}
+ALLOWED_EXTENSIONS = {".csv", ".xlsx"}
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50MB
 
 

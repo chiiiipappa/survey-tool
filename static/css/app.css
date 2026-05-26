@@ -225,24 +225,86 @@ a:hover { text-decoration: underline; }
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(255,255,255,.7);
+  background: rgba(255,255,255,.75);
   z-index: 100;
   align-items: center;
   justify-content: center;
+}
+.spinner-overlay.active { display: flex; }
+.spinner-box {
+  display: flex;
   flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 28px 36px;
+  min-width: 260px;
+  max-width: 360px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.10);
   font-size: .9rem;
   color: var(--color-text-muted);
 }
-.spinner-overlay.active { display: flex; }
 .spinner {
   width: 36px; height: 36px;
   border: 3px solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin .7s linear infinite;
+  flex-shrink: 0;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* 進捗バー */
+#progress-bar-wrap {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-track {
+  flex: 1;
+  height: 8px;
+  background: var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 4px;
+  width: 0%;
+  transition: width .3s ease;
+}
+#progress-pct {
+  font-size: .8rem;
+  min-width: 36px;
+  text-align: right;
+}
+#progress-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  font-size: .8rem;
+}
+.progress-step {
+  padding: 2px 0;
+  color: var(--color-text-muted);
+  opacity: .5;
+}
+.progress-step-done {
+  opacity: .6;
+  color: var(--color-success, #1E8A7A);
+}
+.progress-step-done::before { content: "✓ "; }
+.progress-step-active {
+  opacity: 1;
+  color: var(--color-text);
+  font-weight: 600;
+}
+.progress-step-active::before { content: "▶ "; }
 
 /* ===== ボタン ===== */
 .btn {
@@ -384,6 +446,19 @@ tbody td {
 .badge-ML  { background: #E8F9F7; color: #1E8A7A; }
 .badge-unknown { background: #FDECEA; color: #B8010F; }
 .badge-step { background: #EBEBEB; color: #676767; }
+
+/* 分析用分類バッジ（question_type 11カテゴリ） */
+.badge-qtype-SA        { background: #d1e8ff; color: #0052cc; }
+.badge-qtype-MA        { background: #d4edda; color: #155724; }
+.badge-qtype-MATRIX    { background: #e2d9f3; color: #4a1f6d; }
+.badge-qtype-NUMERIC   { background: #fff3cd; color: #856404; }
+.badge-qtype-OA_TEXT   { background: #fde8d8; color: #7d3f00; }
+.badge-qtype-OA_AUX    { background: #f0f0f0; color: #999; }
+.badge-qtype-WEIGHT    { background: #cce5ff; color: #004085; }
+.badge-qtype-ATTRIBUTE { background: #d6ece1; color: #1a5e3a; }
+.badge-qtype-FLAG      { background: #ffd6d6; color: #6b0000; }
+.badge-qtype-DERIVED   { background: #ececec; color: #666; }
+.badge-qtype-UNKNOWN   { background: #f5f5f5; color: #aaa; }
 
 /* ===== テーブル件数バー ===== */
 .count-bar {
@@ -752,6 +827,13 @@ pre.json-pre {
   background: var(--color-surface-2, #f8f8f8);
 }
 .step3-color-row.dragging { opacity: .35; }
+.step3-vm-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 0; font-size: .82rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.step3-vm-row:last-child { border-bottom: none; }
+.step3-vm-color { width: 32px; height: 24px; border: 1px solid var(--color-border); border-radius: 3px; cursor: pointer; padding: 1px; flex-shrink: 0; }
 .step3-preview-chip {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: .78rem; padding: 2px 6px;
@@ -1078,20 +1160,81 @@ pre.json-pre {
 }
 
 /* 設問セット管理モーダル */
+/* 削除確認ダイアログ */
+.step1-set-delete-dialog {
+  background: var(--color-surface-1, #fff);
+  border-radius: 10px;
+  width: min(360px, 92vw);
+  padding: 24px 24px 20px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.22);
+}
+
 .step1-set-dialog {
   background: var(--color-surface-1, #fff);
   border-radius: 10px;
-  padding: 20px 24px;
-  width: min(680px, 96vw);
+  width: min(960px, 96vw);
   max-height: 82vh;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 8px 32px rgba(0,0,0,.18);
 }
-.step1-set-tab-active {
-  border-bottom: 2px solid var(--color-primary, #DF0515);
-  font-weight: 700;
-  color: var(--color-primary, #DF0515);
+.step1-set-dialog > .step3-color-dialog-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
+
+/* サイドバー + メイン レイアウト */
+.step1-set-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.step1-set-sidebar {
+  width: 220px;
+  min-width: 220px;
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.step1-set-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.step1-set-sidebar-title {
+  font-weight: 600;
+  font-size: .875rem;
+  flex: 1;
+}
+#step1-set-sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+}
+.step1-set-sidebar-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.step1-set-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  min-width: 0;
+}
+.step1-set-editor-empty {
+  color: var(--color-text-muted);
+  font-size: .85rem;
+  padding: 40px 20px;
+  text-align: center;
+}
+#step1-set-editor { display: none; }
 .step1-set-item {
   display: flex;
   align-items: center;
@@ -1116,3 +1259,360 @@ pre.json-pre {
   border-color: var(--color-primary, #DF0515);
   color: var(--color-primary, #DF0515);
 }
+
+/* ===== 分析セット管理モーダル（リデザイン）===== */
+.analysis-set-section-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.analysis-set-section-title  { font-weight:700; font-size:.9rem; color:var(--color-primary); }
+.analysis-set-section-desc   { font-size:.78rem; color:var(--color-text-muted); }
+
+/* 分析セットモーダル: OA_TEXT セクション区切り */
+.analysis-set-oa-header {
+  padding: 5px 8px 4px;
+  font-size: .73rem;
+  font-weight: 600;
+  color: #7d3f00;
+  background: #fde8d8;
+  border-top: 1px solid #f5c9a8;
+  border-bottom: 1px solid #f5c9a8;
+  margin-top: 6px;
+  letter-spacing: .02em;
+}
+
+/* 分析対象 OFF の設問行（STEP1 テーブル） */
+.row-excluded {
+  opacity: 0.45;
+}
+
+.analysis-set-item      { border-left:3px solid var(--color-primary); }
+.analysis-set-item-name { font-weight:600; font-size:.9rem; }
+.analysis-set-delete-btn { color:var(--color-danger,#e53e3e); }
+.analysis-set-empty     { color:var(--color-text-muted); font-size:.85rem; padding:12px 0; margin:0; }
+
+/* システムセット アコーディオン */
+.system-set-accordion         { border:1px solid var(--color-border); border-radius:6px; }
+.system-set-summary           { padding:8px 12px; cursor:pointer; font-size:.85rem; color:var(--color-text-muted); list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
+.system-set-summary::-webkit-details-marker { display:none; }
+.system-set-summary::before   { content:"▶"; font-size:.7rem; transition:transform .2s; }
+details.system-set-accordion[open] .system-set-summary::before { transform:rotate(90deg); }
+.system-set-item              { background:var(--color-surface-alt,#f8f8f8); opacity:.85; }
+
+/* 左右分割パネル（セット作成タブ）*/
+.analysis-set-creator         { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.analysis-set-panel-header    { margin-bottom:8px; }
+.analysis-set-left,
+.analysis-set-right           { display:flex; flex-direction:column; border:1px solid var(--color-border); border-radius:6px; padding:10px; }
+.analysis-set-q-list          { flex:1; overflow-y:auto; max-height:220px; margin-bottom:6px; }
+.analysis-set-selected-list   { flex:1; overflow-y:auto; max-height:260px; }
+
+.analysis-set-q-row           { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; font-size:.82rem; }
+.analysis-set-q-row:hover     { background:var(--color-surface-alt,#f8f8f8); }
+.analysis-set-q-code          { font-weight:600; color:var(--color-primary); min-width:60px; flex-shrink:0; }
+.analysis-set-q-text          { color:var(--color-text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.analysis-set-selected-row    { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; font-size:.82rem; border-bottom:1px solid var(--color-border); }
+.analysis-set-selected-row:last-child { border-bottom:none; }
+.analysis-set-empty-right     { color:var(--color-text-muted); font-size:.8rem; padding:8px; text-align:center; margin:0; }
+
+.analysis-set-badge           { border:1px solid var(--color-primary); color:var(--color-primary); font-weight:600; }
+.system-set-badge             { background:var(--color-surface-alt,#f8f8f8); color:var(--color-text-muted); border:1px solid var(--color-border); }
+
+/* ===== STEP3 分析セット実行リスト ===== */
+.step3-set-run-list   { display:flex; flex-direction:column; gap:0; }
+.step3-set-run-row    { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--color-border); }
+.step3-set-run-row:last-child { border-bottom:none; }
+.step3-set-run-name   { flex:1; font-weight:600; font-size:.88rem; }
+
+.step3-system-set-accordion   { border:1px solid var(--color-border); border-radius:6px; margin-top:8px; }
+.step3-system-set-summary     { padding:6px 12px; cursor:pointer; font-size:.82rem; color:var(--color-text-muted); list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
+.step3-system-set-summary::-webkit-details-marker { display:none; }
+.step3-system-set-summary::before { content:"▶"; font-size:.65rem; transition:transform .2s; }
+details.step3-system-set-accordion[open] .step3-system-set-summary::before { transform:rotate(90deg); }
+.step3-system-sets-inner      { padding:0 10px 10px; }
+
+/* ===== STEP3 サイドバーレイアウト ===== */
+#panel-step3.active {
+  display: flex;
+  margin: -24px;
+  min-height: calc(100vh - 96px);
+}
+.step3-layout { display: flex; flex: 1; min-width: 0; }
+
+.step3-sidebar {
+  width: 220px;
+  min-width: 220px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: calc(100vh - 96px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+  transition: width .2s ease, min-width .2s ease;
+}
+.step3-sidebar.collapsed { width: 44px; min-width: 44px; }
+.step3-sidebar.collapsed .step3-sidebar-label { display: none; }
+.step3-sidebar.collapsed .step3-sidebar-label-block { display: none; }
+.step3-sidebar.collapsed #step3-sidebar-collapse { transform: scaleX(-1); }
+
+.step3-sidebar-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  z-index: 1;
+}
+.step3-sidebar-title { font-weight: 600; font-size: .875rem; }
+
+.step3-sidebar-search { padding: 7px 10px; border-bottom: 1px solid var(--color-border); }
+.step3-sidebar-search-input {
+  width: 100%;
+  font-size: .8rem;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.step3-sidebar-search-input:focus { outline: none; border-color: var(--color-primary); }
+
+.step3-nav-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: .875rem;
+  transition: background .12s;
+  border-left: 3px solid transparent;
+  line-height: 1.3;
+}
+.step3-nav-item:hover { background: var(--color-surface-2, #f5f5f5); }
+.step3-nav-item.active {
+  background: #e8f0fe;
+  border-left-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.step3-nav-item.step3-nav-item-disabled { opacity: .5; cursor: default; pointer-events: none; }
+.step3-nav-dot     { margin-top: 4px; }
+.step3-nav-dot-placeholder { margin-top: 4px; }
+
+.step3-nav-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.step3-nav-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.step3-nav-item-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.step3-nav-item-count {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.step3-nav-item.active .step3-nav-item-count { color: var(--color-primary); opacity: .75; }
+.step3-nav-item-desc {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.step3-nav-item.active .step3-nav-item-desc { color: var(--color-primary); opacity: .75; }
+
+.step3-nav-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+.step3-nav-dot-placeholder { width: 6px; flex-shrink: 0; display: inline-block; }
+
+.step3-nav-system-details { border-top: 1px solid var(--color-border); margin-top: 4px; }
+.step3-nav-system-summary {
+  padding: 7px 12px;
+  font-size: .78rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.step3-nav-system-summary::-webkit-details-marker { display: none; }
+.step3-nav-system-summary::before { content: "▶"; font-size: .6rem; transition: transform .2s; }
+details.step3-nav-system-details[open] .step3-nav-system-summary::before { transform: rotate(90deg); }
+
+.step3-nav-section-header {
+  padding: 10px 12px 4px;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+.step3-nav-empty { padding: 16px 12px; font-size: .83rem; color: var(--color-text-muted); }
+.step3-nav-note  { padding: 5px 12px 10px; font-size: .78rem; color: var(--color-text-muted); line-height: 1.5; }
+
+.step3-main { flex: 1; min-width: 0; padding: 24px; overflow-y: auto; }
+
+/* ===== STEP3 サイドバー: 親セット（<details>）===== */
+.step3-nav-parent-details {
+  border-bottom: 1px solid var(--color-border);
+}
+.step3-nav-parent-summary {
+  padding: 7px 10px 7px 12px;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-surface-2, #f8f8f8);
+  user-select: none;
+  font-weight: 600;
+}
+.step3-nav-parent-summary::-webkit-details-marker { display: none; }
+.step3-nav-parent-summary::before {
+  content: "▶";
+  font-size: .58rem;
+  flex-shrink: 0;
+  transition: transform .2s;
+  color: var(--color-text-muted);
+}
+details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { transform: rotate(90deg); }
+
+/* ===== STEP3 サイドバー: 子セット（インデント）===== */
+.step3-nav-child { padding-left: 22px !important; }
+
+/* ===== STEP1 モーダル: 親子階層 ===== */
+.step1-parent-item {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.step1-parent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-surface-2, #f8f8f8);
+}
+.step1-parent-name {
+  font-weight: 600;
+  flex: 1;
+  font-size: .9rem;
+}
+.step1-children-list {
+  padding: 4px 8px 8px;
+}
+.step1-child-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: .875rem;
+}
+.step1-child-item:hover { background: var(--color-surface-2, #f5f5f5); }
+.step1-child-name { flex: 1; }
+.step1-child-empty {
+  padding: 8px 8px;
+  font-size: .8rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+.step1-set-target-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+/* ===== STEP1 分析セット統合リスト ===== */
+.step1-set-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: .875rem;
+}
+.step1-set-row:hover { background: var(--color-surface-2, #f8f8f8); }
+.step1-set-name { flex: 1; font-weight: 600; }
+.step1-set-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
+
+/* セット行：情報部分（名前＋質問文） */
+.step1-set-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.step1-set-info-header { display: flex; align-items: center; gap: 6px; }
+.step1-set-desc {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* × 削除ボタン（常時表示、ホバーで赤） */
+.step1-set-delete-btn {
+  padding: 4px 7px;
+  font-size: .8rem;
+  font-weight: 600;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #bbb;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.step1-set-delete-btn:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+/* 除外セットを薄く */
+.step3-nav-item.step3-nav-item-excluded { opacity: .65; }
+
+/* 除外中バッジ */
+.step1-set-excluded-badge {
+  font-size: .7rem;
+  padding: 1px 6px;
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 4px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.step1-set-row-excluded { opacity: .7; }
+.step1-set-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .8rem;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  padding: 0 0 10px;
+  cursor: pointer;
+}
+.step1-set-back-btn:hover { color: var(--color-primary); text-decoration: underline; }

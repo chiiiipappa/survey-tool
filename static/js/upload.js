@@ -49,12 +49,14 @@ export function initUploadPanel() {
 }
 
 export async function handleCsvFile(file) {
-  if (!file.name.toLowerCase().endsWith(".csv")) {
-    showError("CSV ファイル（.csv）を選択してください。");
+  const lname = file.name.toLowerCase();
+  if (!lname.endsWith(".csv") && !lname.endsWith(".xlsx")) {
+    showError("CSV (.csv) または Excel (.xlsx) ファイルを選択してください。");
     return;
   }
   _lastFile = file;
-  showSpinner("CSV を解析中…");
+  const label = lname.endsWith(".xlsx") ? "Excel" : "CSV";
+  showSpinner(`${label} を解析中…`);
   try {
     const resp = await uploadFile(file);
     setUploadResult(resp);
@@ -115,10 +117,11 @@ function renderFileInfo(resp) {
       <span class="info-label">設問数:</span>
       <span class="info-value">${resp.row_count}</span>
     </div>
+    ${resp.encoding_detected !== "Excel" ? `
     <div class="info-item">
       <span class="info-label">文字コード:</span>
       <span class="info-value">${escHtml(resp.encoding_detected)}</span>
-    </div>
+    </div>` : ""}
     <div class="info-item">
       <span class="info-label">選択肢列:</span>
       <span class="info-value">${escHtml(CHOICE_MODE_LABEL[resp.choice_column_mode] ?? resp.choice_column_mode)}</span>

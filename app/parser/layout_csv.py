@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # 種別コードマッピング
 # ---------------------------------------------------------------------------
 
+_OA_TYPE_CODES = {"FA", "F", "OA", "XL"}
+_OA_TEXT_KEYWORDS = ["自由回答", "フリーアンサー", "テキスト入力", "その他（記述）", "open answer"]
+_AUX_EXCLUDE_TYPES = {"OA_TEXT", "WEIGHT", "FLAG"}
+
 TYPE_LABEL_MAP: Dict[str, str] = {
     # 既存コード
     "SA": "単一回答",
@@ -66,6 +70,82 @@ def get_type_label(type_code: str) -> Tuple[str, bool]:
     if label:
         return label, False
     return type_code, True
+
+
+def classify_question_type(q: "QuestionItem") -> str:
+    """
+    設問を 11 カテゴリに自動分類して返す。
+
+    優先順:
+      WEIGHT > FLAG > ATTRIBUTE > DERIVED > OA_TEXT > MATRIX > MA > SA > NUMERIC > UNKNOWN
+    """
+    code_lower = q.question_code.lower()
+    type_upper = (q.type_code or "").upper()
+    text = q.question_text or ""
+    text_lower = text.lower()
+    stub_lower = (q.stub or "").lower()
+
+    # 1. WEIGHT
+    if (re.search(r"_weight$", code_lower)
+            or "ウェイト" in text
+            or "weight" in text_lower
+            or "ウェイト" in stub_lower
+            or "weight" in stub_lower):
+        return "WEIGHT"
+
+    # 2. FLAG
+    if ("flag" in code_lower
+            or "フラグ" in text
+            or "フラグ" in stub_lower):
+        return "FLAG"
+
+    # 3. ATTRIBUTE
+    if (text.startswith("[属性]")
+            or text.startswith("【属性】")
+            or text_lower.startswith("[attr]")):
+        return "ATTRIBUTE"
+
+    # 4. DERIVED
+    if re.search(r"(score|derived|calc|computed)$", code_lower):
+        return "DERIVED"
+
+    # 5. OA_TEXT: type_code 優先
+    if type_upper in _OA_TYPE_CODES:
+        return "OA_TEXT"
+    # OA_TEXT: テキストキーワード
+    if any(kw in text_lower or kw in stub_lower for kw in _OA_TEXT_KEYWORDS):
+        return "OA_TEXT"
+
+    # 6. MATRIX
+    if type_upper in {"ML", "SL"}:
+        return "MATRIX"
+
+    # 7. MA
+    if type_upper in {"MA", "M"}:
+        return "MA"
+
+    # 8. SA
+    if type_upper in {"SA", "S"}:
+        return "SA"
+
+    # 9. NUMERIC
+    if type_upper in {"NU", "N"}:
+        return "NUMERIC"
+
+    return "UNKNOWN"
+
+
+def _classify_oa_aux(questions: List["QuestionItem"]) -> List["QuestionItem"]:
+    """2パス目: 親が OA_TEXT の子設問を OA_AUX に変更する。"""
+    code_to_type = {q.question_code: q.question_type for q in questions}
+    for q in questions:
+        if (q.is_child
+                and q.parent_code
+                and code_to_type.get(q.parent_code) == "OA_TEXT"
+                and q.question_type not in _AUX_EXCLUDE_TYPES):
+            q.question_type = "OA_AUX"
+            q.auto_detected_type = "OA_AUX"
+    return questions
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +399,13 @@ def _parse_cqt_format(
         q.choice_count = len(q.choices)
         q.has_children = q.question_code in parent_codes
 
+    # question_type 自動分類（1パス目 + OA_AUX 2パス目）
+    for q in questions:
+        qt = classify_question_type(q)
+        q.question_type = qt
+        q.auto_detected_type = qt
+    questions = _classify_oa_aux(questions)
+
     return questions, parse_warnings, sorted(unknown_type_set)
 
 
@@ -347,12 +434,11 @@ def _make_q(code: str, type_code: str, title: str, row_idx: int) -> QuestionItem
 # メイン関数
 # ---------------------------------------------------------------------------
 
-def parse_layout_csv(
-    raw_bytes: bytes,
-    encoding: str,
+def _parse_layout_df(
+    df: pd.DataFrame,
 ) -> Tuple[List[QuestionItem], List[str], ChoiceColumnMode, List[str]]:
     """
-    レイアウト CSV のバイト列を解析して設問リストを返す。
+    正規化済み DataFrame をパースして設問リストを返す（CSV・Excel 共通処理）。
 
     Returns:
         questions        : List[QuestionItem]
@@ -362,15 +448,6 @@ def parse_layout_csv(
     """
     parse_warnings: List[str] = []
     unknown_type_set: set[str] = set()
-
-    # --- デコード ---
-    text = decode_text(raw_bytes, encoding)
-    text = text.lstrip("﻿")  # BOM 除去
-
-    try:
-        df = pd.read_csv(io.StringIO(text), header=0, dtype=str)
-    except Exception as e:
-        raise ValueError(f"CSV の読み込みに失敗しました: {e}") from e
 
     # 列名の正規化（前後スペース除去）
     df.columns = [str(c).strip() for c in df.columns]
@@ -456,5 +533,44 @@ def parse_layout_csv(
     for q in questions:
         q.has_children = q.question_code in parent_codes
 
+    # question_type 自動分類（1パス目 + OA_AUX 2パス目）
+    for q in questions:
+        qt = classify_question_type(q)
+        q.question_type = qt
+        q.auto_detected_type = qt
+    questions = _classify_oa_aux(questions)
+
     unknown_types = sorted(unknown_type_set)
     return questions, parse_warnings, choice_col_mode, unknown_types
+
+
+# ---------------------------------------------------------------------------
+# 公開エントリーポイント
+# ---------------------------------------------------------------------------
+
+def parse_layout_csv(
+    raw_bytes: bytes,
+    encoding: str,
+) -> Tuple[List[QuestionItem], List[str], ChoiceColumnMode, List[str]]:
+    """レイアウト CSV のバイト列を解析して設問リストを返す。"""
+    text = decode_text(raw_bytes, encoding)
+    text = text.lstrip("﻿")  # BOM 除去
+
+    try:
+        df = pd.read_csv(io.StringIO(text), header=0, dtype=str)
+    except Exception as e:
+        raise ValueError(f"CSV の読み込みに失敗しました: {e}") from e
+
+    return _parse_layout_df(df)
+
+
+def parse_layout_excel(
+    raw_bytes: bytes,
+) -> Tuple[List[QuestionItem], List[str], ChoiceColumnMode, List[str]]:
+    """レイアウト Excel (.xlsx) のバイト列を解析して設問リストを返す。"""
+    try:
+        df = pd.read_excel(io.BytesIO(raw_bytes), header=0, dtype=str, engine="openpyxl")
+    except Exception as e:
+        raise ValueError(f"Excel ファイルの読み込みに失敗しました: {e}") from e
+
+    return _parse_layout_df(df)

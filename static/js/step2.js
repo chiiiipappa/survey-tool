@@ -2,14 +2,39 @@
  * STEP2: 回答データ読込・ラベル変換 パネル UI ロジック。
  */
 import { AppState, setStep2UploadResult, setStep2FaMeta, setStep2FaCodes } from "./state.js";
-import { uploadResponseFile, exportLabeledData, getFaData, exportFaData, getFaMeta, saveFaSettings } from "./api.js";
-import { showSpinner, hideSpinner, showToast, showError, activatePanel } from "./app.js";
+import { uploadResponseFile, getStep2Progress, exportLabeledData, getFaData, exportFaData, getFaMeta, saveFaSettings } from "./api.js";
+import { showProgress, updateProgress, hideProgress, showToast, showError, activatePanel } from "./app.js";
 
 // ---------------------------------------------------------------------------
 // 初期化
 // ---------------------------------------------------------------------------
 
 let _lastFile = null;
+let _uploadAbortController = null;
+let _pollInterval = null;
+
+const UPLOAD_STEPS = [
+  "ファイル送信中…",
+  "ファイル解析中…",
+  "変換辞書を構築中…",
+  "ラベル変換中…",
+  "MA展開・集計軸検出中…",
+  "Parquet保存中…",
+];
+
+function _startProgressPoll(sessionToken) {
+  _pollInterval = setInterval(async () => {
+    try {
+      const p = await getStep2Progress(sessionToken);
+      if (!p) return;
+      updateProgress(p.pct, -1, p.message);
+    } catch (_) { /* ignore */ }
+  }, 600);
+}
+
+function _stopProgressPoll() {
+  if (_pollInterval) { clearInterval(_pollInterval); _pollInterval = null; }
+}
 
 export function initStep2Panel() {
   _initDropZone();
@@ -67,16 +92,38 @@ async function _handleFile(file) {
     return;
   }
 
-  showSpinner("回答データを解析中…");
+  _uploadAbortController = new AbortController();
+  showProgress({
+    title: "回答データを解析中…",
+    steps: UPLOAD_STEPS,
+    showCancel: true,
+    onCancel: () => {
+      _uploadAbortController?.abort();
+      _stopProgressPoll();
+    },
+  });
+  updateProgress(5, 0);
+  _startProgressPoll(AppState.sessionToken);
+
   try {
-    const resp = await uploadResponseFile(file, AppState.sessionToken);
+    const resp = await uploadResponseFile(file, AppState.sessionToken, {
+      signal: _uploadAbortController.signal,
+    });
+    _stopProgressPoll();
+    updateProgress(100, UPLOAD_STEPS.length - 1, "完了");
     setStep2UploadResult(resp);
     _renderAll(resp);
     showToast("回答データを読み込みました。");
   } catch (err) {
+    _stopProgressPoll();
+    if (err.name === "AbortError") {
+      showToast("アップロードをキャンセルしました。");
+      return;
+    }
     showError(err.message);
   } finally {
-    hideSpinner();
+    hideProgress();
+    _uploadAbortController = null;
   }
 }
 
@@ -88,11 +135,10 @@ function _renderAll(resp) {
   renderFileInfoBar(resp);
   renderAdvancedCard(resp);          // ② 折りたたみ
   renderPreviewCard(resp);
-  renderSelectedAxisDisplay(resp);   // ③ 選択済み集計軸（読み取り専用）
+  renderSelectedAxisDisplay(resp);   // validatedStep1Axes を設定（FA表形成で使用）
   document.getElementById("step2-upload-card").style.display = "none";
   _renderStep2LoadedInfo(resp);
   document.getElementById("step2-loaded-card").style.display = "";
-  document.getElementById("step2-selected-axis-card").style.display = "";
   document.getElementById("step2-fa-form-card").style.display = "";  // ④ 即時表示
   document.getElementById("step2-to-step3-card").style.display = "";
   _loadFaMeta();
@@ -115,7 +161,6 @@ function _resetStep2() {
   document.getElementById("step2-upload-card").style.display = "";
   document.getElementById("step2-loaded-card").style.display = "none";
   document.getElementById("step2-advanced-card").style.display = "none";
-  document.getElementById("step2-selected-axis-card").style.display = "none";
   document.getElementById("step2-fa-form-card").style.display = "none";
   document.getElementById("step2-fa-card").style.display = "none";
   document.getElementById("step2-to-step3-card").style.display = "none";
@@ -371,6 +416,8 @@ function _applyColSearch() {
   _renderLabeledPreviewTable("step2-preview-labeled", _labeledRows, q);
 }
 
+const PREVIEW_COL_LIMIT = 50; // 表示列の上限。超過分は「他N列を表示」ボタンで展開
+
 function _renderLabeledPreviewTable(containerId, rows, colFilter = "") {
   const el = document.getElementById(containerId);
   if (!rows.length) {
@@ -379,13 +426,15 @@ function _renderLabeledPreviewTable(containerId, rows, colFilter = "") {
   }
   const questionMap = new Map(AppState.questions.map(q => [q.question_code, q.question_text]));
   const allCols = Object.keys(rows[0]);
-  const cols = colFilter
+  const filtered = colFilter
     ? allCols.filter((c, i) => {
         if (i === 0) return true;
         const text = (questionMap.get(c) ?? c).toLowerCase();
         return c.toLowerCase().includes(colFilter) || text.includes(colFilter);
       })
     : allCols;
+  const cols = filtered.slice(0, PREVIEW_COL_LIMIT);
+  const hiddenCount = filtered.length - cols.length;
   const numStyle = `style="width:40px;text-align:right;color:var(--color-text-muted)"`;
   const thead = `<tr><th ${numStyle}>#</th>${cols.map(c => {
     const title = questionMap.get(c) ?? c;
@@ -394,7 +443,10 @@ function _renderLabeledPreviewTable(containerId, rows, colFilter = "") {
   const tbody = rows.map((row, i) =>
     `<tr><td ${numStyle}>${i + 1}</td>${cols.map(c => `<td>${_esc(String(row[c] ?? ""))}</td>`).join("")}</tr>`
   ).join("");
-  el.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+  const moreBtn = hiddenCount > 0
+    ? `<p class="text-sm" style="padding:8px 0; color:var(--color-text-muted)">他 ${hiddenCount} 列を非表示（列フィルターで絞り込めます）</p>`
+    : "";
+  el.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>${moreBtn}`;
 }
 
 function _renderPreviewTable(containerId, rows, colFilter = "") {
@@ -405,13 +457,15 @@ function _renderPreviewTable(containerId, rows, colFilter = "") {
   }
   const questionMap = new Map(AppState.questions.map(q => [q.question_code, q.question_text]));
   const allCols = Object.keys(rows[0]);
-  const cols = colFilter
+  const filtered = colFilter
     ? allCols.filter((c, i) => {
         if (i === 0) return true;
         const text = (questionMap.get(c) ?? "").toLowerCase();
         return c.toLowerCase().includes(colFilter) || text.includes(colFilter);
       })
     : allCols;
+  const cols = filtered.slice(0, PREVIEW_COL_LIMIT);
+  const hiddenCount = filtered.length - cols.length;
   const numStyle = `style="width:40px;text-align:right;color:var(--color-text-muted)"`;
   const thead = `<tr><th ${numStyle}>#</th>${cols.map(c => {
     const tip = questionMap.get(c);
@@ -420,7 +474,10 @@ function _renderPreviewTable(containerId, rows, colFilter = "") {
   const tbody = rows.map((row, i) =>
     `<tr><td ${numStyle}>${i + 1}</td>${cols.map(c => `<td>${_esc(String(row[c] ?? ""))}</td>`).join("")}</tr>`
   ).join("");
-  el.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+  const moreBtn = hiddenCount > 0
+    ? `<p class="text-sm" style="padding:8px 0; color:var(--color-text-muted)">他 ${hiddenCount} 列を非表示（列フィルターで絞り込めます）</p>`
+    : "";
+  el.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>${moreBtn}`;
 }
 
 function _renderUnmatchedTable(containerId, items) {

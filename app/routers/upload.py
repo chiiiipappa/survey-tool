@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.data_store import survey_cache
-from app.parser.layout_csv import parse_layout_csv
+from app.parser.layout_csv import parse_layout_csv, parse_layout_excel
 from app.schemas import UploadResponse
 from app.utils import detect_encoding, validate_file_extension, validate_file_size
 
@@ -28,7 +29,7 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
     if not validate_file_extension(filename):
         raise HTTPException(
             status_code=422,
-            detail=f"CSV ファイルのみ対応しています。（受け取ったファイル: {filename}）",
+            detail=f"CSV (.csv) または Excel (.xlsx) ファイルを選択してください。（受け取ったファイル: {filename}）",
         )
     if not validate_file_size(len(raw)):
         mb = len(raw) / 1024 / 1024
@@ -37,19 +38,25 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
             detail=f"ファイルサイズが上限（50MB）を超えています。（{mb:.1f}MB）",
         )
 
-    encoding = detect_encoding(raw)
+    is_excel = filename.lower().endswith(".xlsx")
+    encoding = "Excel" if is_excel else detect_encoding(raw)
 
     try:
-        questions, parse_warnings, choice_col_mode, unknown_types = parse_layout_csv(
-            raw, encoding
-        )
+        if is_excel:
+            questions, parse_warnings, choice_col_mode, unknown_types = await asyncio.to_thread(
+                parse_layout_excel, raw
+            )
+        else:
+            questions, parse_warnings, choice_col_mode, unknown_types = await asyncio.to_thread(
+                parse_layout_csv, raw, encoding
+            )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error(f"パースエラー: {e}", exc_info=True)
         raise HTTPException(
             status_code=422,
-            detail=f"CSV の解析中にエラーが発生しました: {e}",
+            detail=f"ファイルの解析中にエラーが発生しました: {e}",
         )
 
     all_type_codes = sorted(set(q.type_code for q in questions if q.type_code))

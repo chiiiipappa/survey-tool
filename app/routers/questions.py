@@ -149,6 +149,8 @@ async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
         step3_min_sample_size=req.step3_min_sample_size,
         question_sets=req.question_sets,
         step3_crosstab_cache=req.step3_crosstab_cache,
+        hidden_question_types=req.hidden_question_types,
+        excluded_questions=req.excluded_questions,
     )
 
     buf = io.BytesIO()

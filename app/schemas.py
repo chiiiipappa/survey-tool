@@ -31,6 +31,9 @@ class QuestionItem(BaseModel):
     original_question: str
     original_type: str
     choice_count: int = 0
+    question_type: str = "UNKNOWN"           # 11-category 分析用分類
+    auto_detected_type: str = "UNKNOWN"      # 自動判定値（不変）
+    manual_override_type: Optional[str] = None  # ユーザー上書き
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +282,8 @@ class ProjectSaveRequest(BaseModel):
     step3_min_sample_size: int = 0
     question_sets: List[dict] = Field(default_factory=list)
     step3_crosstab_cache: dict = Field(default_factory=dict)
+    hidden_question_types: List[str] = Field(default_factory=list)
+    excluded_questions: List[str] = Field(default_factory=list)
 
 
 class LayoutSaveData(BaseModel):
@@ -299,6 +304,8 @@ class LayoutSaveData(BaseModel):
     step3_min_sample_size: int = 0
     question_sets: List[dict] = Field(default_factory=list)
     step3_crosstab_cache: dict = Field(default_factory=dict)
+    hidden_question_types: List[str] = Field(default_factory=list)
+    excluded_questions: List[str] = Field(default_factory=list)
 
 
 class Step2SaveData(BaseModel):

@@ -2,19 +2,23 @@
  * 設問一覧パネルの制御（テーブル描画・検索・フィルタ・軸/属性フラグ編集）。
  */
 import { getQuestions, saveProject, loadProject, saveStep1AxisSettings } from "./api.js";
-import { AppState, setFilterState, setStep1AxisCodes, resetState, setLoadedProject, setProjectName, markClean, markDirty, setStep1FixedPalette, clearStep1FixedPalette, addUserPalette, deleteUserPalette, setQuestionSets, setStep3ActiveSetId } from "./state.js";
+import { AppState, setFilterState, setStep1AxisCodes, resetState, setLoadedProject, setProjectName, markClean, markDirty, setStep1FixedPalette, clearStep1FixedPalette, addUserPalette, deleteUserPalette, setQuestionSets, setStep3ActiveSetId, setExcludedQuestionCodes } from "./state.js";
 import { getCrosstabCache, setCrosstabCache } from "./step3.js";
 import { showToast, showError, showSpinner, hideSpinner, activatePanel } from "./app.js";
 import { handleCsvFile, reloadLastCsvFile } from "./upload.js";
 
 const AXIS_TYPE_CODES = new Set(["SA", "S", "NU", "N", "ML"]);
 
+// STEP1 一覧で初期非表示にする question_type（「補助列も表示」チェックなし時）
+const AUX_QUESTION_TYPES = new Set(["OA_AUX", "FLAG", "DERIVED"]);
+
 const FIXED_PALETTE_LABELS = {
   fan_label:  "ファンラベル",
   gender:     "男女パレット",
-  age_gender: "性年代パレット",
+  age_gender: "性年代パレットA",
   age_a:      "年代別パレットA",
   age_b:      "年代別パレットB",
+  age_c:      "年代別パレットC",
   scale_67:   "6〜7段階",
   scale_1011: "10〜11段階",
 };
@@ -24,11 +28,12 @@ const FIXED_PALETTE_PREVIEWS = {
   age_gender: ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A","#FBCFE8","#F9A8D4","#F472B6","#EC4899","#DB2777","#9D174D"],
   age_a:      ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"],
   age_b:      ["#D1FAE5","#A7F3D0","#6EE7B7","#34D399","#10B981","#065F46"],
+  age_c:      ["#FEF3C7","#FDE68A","#FCD34D","#FBBF24","#F59E0B","#B45309"],
   scale_67:   ["#9D174D","#EC4899","#F9A8D4","#D9D9D9","#93C5FD","#3B82F6","#1E3A8A"],
   scale_1011: ["#9D174D","#DB2777","#EC4899","#F472B6","#F9A8D4","#D9D9D9","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"],
 };
 const DEFAULT_COLORS_PREVIEW = ["#4299E1","#F6AD55","#68D391","#F687B3","#9F7AEA"];
-const FIXED_PALETTE_ORDER_Q = ["fan_label","gender","age_gender","age_a","age_b","scale_67","scale_1011"];
+const FIXED_PALETTE_ORDER_Q = ["fan_label","gender","age_gender","age_a","age_b","age_c","scale_67","scale_1011"];
 
 // ---------------------------------------------------------------------------
 // 設問セット 自動推定・管理
@@ -36,42 +41,62 @@ const FIXED_PALETTE_ORDER_Q = ["fan_label","gender","age_gender","age_a","age_b"
 
 const _FA_TYPES = new Set(["FA","OA","OE","FT","FN"]);
 
-export function autoDetectQuestionSets(questions) {
+// STEP3 デフォルト表示対象の question_type
+const STEP3_DEFAULT_TYPES = new Set(["SA","MA","MATRIX","NUMERIC","WEIGHT","ATTRIBUTE","UNKNOWN"]);
+
+function _getRootPrefix(q, qMap, visited = new Set()) {
+  if (visited.has(q.question_code)) {
+    return q.question_code.match(/^([A-Za-z]+\d+)/)?.[1] ?? q.question_code;
+  }
+  visited.add(q.question_code);
+  if (q.parent_code && qMap[q.parent_code]) {
+    return _getRootPrefix(qMap[q.parent_code], qMap, visited);
+  }
+  return q.question_code.match(/^([A-Za-z]+\d+)/)?.[1] ?? q.question_code;
+}
+
+const _AUTO_SKIP_TYPES = new Set(["OA_TEXT", "OA_AUX", "FLAG", "DERIVED", "WEIGHT"]);
+
+export function autoDetectQuestionSets(questions, excludedCodes = []) {
   if (!questions || questions.length === 0) return [];
-  const groups = {};
+  const excluded = new Set(excludedCodes);
+  const qMap = Object.fromEntries(questions.map(q => [q.question_code, q]));
+
+  const groups = new Map();
   for (const q of questions) {
-    const tc = (q.type_code ?? "").toUpperCase();
-    // FA 系も含めてグループ化（「全設問(FA除く)」は別途作成）
-    const m = q.question_code.match(/^([A-Za-z]+\d+)/);
-    const prefix = m ? m[1] : q.question_code;
-    if (!groups[prefix]) groups[prefix] = [];
-    groups[prefix].push(q.question_code);
+    const qt = q.question_type ?? "UNKNOWN";
+    if (_AUTO_SKIP_TYPES.has(qt)) continue;
+    if (q.has_children) continue;
+    if (excluded.has(q.question_code)) continue;
+
+    const prefix = _getRootPrefix(q, qMap);
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push(q.question_code);
   }
-  const sets = Object.entries(groups).map(([prefix, codes]) => ({
-    setId: `auto_${prefix.toLowerCase()}`,
-    setName: `${prefix}系`,
-    questionCodes: codes,
-    isCustom: false,
-  }));
-  // 先頭に「全設問（FA除く）」
-  const allCodes = questions
-    .filter(q => !_FA_TYPES.has((q.type_code ?? "").toUpperCase()))
-    .map(q => q.question_code);
-  if (allCodes.length > 0) {
-    sets.unshift({
-      setId: "auto_all",
-      setName: "全設問（FA除く）",
-      questionCodes: allCodes,
+
+  return Array.from(groups.entries())
+    .filter(([, codes]) => codes.length > 0)
+    .map(([prefix, codes]) => ({
+      setId: `auto_${prefix.toLowerCase()}`,
+      setName: `${prefix}系`,
+      questionCodes: codes,
       isCustom: false,
-    });
-  }
-  return sets;
+      isParent: false,
+      children: [],
+    }));
 }
 
 function _maybeAutoDetect() {
   if (AppState.questions.length > 0 && AppState.questionSets.length === 0) {
-    setQuestionSets(autoDetectQuestionSets(AppState.questions));
+    setQuestionSets(autoDetectQuestionSets(AppState.questions, AppState.excludedQuestionCodes));
   }
+}
+
+function _getSetQuestionCount(s) {
+  if (s.isParent) {
+    return (s.children ?? []).reduce((sum, c) => sum + (c.questionCodes?.length ?? 0), 0);
+  }
+  return s.questionCodes?.length ?? 0;
 }
 
 function _renderSetSummary() {
@@ -84,9 +109,11 @@ function _renderSetSummary() {
     return;
   }
   card.style.display = "";
-  summary.innerHTML = AppState.questionSets
-    .map(s => `<span class="step3-set-badge" title="${escHtml(s.questionCodes.join(", "))}">${escHtml(s.setName)} <small style="opacity:.7">(${s.questionCodes.length}問)</small></span>`)
-    .join("");
+  const sets = AppState.questionSets;
+  const totalQ = sets.reduce((sum, s) => sum + _getSetQuestionCount(s), 0);
+  const names = sets.slice(0, 3).map(s => `「${escHtml(s.setName)}」`).join("");
+  const more = sets.length > 3 ? `ほか${sets.length - 3}セット` : "";
+  summary.innerHTML = `<span style="font-size:.85rem; color:var(--color-text-muted)">${names}${more} / 計${totalQ}問</span>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,120 +121,342 @@ function _renderSetSummary() {
 // ---------------------------------------------------------------------------
 
 let _setEditingId = null;
+let _allQuestionsForCreate = null;
+let _editingInitialName  = "";
+let _editingInitialCodes = new Set();
 
 function _initSetModal() {
-  const modal   = document.getElementById("step1-set-modal");
+  const modal    = document.getElementById("step1-set-modal");
   const closeBtn = document.getElementById("step1-set-modal-close");
   if (!modal) return;
 
   closeBtn?.addEventListener("click", () => { modal.hidden = true; });
   modal.addEventListener("click", e => { if (e.target === modal) modal.hidden = true; });
 
-  // タブ切り替え
-  modal.querySelectorAll(".step1-set-tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      modal.querySelectorAll(".step1-set-tab").forEach(t => {
-        t.classList.toggle("step1-set-tab-active", t === tab);
-        t.classList.toggle("btn-secondary", t !== tab);
-      });
-      const active = tab.dataset.tab;
-      document.getElementById("step1-set-tab-list").style.display    = active === "list"   ? "" : "none";
-      document.getElementById("step1-set-tab-custom").style.display  = active === "custom" ? "" : "none";
-      if (active === "custom") _refreshSetCreatePanel();
-    });
+  // エディタの表示/非表示
+  const _showEditor = (show) => {
+    const editor = document.getElementById("step1-set-editor");
+    const empty  = document.getElementById("step1-set-editor-empty");
+    if (editor) editor.style.display = show ? "block" : "none";
+    if (empty)  empty.style.display  = show ? "none"  : "block";
+  };
+
+  // 「初期状態に戻す」ボタン → 自動生成状態に戻す
+  document.getElementById("step1-set-regenerate-btn")?.addEventListener("click", () => {
+    if (!confirm("現在の集計セット編集内容を破棄し、自動生成された初期状態に戻します。よろしいですか？")) return;
+    setQuestionSets(autoDetectQuestionSets(AppState.questions, AppState.excludedQuestionCodes));
+    _setEditingId = null;
+    _showEditor(false);
+    _refreshSetList();
+    _renderSetSummary();
   });
 
-  // カスタムセット作成
-  document.getElementById("step1-set-create-btn")?.addEventListener("click", _createCustomSet);
+  // 編集内容が変更されているか判定
+  const _isDirty = () => {
+    const name  = document.getElementById("step1-set-name-input")?.value ?? "";
+    const codes = _getCheckedCodes();
+    if (name !== _editingInitialName) return true;
+    if (codes.size !== _editingInitialCodes.size) return true;
+    for (const c of codes) { if (!_editingInitialCodes.has(c)) return true; }
+    return false;
+  };
+
+  // 変更を破棄（編集中 → データ再ロード、新規 → エディタ非表示）
+  const _discardChanges = () => {
+    if (_isDirty() && !confirm("変更内容を保存せず破棄しますか？")) return;
+    if (_setEditingId) {
+      _refreshSetCreatePanel();
+    } else {
+      _showEditor(false);
+    }
+  };
+
+  // 「変更を破棄」ボタン
+  document.getElementById("step1-set-cancel-btn")?.addEventListener("click", _discardChanges);
+
+  // セットを保存
+  document.getElementById("step1-set-create-btn")?.addEventListener("click", _saveSet);
+
+  // 全選択 / 全解除
   document.getElementById("step1-set-select-all-btn")?.addEventListener("click", () => {
-    document.querySelectorAll(".step1-set-q-chip").forEach(c => c.classList.add("selected"));
+    document.querySelectorAll(".analysis-set-q-cb").forEach(cb => { cb.checked = true; });
+    _syncSelectedList();
   });
   document.getElementById("step1-set-deselect-all-btn")?.addEventListener("click", () => {
-    document.querySelectorAll(".step1-set-q-chip").forEach(c => c.classList.remove("selected"));
-  });
-  document.getElementById("step1-set-q-chips")?.addEventListener("click", e => {
-    const chip = e.target.closest(".step1-set-q-chip");
-    if (chip) chip.classList.toggle("selected");
+    document.querySelectorAll(".analysis-set-q-cb").forEach(cb => { cb.checked = false; });
+    _syncSelectedList();
   });
 
-  // セット一覧イベント委譲
-  document.getElementById("step1-set-list-container")?.addEventListener("click", e => {
-    const delBtn    = e.target.closest("[data-set-delete]");
-    const renameBtn = e.target.closest("[data-set-rename]");
-    if (delBtn) {
-      const id = delBtn.dataset.setDelete;
-      const sets = AppState.questionSets.filter(s => s.setId !== id);
-      setQuestionSets(sets);
-      _refreshSetList();
-      _renderSetSummary();
+  document.getElementById("step1-set-q-list")?.addEventListener("change", e => {
+    if (e.target.classList.contains("analysis-set-q-cb")) _syncSelectedList();
+  });
+
+  document.getElementById("step1-set-selected-list")?.addEventListener("click", e => {
+    const removeBtn = e.target.closest("[data-remove]");
+    if (!removeBtn) return;
+    const code = removeBtn.dataset.remove;
+    const cb = document.querySelector(`.analysis-set-q-cb[data-code="${CSS.escape(code)}"]`);
+    if (cb) cb.checked = false;
+    _syncSelectedList();
+  });
+
+  let _searchTimer = null;
+  document.getElementById("step1-set-q-search")?.addEventListener("input", () => {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(_filterSetQList, 300);
+  });
+
+
+  // 「＋ 新規セット作成」ボタン
+  document.getElementById("step1-set-new-btn")?.addEventListener("click", () => {
+    _setEditingId = null;
+    _refreshSetList();
+    _refreshSetCreatePanel();
+    _showEditor(true);
+  });
+
+  // 削除確認モーダル
+  const _deleteModal   = document.getElementById("step1-set-delete-modal");
+  const _deleteCancelBtn  = document.getElementById("step1-set-delete-cancel");
+  const _deleteConfirmBtn = document.getElementById("step1-set-delete-confirm");
+  let _pendingDeleteId = null;
+
+  function _showDeleteModal(setId) {
+    _pendingDeleteId = setId;
+    if (_deleteModal) _deleteModal.hidden = false;
+  }
+  function _hideDeleteModal() {
+    _pendingDeleteId = null;
+    if (_deleteModal) _deleteModal.hidden = true;
+  }
+  _deleteCancelBtn?.addEventListener("click", _hideDeleteModal);
+  _deleteModal?.addEventListener("click", e => { if (e.target === _deleteModal) _hideDeleteModal(); });
+  _deleteConfirmBtn?.addEventListener("click", () => {
+    const id = _pendingDeleteId;
+    _hideDeleteModal();
+    if (!id) return;
+    if (_setEditingId === id) {
+      _setEditingId = null;
+      _showEditor(false);
     }
-    if (renameBtn) {
-      const id = renameBtn.dataset.setRename;
-      const s = AppState.questionSets.find(s => s.setId === id);
-      if (!s) return;
-      const newName = prompt("セット名を変更:", s.setName);
-      if (newName && newName.trim()) {
-        const sets = AppState.questionSets.map(x => x.setId === id ? { ...x, setName: newName.trim() } : x);
-        setQuestionSets(sets);
+    setQuestionSets(AppState.questionSets.filter(s => s.setId !== id));
+    _refreshSetList();
+    _renderSetSummary();
+  });
+
+  // サイドバーのイベント委譲
+  document.getElementById("step1-set-sidebar-nav")?.addEventListener("click", e => {
+    const delBtn  = e.target.closest("[data-set-delete]");
+    if (delBtn) {
+      e.stopPropagation();
+      _showDeleteModal(delBtn.dataset.setDelete);
+      return;
+    }
+
+    // nav アイテムクリック → セット選択＋エディタ表示
+    const navItem = e.target.closest(".step3-nav-item");
+    if (navItem) {
+      const setId = navItem.dataset.setId;
+      if (setId) {
+        _setEditingId = setId;
         _refreshSetList();
-        _renderSetSummary();
+        _refreshSetCreatePanel();
+        _showEditor(true);
       }
     }
   });
 
   document.getElementById("btn-manage-sets")?.addEventListener("click", () => {
+    const sets = AppState.questionSets;
+    if (sets.length > 0) {
+      _setEditingId = sets[0].setId;
+      _refreshSetCreatePanel();
+      _showEditor(true);
+    } else {
+      _setEditingId = null;
+      _showEditor(false);
+    }
     _refreshSetList();
     modal.hidden = false;
-    // デフォルト「セット一覧」タブを表示
-    const listTab = modal.querySelector(".step1-set-tab[data-tab='list']");
-    if (listTab) listTab.click();
   });
 }
 
 function _refreshSetList() {
-  const container = document.getElementById("step1-set-list-container");
-  if (!container) return;
+  const nav = document.getElementById("step1-set-sidebar-nav");
+  if (!nav) return;
+
   const sets = AppState.questionSets;
   if (sets.length === 0) {
-    container.innerHTML = `<p style="color:var(--color-text-muted); font-size:.9rem">設問セットがありません。</p>`;
+    nav.innerHTML = `<div class="step3-nav-empty">集計セットがありません。<br>「新規集計セット作成」から追加できます。</div>`;
     return;
   }
-  container.innerHTML = sets.map(s => `
-    <div class="step1-set-item">
-      <span style="font-weight:600; font-size:.9rem">${escHtml(s.setName)}</span>
-      <span class="step3-set-count">(${s.questionCodes.length}問)</span>
-      ${s.isCustom ? `<span style="font-size:.72rem; color:var(--color-primary)">カスタム</span>` : ""}
-      <div style="margin-left:auto; display:flex; gap:6px">
-        <button class="btn btn-secondary btn-sm" data-set-rename="${escHtml(s.setId)}">✎ 名称変更</button>
-        ${s.isCustom ? `<button class="btn btn-secondary btn-sm" style="color:var(--color-danger,#e53e3e)" data-set-delete="${escHtml(s.setId)}">削除</button>` : ""}
-      </div>
-    </div>`).join("");
+
+  const qMap    = Object.fromEntries(AppState.questions.map(q => [q.question_code, q]));
+  const excluded = new Set(AppState.excludedQuestionCodes);
+
+  nav.innerHTML = sets.map(s => {
+    const qCount    = _getSetQuestionCount(s);
+    const isExcl    = s.isExcluded === true;
+    const isActive  = s.setId === _setEditingId;
+    const firstCode = s.questionCodes?.find(c => !excluded.has(c)) ?? s.questionCodes?.[0];
+    const firstQ    = firstCode ? qMap[firstCode] : null;
+    const descText  = firstQ?.parent_text || firstQ?.question_text || "";
+    const sid = escHtml(s.setId);
+    return `
+      <div class="step3-nav-item${isActive ? " active" : ""}${isExcl ? " step3-nav-item-excluded" : ""}"
+           data-set-id="${sid}">
+        <span class="step3-nav-dot-placeholder"></span>
+        <div class="step3-nav-item-body">
+          <div class="step3-nav-item-header">
+            <span class="step3-nav-item-name">${escHtml(s.setName)}</span>
+            <span class="step3-nav-item-count">(${qCount})</span>
+            ${isExcl ? `<span class="step1-set-excluded-badge">除外</span>` : ""}
+          </div>
+          ${descText ? `<div class="step3-nav-item-desc">${escHtml(descText)}</div>` : ""}
+        </div>
+        <button class="step1-set-delete-btn" data-set-delete="${sid}" title="削除">×</button>
+      </div>`;
+  }).join("");
 }
 
 function _refreshSetCreatePanel() {
-  const chipsEl = document.getElementById("step1-set-q-chips");
-  if (!chipsEl) return;
-  const questions = AppState.questions.filter(q => !_FA_TYPES.has((q.type_code ?? "").toUpperCase()));
-  chipsEl.innerHTML = questions.map(q =>
-    `<span class="step1-set-q-chip" data-code="${escHtml(q.question_code)}" title="${escHtml(q.question_text)}">${escHtml(q.question_code)}</span>`
-  ).join("");
-  const nameInput = document.getElementById("step1-set-name-input");
+  const _excluded = new Set(AppState.excludedQuestionCodes);
+  _allQuestionsForCreate = AppState.questions.filter(q =>
+    !q.has_children && !_excluded.has(q.question_code)
+  );
+
+  const nameInput   = document.getElementById("step1-set-name-input");
+  const searchInput = document.getElementById("step1-set-q-search");
+  const titleEl     = document.getElementById("step1-set-tab-custom-title");
+  if (searchInput) searchInput.value = "";
+
+  if (_setEditingId) {
+    const set = AppState.questionSets.find(s => s.setId === _setEditingId);
+    if (set) {
+      if (nameInput) nameInput.value = set.setName;
+      if (titleEl)   titleEl.textContent = "集計セットを編集";
+      const editCodes = new Set(set.questionCodes ?? []);
+      _editingInitialName  = set.setName;
+      _editingInitialCodes = new Set(set.questionCodes ?? []);
+      _renderQList(_allQuestionsForCreate, editCodes);
+      _syncSelectedList();
+      return;
+    }
+  }
+
+  // 新規作成モード
+  _editingInitialName  = "";
+  _editingInitialCodes = new Set();
   if (nameInput) nameInput.value = "";
+  if (titleEl)   titleEl.textContent = "新規集計セット作成";
+  _renderQList(_allQuestionsForCreate, new Set());
+  const selectedList = document.getElementById("step1-set-selected-list");
+  if (selectedList) selectedList.innerHTML =
+    `<p class="analysis-set-empty-right">左の一覧から設問を選択してください。</p>`;
+  _updateSelectedCount();
 }
 
-function _createCustomSet() {
-  const nameInput = document.getElementById("step1-set-name-input");
-  const name = nameInput?.value.trim();
+function _renderQList(questions, initialCheckedCodes = null) {
+  const listEl = document.getElementById("step1-set-q-list");
+  if (!listEl) return;
+
+  const normalQs = questions.filter(q => q.question_type !== "OA_TEXT");
+  const oaQs     = questions.filter(q => q.question_type === "OA_TEXT");
+
+  if (!normalQs.length && !oaQs.length) {
+    listEl.innerHTML = `<p class="analysis-set-empty">該当する設問がありません。</p>`;
+    return;
+  }
+
+  const checkedCodes = initialCheckedCodes ?? _getCheckedCodes();
+  const renderRow = (q) => {
+    const shortText = (q.question_text ?? "").slice(0, 28);
+    return `<label class="analysis-set-q-row">
+      <input type="checkbox" class="analysis-set-q-cb" data-code="${escHtml(q.question_code)}"
+             ${checkedCodes.has(q.question_code) ? "checked" : ""}>
+      <span class="analysis-set-q-code">${escHtml(q.question_code)}</span>
+      <span class="analysis-set-q-text" title="${escHtml(q.question_text ?? "")}">${escHtml(shortText)}</span>
+    </label>`;
+  };
+
+  let html = normalQs.map(renderRow).join("");
+  if (oaQs.length) {
+    html += `<div class="analysis-set-oa-header">自由回答（FA分析用）</div>`;
+    html += oaQs.map(renderRow).join("");
+  }
+  listEl.innerHTML = html;
+}
+
+function _getCheckedCodes() {
+  const codes = new Set();
+  document.querySelectorAll(".analysis-set-q-cb:checked")
+    .forEach(cb => codes.add(cb.dataset.code));
+  return codes;
+}
+
+function _syncSelectedList() {
+  const selectedList = document.getElementById("step1-set-selected-list");
+  if (!selectedList) return;
+  const checkedCodes = _getCheckedCodes();
+  const ordered = (_allQuestionsForCreate ?? [])
+    .filter(q => checkedCodes.has(q.question_code))
+    .map(q => q.question_code);
+  selectedList.innerHTML = ordered.length === 0
+    ? `<p class="analysis-set-empty-right">左の一覧から設問を選択してください。</p>`
+    : ordered.map(code => `
+        <div class="analysis-set-selected-row">
+          <span class="analysis-set-q-code">${escHtml(code)}</span>
+          <button class="btn btn-secondary btn-sm" data-remove="${escHtml(code)}"
+                  style="margin-left:auto; padding:1px 6px">✕</button>
+        </div>`).join("");
+  _updateSelectedCount();
+}
+
+function _updateSelectedCount() {
+  const el = document.getElementById("step1-set-selected-count");
+  if (el) el.textContent = `${_getCheckedCodes().size}問選択中`;
+}
+
+function _filterSetQList() {
+  if (!_allQuestionsForCreate) return;
+  const q = (document.getElementById("step1-set-q-search")?.value ?? "").trim().toLowerCase();
+  const filtered = !q
+    ? _allQuestionsForCreate
+    : _allQuestionsForCreate.filter(x =>
+        x.question_code.toLowerCase().includes(q) ||
+        (x.question_text ?? "").toLowerCase().includes(q)
+      );
+  _renderQList(filtered);
+}
+
+function _saveSet() {
+  const name = document.getElementById("step1-set-name-input")?.value.trim();
   if (!name) { alert("セット名を入力してください。"); return; }
-  const selected = [...document.querySelectorAll(".step1-set-q-chip.selected")].map(c => c.dataset.code);
-  if (selected.length === 0) { alert("設問を1つ以上選択してください。"); return; }
-  const setId = `custom_${Date.now()}`;
-  const newSets = [...AppState.questionSets, { setId, setName: name, questionCodes: selected, isCustom: true }];
-  setQuestionSets(newSets);
+
+  const selected = (_allQuestionsForCreate ?? [])
+    .filter(q => _getCheckedCodes().has(q.question_code))
+    .map(q => q.question_code);
+
+  if (_setEditingId) {
+    setQuestionSets(AppState.questionSets.map(s =>
+      s.setId !== _setEditingId ? s : {
+        ...s, setName: name, questionCodes: selected, isCustom: true,
+      }
+    ));
+    _editingInitialName  = name;
+    _editingInitialCodes = new Set(selected);
+  } else {
+    if (selected.length === 0) { alert("設問を1つ以上選択してください。"); return; }
+    const newId = `set_${Date.now()}`;
+    setQuestionSets([...AppState.questionSets, {
+      setId: newId, setName: name,
+      questionCodes: selected, isCustom: true, isParent: false, children: [],
+    }]);
+    _setEditingId = newId;
+  }
+
+  _refreshSetList();
   _renderSetSummary();
-  // リストタブへ切り替え
-  const listTab = document.querySelector(".step1-set-tab[data-tab='list']");
-  if (listTab) listTab.click();
 }
 
 // STEP1 パレット管理モーダル用
@@ -256,7 +505,7 @@ function _s1GeneratePaletteColors(keyHex, count, stepPct, pattern, finePct, satA
   return lightnesses.map(lv => _s1HslToHex(h, sAdj, lv));
 }
 
-// 種別バッジスタイル
+// 種別バッジスタイル（type_code）
 const TYPE_BADGE = {
   SA: { cls: "badge-SA",  label: "単一回答" },
   MA: { cls: "badge-MA",  label: "複数回答" },
@@ -270,23 +519,48 @@ function typeBadge(typeCode, typeLabel) {
   return `<span class="badge ${s.cls}" title="${escHtml(typeCode)}">${escHtml(s.label)}</span>`;
 }
 
+// 分析用分類バッジスタイル（question_type）
+const QUESTION_TYPE_BADGE = {
+  SA:        { cls: "badge-qtype-SA",        label: "SA" },
+  MA:        { cls: "badge-qtype-MA",        label: "MA" },
+  MATRIX:    { cls: "badge-qtype-MATRIX",    label: "MATRIX" },
+  NUMERIC:   { cls: "badge-qtype-NUMERIC",   label: "NUMERIC" },
+  OA_TEXT:   { cls: "badge-qtype-OA_TEXT",   label: "OA" },
+  OA_AUX:    { cls: "badge-qtype-OA_AUX",    label: "OA補助" },
+  WEIGHT:    { cls: "badge-qtype-WEIGHT",    label: "WEIGHT" },
+  ATTRIBUTE: { cls: "badge-qtype-ATTRIBUTE", label: "属性" },
+  FLAG:      { cls: "badge-qtype-FLAG",      label: "FLAG" },
+  DERIVED:   { cls: "badge-qtype-DERIVED",   label: "派生" },
+  UNKNOWN:   { cls: "badge-qtype-UNKNOWN",   label: "?" },
+};
+
+function questionTypeBadge(questionType) {
+  const s = QUESTION_TYPE_BADGE[questionType] ?? QUESTION_TYPE_BADGE.UNKNOWN;
+  return `<span class="badge ${s.cls}" title="${escHtml(questionType)}">${escHtml(s.label)}</span>`;
+}
+
 let _debounceTimer = null;
 
+// _currentDisplayRows は仮想スクロール対応の全選択/全解除で使う
+let _currentDisplayRows = [];
+
 function selectAllAxes() {
-  const cbs = [...document.querySelectorAll("#questions-table .q-axis-cb")];
   const codes = [...AppState.step1AxisCodes];
-  cbs.forEach(cb => {
-    cb.checked = true;
-    if (!codes.includes(cb.dataset.code)) codes.push(cb.dataset.code);
-  });
+  for (const q of _currentDisplayRows) {
+    if (AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase())) {
+      if (!codes.includes(q.question_code)) codes.push(q.question_code);
+    }
+  }
   setStep1AxisCodes(codes);
 }
 
 function deselectAllAxes() {
-  const cbs = [...document.querySelectorAll("#questions-table .q-axis-cb")];
-  const visibleCodes = new Set(cbs.map(cb => cb.dataset.code));
-  cbs.forEach(cb => { cb.checked = false; });
-  setStep1AxisCodes(AppState.step1AxisCodes.filter(c => !visibleCodes.has(c)));
+  const displayCodes = new Set(
+    _currentDisplayRows
+      .filter(q => AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase()))
+      .map(q => q.question_code)
+  );
+  setStep1AxisCodes(AppState.step1AxisCodes.filter(c => !displayCodes.has(c)));
 }
 
 function setAxisCtrlVisible(visible) {
@@ -306,6 +580,7 @@ export function initQuestionsPanel() {
   });
   typeSelect.addEventListener("change", applyFilters);
   childCheck.addEventListener("change", applyFilters);
+  document.getElementById("q-show-aux")?.addEventListener("change", applyFilters);
   applyBtn.addEventListener("click", applyFilters);
 
   const table = document.getElementById("questions-table");
@@ -407,11 +682,16 @@ export function initQuestionsPanel() {
     }
     const previewEl = document.querySelector(`[data-axis-preview="${CSS.escape(axisCode)}"]`);
     if (previewEl) {
-      const colors = val === "__none__"
-        ? ["#676767"]
-        : val !== "__auto__"
-          ? (FIXED_PALETTE_PREVIEWS[val] ?? AppState.userPalettes?.[val]?.generatedColors ?? DEFAULT_COLORS_PREVIEW)
-          : DEFAULT_COLORS_PREVIEW;
+      let colors;
+      if (val === "__none__") {
+        colors = ["#676767"];
+      } else if (val === "__auto__") {
+        const autoKey = _detectFixedPaletteFromQuestion(axisCode);
+        colors = autoKey === "__none__" ? ["#676767"]
+          : (FIXED_PALETTE_PREVIEWS[autoKey] ?? DEFAULT_COLORS_PREVIEW);
+      } else {
+        colors = FIXED_PALETTE_PREVIEWS[val] ?? AppState.userPalettes?.[val]?.generatedColors ?? DEFAULT_COLORS_PREVIEW;
+      }
       previewEl.innerHTML = colors.map(c => `<span style="background:${c}"></span>`).join("");
     }
   });
@@ -478,18 +758,23 @@ function updateAxisSummary() {
 
 function _detectFixedPaletteFromQuestion(code) {
   const q = (AppState.questions ?? []).find(q => q.question_code === code);
-  if (!q) return null;
+  if (!q) return "__none__";
   const text = (q.question_text ?? "") + (q.stub ?? "");
   if (/[*＊]ファンラベル/.test(text) || /ファン度/.test(text) ||
       /FAN_LEVEL/i.test(code) || /SKFAN/i.test(code)) return "fan_label";
+  // テキストベース検出（軸名・質問文を優先）
+  if (/性年代|性×年代|男女年代|性年代別/.test(text)) return "age_gender";
+  if (/性別|男女/.test(text)) return "gender";
+  if (/年代|年齢/.test(text)) return "age_c";
+  // 選択肢ベース検出
   const labels = (q.choices ?? []).map(c => c.choice_text ?? "");
   if (labels.some(l => /コアファン/.test(l)) && labels.some(l => /ライトファン/.test(l))) return "fan_label";
-  if (labels.some(l => /\d+代(男性|女性)/.test(l))) return "age_gender";
+  if (labels.some(l => /(男性|女性)\d+代/.test(l)) || labels.some(l => /\d+代(男性|女性)/.test(l))) return "age_gender";
   if (labels.some(l => /^男($|性)/.test(l)) || labels.some(l => /^女($|性)/.test(l))) return "gender";
-  if (labels.some(l => /\d+代/.test(l))) return "age_a";
+  if (labels.some(l => /\d+代/.test(l)) || labels.some(l => /\d+[-~〜]\d+歳/.test(l))) return "age_c";
   if (labels.some(l => /High[1-5]|TOP[23]/.test(l)) && labels.some(l => /Low[1-5]/.test(l)))
     return labels.length > 7 ? "scale_1011" : "scale_67";
-  return null;
+  return "__none__";
 }
 
 function updateAxisColorSection() {
@@ -516,7 +801,9 @@ function updateAxisColorSection() {
         : DEFAULT_COLORS_PREVIEW;
     const swatches = previewColors.map(c => `<span style="background:${c}"></span>`).join("");
 
-    const autoLabel = autoKey ? `自動検出（${FIXED_PALETTE_LABELS[autoKey]}）` : "自動検出（なし）";
+    const autoLabel = autoKey === "__none__"
+      ? "自動（グレー）"
+      : `自動（${FIXED_PALETTE_LABELS[autoKey] ?? autoKey}）`;
     const userPalettes = Object.values(AppState.userPalettes ?? {});
     const isCustomPalette = isExplicit && selectedKey && !FIXED_PALETTE_ORDER_Q.includes(selectedKey) && selectedKey !== "__none__";
     const options = [
@@ -790,15 +1077,148 @@ function buildChoiceCell(choices) {
   </div>`;
 }
 
+// ---------------------------------------------------------------------------
+// 仮想スクロールテーブル
+// ---------------------------------------------------------------------------
+
+const VT_BUFFER = 15;      // 可視領域の上下に保持する余裕行数
+const VT_ROW_HEIGHT = 48;  // 行の推定高さ(px)。初回レンダリング後に実測値で上書き
+
+class _VirtualTable {
+  constructor(scrollEl, tbody) {
+    this._scrollEl = scrollEl;
+    this._tbody = tbody;
+    this._rows = [];
+    this._buildFn = null;
+    this._rowHeight = VT_ROW_HEIGHT;
+    this._start = -1;
+    this._end = -1;
+    this._measured = false;
+
+    this._topSpacer = this._makeSpacer();
+    this._botSpacer = this._makeSpacer();
+    tbody.appendChild(this._topSpacer);
+    tbody.appendChild(this._botSpacer);
+
+    this._onScroll = () => this._update();
+    scrollEl.addEventListener("scroll", this._onScroll, { passive: true });
+  }
+
+  _makeSpacer() {
+    const tr = document.createElement("tr");
+    tr.className = "vt-spacer";
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    td.style.cssText = "padding:0;border:none;height:0";
+    tr.appendChild(td);
+    return tr;
+  }
+
+  render(rows, buildFn) {
+    this._rows = rows;
+    this._buildFn = buildFn;
+    this._start = -1;
+    this._end = -1;
+    this._measured = false;
+    this._scrollEl.scrollTop = 0;
+    this._update();
+  }
+
+  _getViewport() {
+    const scrollTop = this._scrollEl.scrollTop;
+    const h = this._scrollEl.clientHeight || 560;
+    const rh = this._rowHeight;
+    const start = Math.max(0, Math.floor(scrollTop / rh) - VT_BUFFER);
+    const end = Math.min(this._rows.length, Math.ceil((scrollTop + h) / rh) + VT_BUFFER);
+    return { start, end };
+  }
+
+  _update() {
+    if (!this._rows.length || !this._buildFn) return;
+    const { start, end } = this._getViewport();
+    if (start === this._start && end === this._end) return;
+
+    this._start = start;
+    this._end = end;
+    const n = this._rows.length;
+    const rh = this._rowHeight;
+
+    this._topSpacer.firstChild.style.height = (start * rh) + "px";
+    this._botSpacer.firstChild.style.height = Math.max(0, (n - end) * rh) + "px";
+
+    // 旧可視行を削除
+    const toRemove = [];
+    for (const tr of this._tbody.children) {
+      if (tr !== this._topSpacer && tr !== this._botSpacer) toRemove.push(tr);
+    }
+    toRemove.forEach(tr => tr.remove());
+
+    // 新可視行を挿入
+    let html = "";
+    for (let i = start; i < end; i++) html += this._buildFn(this._rows[i], i);
+    const temp = document.createElement("tbody");
+    temp.innerHTML = html;
+    const frag = document.createDocumentFragment();
+    while (temp.firstChild) frag.appendChild(temp.firstChild);
+    this._tbody.insertBefore(frag, this._botSpacer);
+
+    // 初回レンダリング後に実際の行高さを計測して精度を上げる
+    if (!this._measured) {
+      const sample = this._tbody.children[1];
+      if (sample && sample.offsetHeight > 10) {
+        this._rowHeight = sample.offsetHeight;
+        this._measured = true;
+        this._botSpacer.firstChild.style.height = Math.max(0, (n - end) * this._rowHeight) + "px";
+      }
+    }
+  }
+
+  showEmpty(html) {
+    const toRemove = [];
+    for (const tr of this._tbody.children) {
+      if (tr !== this._topSpacer && tr !== this._botSpacer) toRemove.push(tr);
+    }
+    toRemove.forEach(tr => tr.remove());
+    this._topSpacer.firstChild.style.height = "0";
+    this._botSpacer.firstChild.style.height = "0";
+    const temp = document.createElement("tbody");
+    temp.innerHTML = html;
+    const frag = document.createDocumentFragment();
+    while (temp.firstChild) frag.appendChild(temp.firstChild);
+    this._tbody.insertBefore(frag, this._botSpacer);
+  }
+
+  destroy() {
+    this._scrollEl.removeEventListener("scroll", this._onScroll);
+  }
+}
+
+let _vt = null;
+
 function renderTable(questions, totalCount, filteredCount) {
-  const tbody = document.querySelector("#questions-table tbody");
+  const tbody    = document.querySelector("#questions-table tbody");
+  const scrollEl = document.getElementById("questions-table-wrap");
   const countBar = document.getElementById("questions-count-bar");
 
-  // has_children=true の親設問は一覧に表示しない（内部保持のみ）
-  const displayRows = questions.filter((q) => !q.has_children);
+  const showAux = document.getElementById("q-show-aux")?.checked ?? false;
+  const displayRows = questions.filter((q) => {
+    if (q.has_children) return false;
+    if (!showAux && AUX_QUESTION_TYPES.has(q.question_type ?? "")) return false;
+    return true;
+  });
+
+  _currentDisplayRows = displayRows;
+
+  // 仮想テーブルを初回のみ生成（スクロールリスナーを使い回す）
+  if (!_vt) {
+    tbody.innerHTML = "";
+    _vt = new _VirtualTable(scrollEl, tbody);
+  }
 
   if (displayRows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:32px; color:var(--color-text-muted)">該当する設問がありません。</td></tr>`;
+    _vt.showEmpty(
+      `<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--color-text-muted)">該当する設問がありません。</td></tr>`
+    );
     countBar.textContent = `0件表示 / 全${totalCount}件`;
     setAxisCtrlVisible(false);
     return;
@@ -808,32 +1228,34 @@ function renderTable(questions, totalCount, filteredCount) {
 
   const axisSelected = new Set(AppState.step1AxisCodes);
   let hasAxisCb = false;
+  for (const q of displayRows) {
+    if (AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase())) { hasAxisCb = true; break; }
+  }
 
-  tbody.innerHTML = displayRows.map((q, i) => {
+  const buildRowHtml = (q, i) => {
     const rowCls  = q.is_child ? "row-child" : "";
     const codeCls = "code-cell" + (q.is_child ? " is-child" : "");
-
     const questionText = q.is_child ? (q.parent_text || q.question_text) : q.question_text;
     const stubText     = q.is_child ? (q.stub || q.question_text) : (q.stub || "");
-
     const hasAxis = AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase());
-    if (hasAxis) hasAxisCb = true;
     const axisCell = hasAxis
       ? `<td style="text-align:center"><input type="checkbox" class="q-axis-cb" data-code="${escHtml(q.question_code)}" ${axisSelected.has(q.question_code) ? "checked" : ""}></td>`
       : `<td></td>`;
-
+    const qtBadge = questionTypeBadge(q.question_type ?? "UNKNOWN");
     return `
       <tr class="${rowCls}">
         ${axisCell}
         <td>${i + 1}</td>
         <td class="${codeCls}">${escHtml(q.question_code)}</td>
         <td>${typeBadge(q.type_code, q.type_label)}</td>
+        <td>${qtBadge}</td>
         <td><span class="text-truncate" title="${escHtml(questionText)}">${escHtml(questionText)}</span></td>
         <td><span class="text-truncate" title="${escHtml(stubText)}">${escHtml(stubText)}</span></td>
         <td>${buildChoiceCell(q.choices)}</td>
       </tr>`;
-  }).join("");
+  };
 
+  _vt.render(displayRows, buildRowHtml);
   setAxisCtrlVisible(hasAxisCb);
 }
 
@@ -897,6 +1319,8 @@ export function initProjectHeader() {
         },
         AppState.questionSets,
         getCrosstabCache(),
+        AppState.hiddenQuestionTypes,
+        AppState.excludedQuestionCodes,
       );
       markClean(new Date());
       showToast("プロジェクトを保存しました。");

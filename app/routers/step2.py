@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from datetime import datetime
@@ -47,6 +48,18 @@ router = APIRouter()
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 
+# セッションごとのアップロード進捗（スレッド安全: GIL + dict 代入はアトミック）
+_upload_progress: dict[str, dict] = {}
+
+
+def _set_progress(token: str, pct: int, message: str) -> None:
+    _upload_progress[token] = {"pct": pct, "message": message, "done": False}
+
+
+@router.get("/step2/progress/{session_token}", summary="STEP2 アップロード進捗取得")
+async def get_step2_progress(session_token: str):
+    return _upload_progress.get(session_token, {"pct": 0, "message": "待機中…", "done": False})
+
 
 @router.post("/step2/upload", response_model=Step2UploadResponse, summary="回答データアップロード・ラベル変換")
 async def step2_upload(
@@ -66,29 +79,62 @@ async def step2_upload(
 
     raw_bytes = await file.read()
     if len(raw_bytes) > MAX_FILE_SIZE:
-        raise HTTPException(413, "ファイルサイズが上限（50MB）を超えています。")
+        raise HTTPException(413, "ファイルサイズが上限（500MB）を超えています。")
 
     questions = survey_cache.get_questions(session_token)
     if questions is None:
         raise HTTPException(404, "セッションが見つかりません。STEP1 からやり直してください。")
 
+    # 重い同期処理をスレッドプールで実行（イベントループをブロックしない）
+    def _process():
+        _set_progress(session_token, 10, "ファイル解析中…")
+        df_, enc = parse_response_file(raw_bytes, filename)
+        layout_codes_ = [q.question_code for q in questions]
+
+        _set_progress(session_token, 30, "変換辞書を構築中…")
+        codebook_ = build_codebook(questions)
+        matched_, missing_, extra_, bracket_cols_raw_ = match_columns(
+            list(df_.columns), layout_codes_, questions
+        )
+        missing_details_raw_ = classify_missing_columns(
+            missing_, questions, matched_, bracket_cols_raw_
+        )
+
+        _set_progress(session_token, 55, "ラベル変換中…")
+        labeled_df_, unmatched_ = convert_labels(df_, codebook_, matched_, bracket_cols_raw_)
+
+        _set_progress(session_token, 75, "MA展開・集計軸検出中…")
+        multi_select_ = detect_multi_select(df_, questions, matched_)
+        axis_candidates_ = build_axis_candidates(questions, matched_)
+
+        _set_progress(session_token, 90, "Parquet保存中…")
+        lp_ = save_parquet(session_token, labeled_df_, "labeled_data")
+
+        _upload_progress[session_token] = {"pct": 100, "message": "完了", "done": True}
+        return (df_, enc, labeled_df_, unmatched_,
+                matched_, missing_, extra_,
+                bracket_cols_raw_, missing_details_raw_,
+                multi_select_, axis_candidates_, lp_, codebook_)
+
     try:
-        df, encoding = parse_response_file(raw_bytes, filename)
+        (df, encoding, labeled_df, unmatched_values,
+         matched, missing, extra,
+         bracket_cols_raw, missing_details_raw,
+         multi_select_cols, axis_candidates, labeled_parquet_path, codebook,
+         ) = await asyncio.to_thread(_process)
     except Exception as exc:
+        _upload_progress.pop(session_token, None)
         logger.exception("回答データ解析エラー")
         raise HTTPException(422, f"ファイルの読み込みに失敗しました: {exc}") from exc
+    finally:
+        # 完了・エラー後は30秒で自動削除（ポーリングが拾えるよう少し残す）
+        async def _cleanup():
+            await asyncio.sleep(30)
+            _upload_progress.pop(session_token, None)
+        asyncio.ensure_future(_cleanup())
 
-    layout_codes = [q.question_code for q in questions]
-    codebook = build_codebook(questions)
-    matched, missing, extra, bracket_cols_raw = match_columns(list(df.columns), layout_codes, questions)
     bracket_columns = [BracketColumnItem(**bc) for bc in bracket_cols_raw]
-    missing_details_raw = classify_missing_columns(missing, questions, matched, bracket_cols_raw)
     missing_details = [MissingColumnDetail(**d) for d in missing_details_raw]
-    labeled_df, unmatched_values = convert_labels(df, codebook, matched, bracket_cols_raw)
-    multi_select_cols = detect_multi_select(df, questions, matched)
-    axis_candidates = build_axis_candidates(questions, matched)
-
-    labeled_parquet_path = save_parquet(session_token, labeled_df, "labeled_data")
 
     survey_cache.set_step2(
         session_token,

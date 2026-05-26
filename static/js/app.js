@@ -11,13 +11,89 @@ import { initStep3Panel } from "./step3.js";
 // グローバルユーティリティ（他モジュールからインポートして使う）
 // ---------------------------------------------------------------------------
 
-export function showSpinner(msg = "処理中…") {
-  document.getElementById("spinner-msg").textContent = msg;
+/** メインスレッドをブロックしないための yield。chunk処理の合間に呼ぶ。 */
+export function yieldToMain() {
+  if (typeof scheduler !== "undefined" && typeof scheduler.yield === "function") {
+    return scheduler.yield();
+  }
+  return new Promise((r) => setTimeout(r, 0));
+}
+
+// ---------------------------------------------------------------------------
+// 進捗バー API
+// ---------------------------------------------------------------------------
+
+let _cancelCallback = null;
+
+/**
+ * 進捗オーバーレイを表示する。
+ * @param {object} opts
+ * @param {string}   opts.title      - タイトル文字列
+ * @param {string[]} opts.steps      - ステップ名の配列
+ * @param {boolean}  [opts.showCancel=false]
+ * @param {Function} [opts.onCancel] - キャンセル時コールバック
+ */
+export function showProgress({ title = "処理中…", steps = [], showCancel = false, onCancel = null } = {}) {
+  document.getElementById("spinner-msg").textContent = title;
+  const barWrap = document.getElementById("progress-bar-wrap");
+  if (barWrap) barWrap.style.display = steps.length > 0 ? "" : "none";
+
+  const fill = document.getElementById("progress-bar-fill");
+  if (fill) fill.style.width = "0%";
+  const pct = document.getElementById("progress-pct");
+  if (pct) pct.textContent = "0%";
+
+  const stepsEl = document.getElementById("progress-steps");
+  if (stepsEl) {
+    stepsEl.innerHTML = steps.map((s, i) =>
+      `<li id="progress-step-${i}" class="progress-step">${s}</li>`
+    ).join("");
+  }
+
+  const cancelBtn = document.getElementById("progress-cancel-btn");
+  if (cancelBtn) {
+    cancelBtn.style.display = showCancel ? "" : "none";
+    _cancelCallback = onCancel;
+  }
+
   document.getElementById("spinner-overlay").classList.add("active");
 }
 
-export function hideSpinner() {
+/**
+ * 進捗バーを更新する。
+ * @param {number} pct       - 0〜100
+ * @param {number} stepIndex - 現在のステップインデックス（-1 で変更なし）
+ * @param {string} [msg]     - タイトル文字列（省略可）
+ */
+export function updateProgress(pct, stepIndex = -1, msg) {
+  const fill = document.getElementById("progress-bar-fill");
+  if (fill) fill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+  const pctEl = document.getElementById("progress-pct");
+  if (pctEl) pctEl.textContent = `${Math.round(pct)}%`;
+  if (msg) document.getElementById("spinner-msg").textContent = msg;
+
+  if (stepIndex >= 0) {
+    document.querySelectorAll(".progress-step").forEach((el, i) => {
+      el.classList.toggle("progress-step-active", i === stepIndex);
+      el.classList.toggle("progress-step-done", i < stepIndex);
+    });
+  }
+}
+
+/** 進捗オーバーレイを隠す。 */
+export function hideProgress() {
   document.getElementById("spinner-overlay").classList.remove("active");
+  _cancelCallback = null;
+  const cancelBtn = document.getElementById("progress-cancel-btn");
+  if (cancelBtn) cancelBtn.style.display = "none";
+}
+
+export function showSpinner(msg = "処理中…") {
+  showProgress({ title: msg });
+}
+
+export function hideSpinner() {
+  hideProgress();
 }
 
 export function showToast(msg, isError = false) {
@@ -59,6 +135,11 @@ export function activatePanel(name) {
 // ---------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("progress-cancel-btn")?.addEventListener("click", () => {
+    if (_cancelCallback) _cancelCallback();
+    hideProgress();
+  });
+
   initUploadPanel();
   initQuestionsPanel();
   initStep2Panel();

@@ -7,6 +7,7 @@
 import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
+import { yieldToMain } from "./app.js";
 import {
   exportSingleExcel, exportAllExcel,
   exportSingleCsv,   exportAllCsv,
@@ -165,6 +166,12 @@ const FIXED_PALETTES = {
   fan_label: {
     label: "ファンラベル",
     preview: ["#FF5050","#FF9999","#FFCCCC","#BFBFBF"],
+    canonicalValues: [
+      { label: "コアファン",       color: "#FF5050" },
+      { label: "ファン",           color: "#FF9999" },
+      { label: "ライトファン",     color: "#FFCCCC" },
+      { label: "非ファン",         color: "#BFBFBF" },
+    ],
     colorFor(label) {
       if (/コアファン/.test(label))      return "#FF5050";
       if (/ライトファン/.test(label))    return "#FFCCCC";
@@ -176,6 +183,10 @@ const FIXED_PALETTES = {
   gender: {
     label: "男女パレット",
     preview: ["#1D4ED8","#DB2777"],
+    canonicalValues: [
+      { label: "男性", color: "#1D4ED8" },
+      { label: "女性", color: "#DB2777" },
+    ],
     colorFor(label) {
       if (/^男($|性)/.test(label)) return "#1D4ED8";
       if (/^女($|性)/.test(label)) return "#DB2777";
@@ -183,22 +194,37 @@ const FIXED_PALETTES = {
     },
   },
   age_gender: {
-    label: "性年代パレット",
+    label: "性年代パレットA",
     preview: ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A","#FBCFE8","#F9A8D4","#F472B6","#EC4899","#DB2777","#9D174D"],
+    canonicalValues: [
+      { label: "男性10代", color: "#BFDBFE" }, { label: "男性20代", color: "#93C5FD" },
+      { label: "男性30代", color: "#60A5FA" }, { label: "男性40代", color: "#3B82F6" },
+      { label: "男性50代", color: "#1D4ED8" }, { label: "男性60代", color: "#1E3A8A" },
+      { label: "女性10代", color: "#FBCFE8" }, { label: "女性20代", color: "#F9A8D4" },
+      { label: "女性30代", color: "#F472B6" }, { label: "女性40代", color: "#EC4899" },
+      { label: "女性50代", color: "#DB2777" }, { label: "女性60代", color: "#9D174D" },
+    ],
     colorFor(label) {
-      const m = label.match(/(\d+)代(男性|女性)/);
-      if (!m) return null;
-      const d = parseInt(m[1]);
+      const gm = label.match(/(男性|女性)/);
+      if (!gm) return null;
+      const dm = label.match(/(\d+)代/) ?? label.match(/(\d+)[-~〜]\d+歳?/);
+      if (!dm) return null;
+      const d = parseInt(dm[1]);
       const male   = {10:"#BFDBFE",20:"#93C5FD",30:"#60A5FA",40:"#3B82F6",50:"#1D4ED8",60:"#1E3A8A"};
       const female = {10:"#FBCFE8",20:"#F9A8D4",30:"#F472B6",40:"#EC4899",50:"#DB2777",60:"#9D174D"};
-      return (m[2] === "男性" ? male : female)[d] ?? null;
+      return (gm[1] === "男性" ? male : female)[d] ?? null;
     },
   },
   age_a: {
     label: "年代別パレットA",
     preview: ["#BFDBFE","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"],
+    canonicalValues: [
+      { label: "10代", color: "#BFDBFE" }, { label: "20代", color: "#93C5FD" },
+      { label: "30代", color: "#60A5FA" }, { label: "40代", color: "#3B82F6" },
+      { label: "50代", color: "#1D4ED8" }, { label: "60代", color: "#1E3A8A" },
+    ],
     colorFor(label) {
-      const m = label.match(/(\d+)代/);
+      const m = label.match(/(\d+)代/) ?? label.match(/(\d+)[-~〜]\d+歳?/);
       if (!m) return null;
       const map = {10:"#BFDBFE",20:"#93C5FD",30:"#60A5FA",40:"#3B82F6",50:"#1D4ED8",60:"#1E3A8A"};
       return map[parseInt(m[1])] ?? null;
@@ -207,10 +233,30 @@ const FIXED_PALETTES = {
   age_b: {
     label: "年代別パレットB",
     preview: ["#D1FAE5","#A7F3D0","#6EE7B7","#34D399","#10B981","#065F46"],
+    canonicalValues: [
+      { label: "10代", color: "#D1FAE5" }, { label: "20代", color: "#A7F3D0" },
+      { label: "30代", color: "#6EE7B7" }, { label: "40代", color: "#34D399" },
+      { label: "50代", color: "#10B981" }, { label: "60代", color: "#065F46" },
+    ],
     colorFor(label) {
-      const m = label.match(/(\d+)代/);
+      const m = label.match(/(\d+)代/) ?? label.match(/(\d+)[-~〜]\d+歳?/);
       if (!m) return null;
       const map = {10:"#D1FAE5",20:"#A7F3D0",30:"#6EE7B7",40:"#34D399",50:"#10B981",60:"#065F46"};
+      return map[parseInt(m[1])] ?? null;
+    },
+  },
+  age_c: {
+    label: "年代別パレットC",
+    preview: ["#FEF3C7","#FDE68A","#FCD34D","#FBBF24","#F59E0B","#B45309"],
+    canonicalValues: [
+      { label: "10代", color: "#FEF3C7" }, { label: "20代", color: "#FDE68A" },
+      { label: "30代", color: "#FCD34D" }, { label: "40代", color: "#FBBF24" },
+      { label: "50代", color: "#F59E0B" }, { label: "60代", color: "#B45309" },
+    ],
+    colorFor(label) {
+      const m = label.match(/(\d+)代/) ?? label.match(/(\d+)[-~〜]\d+歳?/);
+      if (!m) return null;
+      const map = {10:"#FEF3C7",20:"#FDE68A",30:"#FCD34D",40:"#FBBF24",50:"#F59E0B",60:"#B45309"};
       return map[parseInt(m[1])] ?? null;
     },
   },
@@ -253,20 +299,21 @@ const FIXED_PALETTES = {
     colorFor: () => "#676767",
   },
 };
-const FIXED_PALETTE_ORDER = ["fan_label","gender","age_gender","age_a","age_b","scale_67","scale_1011"];
+const FIXED_PALETTE_ORDER = ["fan_label","gender","age_gender","age_a","age_b","age_c","scale_67","scale_1011"];
 
 function _detectFixedPaletteFromLabels(labels) {
   if (labels.some(l => /コアファン/.test(l)) && labels.some(l => /ライトファン/.test(l)))
     return "fan_label";
-  if (labels.some(l => /\d+代(男性|女性)/.test(l)))
+  if (labels.some(l => /(男性|女性)\d+代/.test(l)) || labels.some(l => /\d+代(男性|女性)/.test(l)) ||
+      labels.some(l => /(男性|女性)\d+[-~〜]\d+/.test(l)))
     return "age_gender";
   if (labels.some(l => /^男($|性)/.test(l)) || labels.some(l => /^女($|性)/.test(l)))
     return "gender";
-  if (labels.some(l => /\d+代/.test(l)))
-    return "age_a";
+  if (labels.some(l => /\d+代/.test(l)) || labels.some(l => /\d+[-~〜]\d+歳/.test(l)))
+    return "age_c";
   if (labels.some(l => /High[1-5]|TOP[23]/.test(l)) && labels.some(l => /Low[1-5]/.test(l)))
     return labels.length > 7 ? "scale_1011" : "scale_67";
-  return null;
+  return "__none__";
 }
 
 function _getActiveFixedPaletteKey(labels) {
@@ -282,10 +329,11 @@ let _lastCrosstabData = null;
 // 複合軸カラーモード: null ならデフォルト。配列を設定すると _getColorsForGraph のパレット検索に使用する
 let _compositeColorPaletteLookup = null;
 // カラーモーダル状態
-let _colorModalIdx       = null;
-let _colorModalLabels    = [];    // 現在の系列ラベル配列
-let _colorModalPaletteKey = null; // モーダル内選択中パレットキー
-let _colorModalOverrides  = {};   // { label: hex } 個別上書き
+let _colorModalIdx          = null;
+let _colorModalLabels       = [];    // 現在の系列ラベル配列
+let _colorModalPaletteKey   = null;  // モーダル内選択中パレットキー
+let _colorModalOverrides    = {};    // { label: hex } 個別上書き
+let _colorModalValueMapping = null;  // [{label, color}] | null 値↔色対応（編集中作業コピー）
 // ドラッグ状態（"color" | null）
 let _dragType  = null;
 let _dragValue = null;
@@ -330,7 +378,24 @@ function _clearPendingChartRenders() {
   _pendingChartRenders.clear();
 }
 
-// 色解決：個別上書き > 固定カラー > 選択パレット > STEP1軸パレット > COLORSデフォルト
+// ラベルの年代表記を正規化（例: "20-29歳" → "20代"）
+function _normalizeAgeLabel(s) {
+  return s.replace(/(\d+)[-~〜]\d+歳?/g, (_, d) => `${parseInt(d)}代`).trim();
+}
+
+// valueColorMapping に対するファジーマッチング
+function _matchValueColorMapping(label, mapping) {
+  if (!mapping?.length) return null;
+  let m = mapping.find(e => e.label === label);
+  if (m) return m.color;
+  const n = _normalizeAgeLabel(label);
+  m = mapping.find(e => _normalizeAgeLabel(e.label) === n);
+  if (m) return m.color;
+  m = mapping.find(e => label.includes(e.label) || e.label.includes(label));
+  return m?.color ?? null;
+}
+
+// 色解決：個別上書き > 固定カラー > valueColorMapping(ファジー) > 選択パレット > STEP1軸パレット > COLORSデフォルト
 // _compositeColorPaletteLookup が設定されている場合、パレット検索にはそのラベルを使用する
 function _getColorsForGraph(questionCode, labels) {
   const s = AppState.step3QuestionSettings[questionCode] ?? {};
@@ -341,6 +406,7 @@ function _getColorsForGraph(questionCode, labels) {
   }
 
   const overrides = s.overriddenSeriesColors ?? {};
+  const vm = s.valueColorMapping ?? null;
   const lookupLabels = _compositeColorPaletteLookup ?? labels;
   const paletteKey = "selectedPalette" in s
     ? s.selectedPalette
@@ -353,11 +419,13 @@ function _getColorsForGraph(questionCode, labels) {
     if (overrides[l]) return overrides[l];
     const fc = _fixedColorFor(l);
     if (fc) return fc;
+    const ll = lookupLabels[i] ?? l;
+    const mc = _matchValueColorMapping(ll, vm);
+    if (mc) return mc;
     if (palette) {
       if (palette.generatedColors) {
         return palette.generatedColors[i % palette.generatedColors.length];
       }
-      const ll = lookupLabels[i] ?? l;
       const pc = palette.colorFor(ll);
       if (pc) return pc;
     }
@@ -385,14 +453,15 @@ export function initStep3Panel() {
 
   _initLazyChartObserver();
   document.addEventListener("survey:statechange", _onStateChange);
-  document.getElementById("step3-set-generate-btn")?.addEventListener("click", _runCrosstab);
-
   // イベント委譲: results コンテナに1度だけ登録
   const resultsEl = document.getElementById("step3-results");
   if (resultsEl) {
     resultsEl.addEventListener("change", _onResultsChange);
     resultsEl.addEventListener("click",  _onResultsClick);
   }
+
+  // サイドバー初期化
+  _initSidebar();
 
   // カラーモーダル初期化
   _initColorModal();
@@ -406,8 +475,7 @@ export function initStep3Panel() {
 function _onStateChange() {
   if (AppState.activePanel !== "step3") return;
   _renderAxisSelector();
-  _renderSetSelector();
-  _updateGenerateButton();
+  _renderSidebar();
   const nc = document.getElementById("step3-axis-ncount");
   if (nc) { nc.style.display = "none"; nc.innerHTML = ""; }
 }
@@ -570,63 +638,155 @@ function _rerenderCompositeIfNeeded() {
   const currentData = _currentCacheKey ? _crosstabCache[_currentCacheKey] : _lastCrosstabData;
   if (!currentData?.secondary_axis_question_code) return;
   const container = document.getElementById("step3-results");
-  if (container) _renderResults(container, currentData);
+  if (container) _renderResults(container, currentData); // async だが完了を待つ必要はない
 }
 
 // ---------------------------------------------------------------------------
-// 生成ボタン制御
+// サイドバー
 // ---------------------------------------------------------------------------
 
-function _updateGenerateButton() {
-  const btn  = document.getElementById("step3-set-generate-btn");
-  const note = document.getElementById("step3-run-note");
-  if (!btn) return;
+function _initSidebar() {
+  document.getElementById("step3-sidebar-collapse")?.addEventListener("click", () => {
+    document.getElementById("step3-sidebar")?.classList.toggle("collapsed");
+  });
+  document.getElementById("step3-set-search")?.addEventListener("input", () => _renderSidebar());
+}
+
+function _renderSidebar() {
+  const nav = document.getElementById("step3-sidebar-nav");
+  if (!nav) return;
+
+  const allSets   = AppState.questionSets;
+  const searchVal = (document.getElementById("step3-set-search")?.value ?? "").trim().toLowerCase();
+
+  if (!allSets.length) {
+    nav.innerHTML = `<div class="step3-nav-empty">STEP1 で集計セットを設定してください</div>`;
+    return;
+  }
+
   const hasStep2 = Boolean(AppState.step2Filename);
   const hasAxis  = Boolean(AppState.step3ActiveAxisCode) && _getAxisCandidates().length > 0;
-  const hasSet   = Boolean(AppState.step3ActiveSetId);
-  btn.disabled = !hasStep2 || !hasAxis || !hasSet;
-  if (note) {
-    note.textContent = !hasStep2 ? "STEP2 で回答データをアップロードすると実行できます。"
-                     : !hasAxis  ? "STEP1 で集計軸を選択してください。"
-                     : !hasSet   ? "設問セットを選択してください。"
-                     : "";
+  const canRun   = hasStep2 && hasAxis;
+  const activeId = AppState.step3ActiveSetId;
+
+  // 分析対象 OFF の設問コードセット
+  const excluded = new Set(AppState.excludedQuestionCodes);
+
+  // 代表質問文取得用マップ（question_code → QuestionItem）
+  const qMap = Object.fromEntries(AppState.questions.map(q => [q.question_code, q]));
+
+  // フラットなセットリストを作成（isParent の場合は children を展開）
+  // 分析対象 OFF の設問を除いた effectiveCodes が 0 件のセットはスキップ
+  const flatSets = [];
+  for (const s of allSets) {
+    if (s.isParent && (s.children ?? []).length > 0) {
+      for (const child of s.children) {
+        if (child.isExcluded) continue;
+        const eff = (child.questionCodes ?? []).filter(c => !excluded.has(c));
+        if (eff.length > 0) flatSets.push({ ...child, _effectiveCodes: eff });
+      }
+    } else {
+      if (s.isExcluded) continue;
+      const eff = (s.questionCodes ?? []).filter(c => !excluded.has(c));
+      if (eff.length > 0) flatSets.push({ ...s, _effectiveCodes: eff });
+    }
   }
+
+  let filtered = flatSets;
+  if (searchVal) {
+    filtered = flatSets.filter(s => s.setName.toLowerCase().includes(searchVal));
+  }
+
+  if (filtered.length === 0) {
+    nav.innerHTML = `<div class="step3-nav-empty">STEP1 で集計セットを設定してください</div>`;
+    return;
+  }
+
+  const itemHtml = (s) => {
+    const effectiveCodes = s._effectiveCodes;
+    const isActive    = s.setId === activeId;
+    const isGenerated = Object.keys(_crosstabCache).some(k => k.endsWith(`||${s.setId}`));
+    const disabledCls = canRun ? "" : " step3-nav-item-disabled";
+
+    // 代表質問文: 最初の設問の parent_text → question_text の順で取得
+    const firstQ   = qMap[effectiveCodes[0]];
+    const descText = firstQ?.parent_text || firstQ?.question_text || "";
+
+    return `<div class="step3-nav-item${isActive ? " active" : ""}${disabledCls}"
+              data-setid="${_esc(s.setId)}" title="${_esc(s.setName)}">
+      ${isGenerated
+        ? `<span class="step3-nav-dot"></span>`
+        : `<span class="step3-nav-dot-placeholder"></span>`}
+      <div class="step3-nav-item-body">
+        <div class="step3-nav-item-header">
+          <span class="step3-nav-item-name step3-sidebar-label">${_esc(s.setName)}</span>
+          <span class="step3-nav-item-count step3-sidebar-label">(${effectiveCodes.length})</span>
+        </div>
+        ${descText ? `<div class="step3-nav-item-desc step3-sidebar-label">${_esc(descText)}</div>` : ""}
+      </div>
+    </div>`;
+  };
+
+  let html = filtered.map(itemHtml).join("");
+
+  if (!canRun) {
+    const msg = !hasStep2
+      ? "STEP2 でデータを読み込んでください"
+      : "集計軸を選択してください";
+    html += `<div class="step3-nav-note">${_esc(msg)}</div>`;
+  }
+
+  nav.innerHTML = html;
+
+  nav.querySelectorAll(".step3-nav-item:not(.step3-nav-item-disabled)").forEach(item => {
+    item.addEventListener("click", () => {
+      const setId = item.dataset.setid;
+      setStep3ActiveSetId(setId);
+      _runCrosstab(setId);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
 // クロス集計実行
 // ---------------------------------------------------------------------------
 
-async function _runCrosstab() {
+async function _runCrosstab(setId) {
+  const activeSetId = setId || AppState.step3ActiveSetId;
   const axisCode = AppState.step3ActiveAxisCode;
-  const setId    = AppState.step3ActiveSetId;
-  if (!axisCode || !AppState.sessionToken) return;
+  if (!axisCode || !activeSetId || !AppState.sessionToken) return;
 
   const secAxisCode = AppState.step3SecondaryAxisCode;
-  const set = AppState.questionSets.find(s => s.setId === setId);
-  const targetCodes = set?.questionCodes ?? [];
-  const key = setId ? _getCacheKey(axisCode, secAxisCode, setId) : "";
+  // フラット一覧で検索、なければ children を探索（カスタム親セットの子）
+  let set = AppState.questionSets.find(s => s.setId === activeSetId);
+  if (!set) {
+    for (const parent of AppState.questionSets) {
+      const child = (parent.children ?? []).find(c => c.setId === activeSetId);
+      if (child) { set = child; break; }
+    }
+  }
+  const _excl = new Set(AppState.excludedQuestionCodes);
+  const targetCodes = (set?.questionCodes ?? []).filter(c => !_excl.has(c));
+  const key = _getCacheKey(axisCode, secAxisCode, activeSetId);
 
-  const btn        = document.getElementById("step3-set-generate-btn");
-  const progressEl = document.getElementById("step3-progress");
+  const progressEl  = document.getElementById("step3-progress");
   const progressMsg = document.getElementById("step3-progress-msg");
-  const resultsEl  = document.getElementById("step3-results");
+  const resultsEl   = document.getElementById("step3-results");
   const placeholder = document.getElementById("step3-placeholder");
   if (!resultsEl) return;
 
   // キャッシュヒット → 即時表示
-  if (key && _crosstabCache[key]) {
+  if (_crosstabCache[key]) {
     _currentCacheKey = key;
     _destroyAllCharts();
     _clearPendingChartRenders();
     if (placeholder) placeholder.style.display = "none";
-    _renderResults(resultsEl, _crosstabCache[key]);
-    _renderGeneratedSetsNav();
+    await _renderResults(resultsEl, _crosstabCache[key]);
+    _renderSidebar();
     return;
   }
 
   // キャッシュミス → API 呼び出し
-  if (btn) btn.disabled = true;
   if (progressEl) progressEl.style.display = "";
   if (progressMsg) progressMsg.textContent = `⏳ 集計中… (${targetCodes.length || "全"}問)`;
   _destroyAllCharts();
@@ -636,105 +796,31 @@ async function _runCrosstab() {
     const data = await generateCrosstab(
       AppState.sessionToken, axisCode, secAxisCode, targetCodes
     );
-    if (key) _crosstabCache[key] = data;
+    _crosstabCache[key] = data;
     _currentCacheKey = key;
     AppState.step3LastGeneratedAxisCode = axisCode;
     _lastCrosstabData = data;
     if (placeholder) placeholder.style.display = "none";
-    _renderResults(resultsEl, data);
-    _renderGeneratedSetsNav();
+    await _renderResults(resultsEl, data);
+    _renderSidebar();
   } catch (err) {
     if (placeholder) placeholder.style.display = "none";
     resultsEl.innerHTML = `<div class="card"><div class="card-body" style="color:var(--color-danger,#e53e3e)">エラー: ${_esc(err.message)}</div></div>`;
   } finally {
-    if (btn) btn.disabled = false;
     if (progressEl) progressEl.style.display = "none";
-    _updateGenerateButton();
+    _renderSidebar();
   }
-}
-
-// ---------------------------------------------------------------------------
-// 設問セット選択 UI / 生成済みセット一覧
-// ---------------------------------------------------------------------------
-
-function _renderSetSelector() {
-  const el = document.getElementById("step3-set-selector");
-  if (!el) return;
-  const sets = AppState.questionSets;
-  if (!sets.length) {
-    el.innerHTML = `<span class="text-sm" style="color:var(--color-text-muted)">設問セット候補がありません。STEP1 で調査票をアップロードしてください。</span>`;
-    return;
-  }
-  const active = AppState.step3ActiveSetId;
-  el.innerHTML = sets.map(s => `
-    <label class="step3-set-radio-label${s.setId === active ? " active" : ""}">
-      <input type="radio" name="step3-set" value="${_esc(s.setId)}" ${s.setId === active ? "checked" : ""}
-             style="accent-color:var(--color-primary)">
-      <span>${_esc(s.setName)}</span>
-      <span class="step3-set-count">(${s.questionCodes.length}問)</span>
-    </label>`).join("");
-  el.querySelectorAll("input[name='step3-set']").forEach(radio => {
-    radio.addEventListener("change", () => {
-      if (!radio.checked) return;
-      setStep3ActiveSetId(radio.value);
-      _updateGenerateButton();
-      // ラジオラベルのアクティブスタイルを更新
-      el.querySelectorAll(".step3-set-radio-label").forEach(lbl => {
-        lbl.classList.toggle("active", lbl.querySelector("input")?.value === radio.value);
-      });
-    });
-  });
-}
-
-function _renderGeneratedSetsNav() {
-  const section = document.getElementById("step3-generated-sets-section");
-  const nav     = document.getElementById("step3-generated-sets-nav");
-  if (!nav) return;
-  const keys = Object.keys(_crosstabCache);
-  if (!keys.length) {
-    if (section) section.style.display = "none";
-    return;
-  }
-  if (section) section.style.display = "";
-  nav.innerHTML = keys.map(key => {
-    const [axisCode, secAxisCode, setId] = key.split("||");
-    const data = _crosstabCache[key];
-    const set = AppState.questionSets.find(s => s.setId === setId);
-    const setName = set?.setName ?? setId;
-    const axisLabel = _getAxisLabel(axisCode);
-    const secLabel = secAxisCode ? ` × ${_getAxisLabel(secAxisCode)}` : "";
-    const label = `${setName} × ${axisLabel}${secLabel}`;
-    const isActive = key === _currentCacheKey;
-    return `<button class="step3-generated-set-btn${isActive ? " active" : ""}" data-cache-key="${_esc(key)}">${_esc(label)} <small class="step3-set-count">(${data.results?.length ?? 0}問)</small></button>`;
-  }).join("");
-  nav.querySelectorAll(".step3-generated-set-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.cacheKey;
-      if (!_crosstabCache[key]) return;
-      _currentCacheKey = key;
-      _lastCrosstabData = _crosstabCache[key];
-      const resultsEl = document.getElementById("step3-results");
-      if (resultsEl) {
-        _destroyAllCharts();
-        _clearPendingChartRenders();
-        const placeholder = document.getElementById("step3-placeholder");
-        if (placeholder) placeholder.style.display = "none";
-        _renderResults(resultsEl, _crosstabCache[key]);
-      }
-      _renderGeneratedSetsNav();
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
 // 結果描画
 // ---------------------------------------------------------------------------
 
-function _renderResults(container, data) {
+async function _renderResults(container, data) {
   if (data.secondary_axis_question_code) {
-    _renderCompositeResults(container, data);
+    await _renderCompositeResults(container, data);
   } else {
-    _renderSimpleResults(container, data);
+    await _renderSimpleResults(container, data);
   }
 }
 
@@ -752,26 +838,25 @@ function _updateAxisNcount(axisLabel, categories, totals, warningsHtml) {
   el.style.display = "block";
 }
 
-function _renderSimpleResults(container, data) {
+async function _renderSimpleResults(container, data) {
   const { axis_question_text, axis_categories, axis_totals, results, warnings } = data;
 
-  let html = "";
+  // ヘッダー（一括変更バー + 一括エクスポートバー）を先に挿入してUIを即時表示
+  container.innerHTML =
+    _buildBulkBar() +
+    `<div class="card" style="margin-bottom:8px">
+      <div class="card-body" style="padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px">
+        <span style="font-size:.85rem; font-weight:600; color:var(--color-text-muted)">一括出力：</span>
+        <button id="step3-export-all-excel" class="btn btn-secondary btn-sm">📥 すべてExcel</button>
+        <button id="step3-export-all-csv"   class="btn btn-secondary btn-sm">📥 すべてCSV (ZIP)</button>
+        <button id="step3-export-all-png"   class="btn btn-secondary btn-sm">📥 すべてPNG</button>
+      </div>
+    </div>`;
 
-  // 一括変更バー
-  html += _buildBulkBar();
-
-  // 一括エクスポートバー
-  html += `<div class="card" style="margin-bottom:8px">
-    <div class="card-body" style="padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px">
-      <span style="font-size:.85rem; font-weight:600; color:var(--color-text-muted)">一括出力：</span>
-      <button id="step3-export-all-excel" class="btn btn-secondary btn-sm">📥 すべてExcel</button>
-      <button id="step3-export-all-csv"   class="btn btn-secondary btn-sm">📥 すべてCSV (ZIP)</button>
-      <button id="step3-export-all-png"   class="btn btn-secondary btn-sm">📥 すべてPNG</button>
-    </div>
-  </div>`;
-
-  // 設問ごとのカード
-  results.forEach((result, idx) => {
+  // 設問カードを10枚ごとにチャンク挿入してメインスレッドを解放する
+  const CHUNK = 10;
+  for (let idx = 0; idx < results.length; idx++) {
+    const result = results[idx];
     const settings = _getSettings(result.question_code, result.type_code);
     const recommended = _recommendedType(result.type_code);
     const recommendedLabel = _recommendedLabel(result.type_code);
@@ -824,7 +909,7 @@ function _renderSimpleResults(container, data) {
     // 除外バッジ（除外中のみ表示）
     const excludedBadge = `<span id="step3-excluded-badge-${idx}" class="badge-excluded"${settings.excluded ? "" : " hidden"}>除外</span>`;
 
-    html += `
+    const cardHtml = `
     <div id="step3-card-${idx}" class="card${settings.excluded ? " step3-excluded-card" : ""}" style="margin-bottom:8px">
 
       <!-- タイトル行: 常時表示 -->
@@ -895,15 +980,18 @@ function _renderSimpleResults(container, data) {
       </div>
 
     </div>`;
-  });
 
-  if (!results.length) {
-    html += `<div class="card"><div class="card-body" style="color:var(--color-text-muted); text-align:center; padding:32px">
-      クロス集計できる設問がありませんでした。
-    </div></div>`;
+    container.insertAdjacentHTML("beforeend", cardHtml);
+    // CHUNK 枚ごとにメインスレッドへ制御を返す
+    if (idx % CHUNK === CHUNK - 1) await yieldToMain();
   }
 
-  container.innerHTML = html;
+  if (!results.length) {
+    container.insertAdjacentHTML("beforeend",
+      `<div class="card"><div class="card-body" style="color:var(--color-text-muted); text-align:center; padding:32px">
+        クロス集計できる設問がありませんでした。
+      </div></div>`);
+  }
 
   // 軸N数をシンプル表示
   const warningsHtml = warnings.length
@@ -933,7 +1021,7 @@ function _renderSimpleResults(container, data) {
 // 複合集計結果描画
 // ---------------------------------------------------------------------------
 
-function _renderCompositeResults(container, data) {
+async function _renderCompositeResults(container, data) {
   const minN = AppState.step3MinSampleSize;
 
   // N数フィルター
@@ -962,17 +1050,15 @@ function _renderCompositeResults(container, data) {
 
   const mode = AppState.step3CompositeDisplayMode;
   if (mode === "split") {
-    _renderSplitResults(container, filteredData);
+    await _renderSplitResults(container, filteredData);
   } else {
-    // flat / nested: 複合ラベルそのままでシンプル描画
-    // nested は flat と同じ Chart.js 表示（ラベル順に視覚的グループが生まれる）
-    _renderSimpleResults(container, filteredData);
+    await _renderSimpleResults(container, filteredData);
   }
 }
 
 const _COMPOSITE_SEP = " × ";
 
-function _renderSplitResults(container, data) {
+async function _renderSplitResults(container, data) {
   const {
     axis_question_text, axis_categories, axis_totals,
     primary_axis_categories, secondary_axis_categories, results, warnings,
@@ -1000,21 +1086,22 @@ function _renderSplitResults(container, data) {
     return;
   }
 
-  // 一括変更バー
-  let html = _buildBulkBar();
+  // ヘッダー先行挿入
+  container.innerHTML =
+    _buildBulkBar() +
+    `<div class="card" style="margin-bottom:8px">
+      <div class="card-body" style="padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px">
+        <span style="font-size:.85rem; font-weight:600; color:var(--color-text-muted)">一括出力：</span>
+        <button id="step3-export-all-excel" class="btn btn-secondary btn-sm">📥 すべてExcel</button>
+        <button id="step3-export-all-csv"   class="btn btn-secondary btn-sm">📥 すべてCSV (ZIP)</button>
+        <button id="step3-export-all-png"   class="btn btn-secondary btn-sm">📥 すべてPNG</button>
+      </div>
+    </div>`;
 
-  // 一括エクスポートバー
-  html += `<div class="card" style="margin-bottom:8px">
-    <div class="card-body" style="padding:10px 16px; display:flex; align-items:center; flex-wrap:wrap; gap:8px">
-      <span style="font-size:.85rem; font-weight:600; color:var(--color-text-muted)">一括出力：</span>
-      <button id="step3-export-all-excel" class="btn btn-secondary btn-sm">📥 すべてExcel</button>
-      <button id="step3-export-all-csv"   class="btn btn-secondary btn-sm">📥 すべてCSV (ZIP)</button>
-      <button id="step3-export-all-png"   class="btn btn-secondary btn-sm">📥 すべてPNG</button>
-    </div>
-  </div>`;
-
-  // 設問ごとのカード（split グループを内包）
-  results.forEach((result, idx) => {
+  // 設問ごとのカードをチャンク挿入
+  const CHUNK = 10;
+  for (let idx = 0; idx < results.length; idx++) {
+    const result = results[idx];
     const settings = _getSettings(result.question_code, result.type_code);
     const recommended     = _recommendedType(result.type_code);
     const recommendedLabel = _recommendedLabel(result.type_code);
@@ -1055,7 +1142,7 @@ function _renderSplitResults(container, data) {
         <div id="step3-chart-area-${idx}-${gIdx}" class="step3-chart-area" style="margin-bottom:4px"></div>
       </div>`).join("");
 
-    html += `
+    const cardHtml = `
     <div id="step3-card-${idx}" class="card${settings.excluded ? " step3-excluded-card" : ""}" style="margin-bottom:8px">
       <div class="card-header" style="padding:10px 16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px">
         <div>
@@ -1105,15 +1192,17 @@ function _renderSplitResults(container, data) {
         </div>
       </div>
     </div>`;
-  });
 
-  if (!results.length) {
-    html += `<div class="card"><div class="card-body" style="color:var(--color-text-muted); text-align:center; padding:32px">
-      クロス集計できる設問がありませんでした。
-    </div></div>`;
+    container.insertAdjacentHTML("beforeend", cardHtml);
+    if (idx % CHUNK === CHUNK - 1) await yieldToMain();
   }
 
-  container.innerHTML = html;
+  if (!results.length) {
+    container.insertAdjacentHTML("beforeend",
+      `<div class="card"><div class="card-body" style="color:var(--color-text-muted); text-align:center; padding:32px">
+        クロス集計できる設問がありませんでした。
+      </div></div>`);
+  }
 
   // 軸N数をシンプル表示（split: primary軸ごとに合計n数）
   {
@@ -1407,7 +1496,7 @@ function _rerenderCompositeAll() {
   if (container && d) {
     _destroyAllCharts();
     _clearPendingChartRenders();
-    _renderResults(container, d);
+    _renderResults(container, d); // async だが完了を待つ必要はない
   }
 }
 
@@ -2198,13 +2287,15 @@ function _getColorSeriesLabels(result, settings, axisCategories) {
   return axisCategories;
 }
 
-// モーダル内での色を palette + overrides から計算
+// モーダル内での色を overrides > fixedColor > valueColorMapping(ファジー) > palette > COLORS で計算
 function _deriveModalColors(labels) {
   const palette = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey] : null;
   return labels.map((l, i) => {
     if (_colorModalOverrides[l]) return _colorModalOverrides[l];
     const fc = _fixedColorFor(l);
     if (fc) return fc;
+    const mc = _matchValueColorMapping(l, _colorModalValueMapping);
+    if (mc) return mc;
     if (palette) { const pc = palette.colorFor(l); if (pc) return pc; }
     return COLORS[i % COLORS.length];
   });
@@ -2235,6 +2326,14 @@ function _openColorModal(idx) {
     // 未設定: 軸レベル or 自動検出
     _colorModalPaletteKey = _getActiveFixedPaletteKey(labels);
     _colorModalOverrides  = {};
+  }
+
+  // valueColorMapping: 保存済み → 復元、なければパレットのcanonicalValuesを展開
+  if (rawSettings.valueColorMapping?.length > 0) {
+    _colorModalValueMapping = rawSettings.valueColorMapping.map(e => ({ ...e }));
+  } else {
+    const pal = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey] : null;
+    _colorModalValueMapping = pal?.canonicalValues ? pal.canonicalValues.map(e => ({ ...e })) : null;
   }
 
   document.getElementById("step3-color-title").textContent =
@@ -2273,7 +2372,23 @@ function _refreshColorModal(labels) {
     applyPaletteBtn.textContent = pal ? `「${pal.label}」を適用` : "デフォルト配色を適用";
   }
 
-  // 系列カラーピッカー（ラベルベース、ドラッグ並び替えなし）
+  // 値↔色対応（canonicalValues編集エリア）
+  const vmEl = document.getElementById("step3-value-mapping-rows");
+  if (vmEl) {
+    if (_colorModalValueMapping?.length > 0) {
+      vmEl.innerHTML = _colorModalValueMapping.map((entry, i) => `
+        <div class="step3-vm-row" data-vi="${i}">
+          <input type="color" class="step3-vm-color" value="${entry.color}" data-vi="${i}">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${entry.color};margin-right:4px;vertical-align:middle;flex-shrink:0"></span>
+          <input type="text" class="step3-vm-label" value="${_esc(entry.label)}" placeholder="値名" data-vi="${i}" style="flex:1;font-size:.82rem;padding:2px 6px;border:1px solid var(--color-border);border-radius:3px;min-width:0">
+          <button class="step3-vm-del btn btn-secondary btn-sm" data-vi="${i}" style="padding:1px 6px;font-size:.78rem">✕</button>
+        </div>`).join("");
+    } else {
+      vmEl.innerHTML = `<div style="font-size:.78rem;color:var(--color-text-muted);padding:4px 0">パレットを選択すると値↔色対応が表示されます</div>`;
+    }
+  }
+
+  // 実系列への適用プレビュー（ファジーマッチ後の色）
   const colors = _deriveModalColors(labels);
   const rowsEl = document.getElementById("step3-color-rows");
   if (rowsEl) {
@@ -2329,19 +2444,59 @@ function _initColorModal() {
   const rowsEl    = document.getElementById("step3-color-rows");
   const paletteEl = document.getElementById("step3-drag-palette");
 
-  // パレットボタンクリック → 選択状態だけ更新（即時適用しない）
+  // パレットボタンクリック → 選択状態更新 + valueColorMappingをcanonicalValuesで上書き
   document.getElementById("step3-palette-btns")?.addEventListener("click", e => {
     const btn = e.target.closest(".step3-palette-swatch");
     if (!btn) return;
     const key = btn.dataset.palette;
     _colorModalPaletteKey = key === "__none__" ? null : key;
+    const pal = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey] : null;
+    _colorModalValueMapping = pal?.canonicalValues ? pal.canonicalValues.map(e => ({ ...e })) : null;
     _refreshColorModal(_colorModalLabels);
   });
 
   // 「このパレットを適用」→ 全上書きをクリアしてパレット色を一括適用
   document.getElementById("step3-palette-apply-btn")?.addEventListener("click", () => {
     _colorModalOverrides = {};
+    const pal = _colorModalPaletteKey ? FIXED_PALETTES[_colorModalPaletteKey] : null;
+    _colorModalValueMapping = pal?.canonicalValues ? pal.canonicalValues.map(e => ({ ...e })) : _colorModalValueMapping;
     _refreshColorModal(_colorModalLabels);
+  });
+
+  // 値↔色対応: 色変更
+  document.getElementById("step3-value-mapping-rows")?.addEventListener("input", e => {
+    const colorInput = e.target.closest(".step3-vm-color");
+    const labelInput = e.target.closest(".step3-vm-label");
+    if (colorInput && _colorModalValueMapping) {
+      const i = parseInt(colorInput.dataset.vi, 10);
+      _colorModalValueMapping[i].color = colorInput.value;
+      // スウォッチも即時更新
+      const swatch = colorInput.nextElementSibling;
+      if (swatch) swatch.style.background = colorInput.value;
+      _refreshColorPreview(_colorModalLabels);
+    } else if (labelInput && _colorModalValueMapping) {
+      const i = parseInt(labelInput.dataset.vi, 10);
+      _colorModalValueMapping[i].label = labelInput.value;
+    }
+  });
+
+  // 値↔色対応: 削除
+  document.getElementById("step3-value-mapping-rows")?.addEventListener("click", e => {
+    const delBtn = e.target.closest(".step3-vm-del");
+    if (!delBtn || !_colorModalValueMapping) return;
+    const i = parseInt(delBtn.dataset.vi, 10);
+    _colorModalValueMapping.splice(i, 1);
+    _refreshColorModal(_colorModalLabels);
+  });
+
+  // 値↔色対応: 追加
+  document.getElementById("step3-value-mapping-add")?.addEventListener("click", () => {
+    if (!_colorModalValueMapping) _colorModalValueMapping = [];
+    _colorModalValueMapping.push({ label: "", color: "#999999" });
+    _refreshColorModal(_colorModalLabels);
+    // 追加した行の入力欄にフォーカス
+    const vmEl = document.getElementById("step3-value-mapping-rows");
+    vmEl?.querySelector(".step3-vm-row:last-child .step3-vm-label")?.focus();
   });
 
   // 個別色変更 → 上書きに追加、カスタムバッジを動的付与
@@ -2423,26 +2578,28 @@ function _initColorModal() {
     modal.hidden = true;
   });
 
-  // 「現在のグラフだけ変更」→ 新形式で保存
+  // 「現在のグラフだけ変更」→ 新形式で保存（valueColorMapping含む）
   document.getElementById("step3-color-apply-one")?.addEventListener("click", () => {
     const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
     const result = d?.results[_colorModalIdx];
     if (!result) return;
     setStep3Setting(result.question_code, "selectedPalette",        _colorModalPaletteKey);
+    setStep3Setting(result.question_code, "valueColorMapping",      _colorModalValueMapping ? [..._colorModalValueMapping] : null);
     setStep3Setting(result.question_code, "overriddenSeriesColors",  { ..._colorModalOverrides });
     setStep3Setting(result.question_code, "customColors",            null);
     _reRenderCard(_colorModalIdx);
     modal.hidden = true;
   });
 
-  // 「同じ集計軸すべてに適用」→ 全設問に新形式で保存
+  // 「同じ集計軸すべてに適用」→ 全設問に新形式で保存（valueColorMapping含む）
   document.getElementById("step3-color-apply-all")?.addEventListener("click", () => {
     const allResults = ((_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData)?.results ?? [];
     const palette    = _colorModalPaletteKey;
+    const vm         = _colorModalValueMapping ? [..._colorModalValueMapping] : null;
     const overrides  = { ..._colorModalOverrides };
     const updates    = {};
     allResults.forEach(r => {
-      updates[r.question_code] = { selectedPalette: palette, overriddenSeriesColors: overrides, customColors: null };
+      updates[r.question_code] = { selectedPalette: palette, valueColorMapping: vm, overriddenSeriesColors: overrides, customColors: null };
     });
     setStep3SettingsBulk(updates);
     allResults.forEach((_, i) => _reRenderCard(i));

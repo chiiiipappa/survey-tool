@@ -42,7 +42,7 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surv) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}) {
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = []) {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -58,6 +58,8 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       step3_min_sample_size: compositeSettings.minSampleSize ?? 0,
       question_sets: questionSets,
       step3_crosstab_cache: step3CrosstabCache,
+      hidden_question_types: hiddenQuestionTypes,
+      excluded_questions: excludedQuestions,
     }),
   });
   if (!res.ok) {
@@ -129,15 +131,22 @@ export async function saveFaSettings(token, faCodes, attrCols) {
 // ---------------------------------------------------------------------------
 
 /** 回答データ CSV / xlsx をアップロードしてラベル変換結果を取得する。 */
-export async function uploadResponseFile(file, sessionToken) {
+export async function uploadResponseFile(file, sessionToken, { signal } = {}) {
   const form = new FormData();
   form.append("file", file);
   form.append("session_token", sessionToken);
-  const res = await fetch(`${BASE}/step2/upload`, { method: "POST", body: form });
+  const res = await fetch(`${BASE}/step2/upload`, { method: "POST", body: form, signal });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "回答データのアップロードに失敗しました。");
   }
+  return res.json();
+}
+
+/** STEP2 アップロード進捗をポーリングする。 */
+export async function getStep2Progress(sessionToken) {
+  const res = await fetch(`${BASE}/step2/progress/${encodeURIComponent(sessionToken)}`);
+  if (!res.ok) return null;
   return res.json();
 }
 

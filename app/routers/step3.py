@@ -25,7 +25,7 @@ router = APIRouter()
 # SA / MA / 数値系のみクロス集計対象。FAは除外。
 _CROSSTAB_SA_TYPES = {"SA", "S", "NU", "N"}
 _CROSSTAB_MA_TYPES = {"MA", "ML", "M"}
-_SKIP_TYPES = {"FA", "OA", "OE", "FT", "FN"}
+_SKIP_TYPES = {"FA", "OA", "OE", "FT", "FN", "XL", "F"}
 
 
 def _safe_float(val: float) -> float:
@@ -128,8 +128,14 @@ def _resolve_needed_columns(
 
     # bracket列: base_code → [display_header, ...]（MA設問の展開列名）
     bracket_map: dict[str, list[str]] = {}
+    bracket_headers: set[str] = set()
     for bc in step2_data.get("bracket_columns", []):
         bracket_map.setdefault(bc["base_code"], []).append(bc["display_header"])
+        bracket_headers.add(bc["display_header"])
+
+    # parquet に存在する列 = matched_columns（直接コード）＋ bracket display_header
+    matched_set = set(step2_data.get("matched_columns", []))
+    available = matched_set | bracket_headers
 
     needed: set[str] = {body.axis_question_code}
     if body.secondary_axis_question_code:
@@ -138,8 +144,10 @@ def _resolve_needed_columns(
     for code in body.target_question_codes:
         if code in bracket_map:
             needed.update(bracket_map[code])
-        else:
+        elif code in available:
+            # parquet に存在することが確認できた列のみ追加
             needed.add(code)
+        # else: レイアウトにはあるが回答データに存在しない設問はスキップ
 
     return list(needed)
 
@@ -164,6 +172,12 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
         df = load_parquet(Path(parquet_path), columns=columns_needed)
     except FileNotFoundError:
         raise HTTPException(422, "データが失われています。再アップロードしてください。")
+    except Exception as exc:
+        logger.warning("列プロジェクション失敗、全列ロードにフォールバック: %s", exc)
+        try:
+            df = load_parquet(Path(parquet_path))
+        except FileNotFoundError:
+            raise HTTPException(422, "データが失われています。再アップロードしてください。")
     axis_col = body.axis_question_code
 
     if axis_col not in df.columns:
