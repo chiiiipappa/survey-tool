@@ -59,6 +59,9 @@ function _chartSuitability(chartId, typeCode) {
 // 向き選択が有効なチャートタイプ
 const ORIENTATION_TYPES = new Set(["bar", "stacked100", "grouped"]);
 
+// 棒の太さ調整が有効なチャートタイプ
+const BAR_WIDTH_TYPES = new Set(["bar", "stacked100", "grouped", "avg_bar"]);
+
 const COLORS = [
   "#4299E1", "#F6AD55", "#68D391", "#F687B3", "#9F7AEA",
   "#76E4F7", "#FC8181", "#B7EE8F", "#F6E05E", "#90CDF4",
@@ -458,6 +461,7 @@ export function initStep3Panel() {
   if (resultsEl) {
     resultsEl.addEventListener("change", _onResultsChange);
     resultsEl.addEventListener("click",  _onResultsClick);
+    resultsEl.addEventListener("input",  _onResultsInput);
   }
 
   // サイドバー初期化
@@ -967,6 +971,26 @@ async function _renderSimpleResults(container, data) {
             <option value="asc"     ${settings.sortOrder === "asc"      ? " selected" : ""}>昇順</option>
           </select>
           ${transposeHtml}
+          <span class="step3-height-ctrl" style="display:flex; align-items:center; gap:4px; font-size:.82rem">
+            <span style="color:var(--color-text-muted)">高さ：</span>
+            <input type="range" class="step3-chart-height-slider"
+                   data-q="${_esc(result.question_code)}" data-idx="${idx}"
+                   min="150" max="540" step="10"
+                   value="${settings.chartHeight ?? 270}"
+                   style="width:80px; accent-color:var(--color-primary,#3B82F6)">
+            <span class="step3-chart-height-val" style="min-width:30px">${settings.chartHeight ? settings.chartHeight + "px" : "自動"}</span>
+            <button class="btn btn-secondary btn-sm step3-chart-height-reset-btn"
+                    data-q="${_esc(result.question_code)}" data-idx="${idx}">自動</button>
+          </span>
+          <span class="step3-bar-width-ctrl" style="display:${BAR_WIDTH_TYPES.has(settings.chartType) ? "flex" : "none"}; align-items:center; gap:4px; font-size:.82rem">
+            <span style="color:var(--color-text-muted)">棒の太さ：</span>
+            <input type="range" class="step3-bar-width-slider"
+                   data-q="${_esc(result.question_code)}" data-idx="${idx}"
+                   min="10" max="100" step="5"
+                   value="${Math.round((settings.barWidth ?? 0.9) * 100)}"
+                   style="width:70px; accent-color:var(--color-primary,#3B82F6)">
+            <span class="step3-bar-width-val" style="min-width:30px">${Math.round((settings.barWidth ?? 0.9) * 100)}%</span>
+          </span>
         </div>
 
         <!-- 表示選択肢パネル -->
@@ -1250,6 +1274,46 @@ async function _renderSplitResults(container, data) {
 // イベント委譲ハンドラ
 // ---------------------------------------------------------------------------
 
+function _onResultsInput(e) {
+  // グラフ高さスライダー：ライブプレビュー
+  const heightSlider = e.target.closest(".step3-chart-height-slider");
+  if (heightSlider) {
+    const val = parseInt(heightSlider.value, 10);
+    const ctrl = heightSlider.closest(".step3-height-ctrl");
+    if (ctrl) {
+      const valEl = ctrl.querySelector(".step3-chart-height-val");
+      if (valEl) valEl.textContent = val + "px";
+    }
+    const idx = parseInt(heightSlider.dataset.idx, 10);
+    const areaEl = document.getElementById(`step3-chart-area-${idx}`);
+    if (areaEl) {
+      areaEl.style.height = val + "px";
+      const chart = _charts.get(areaEl.id);
+      if (chart && !Array.isArray(chart)) chart.resize();
+    }
+    return;
+  }
+
+  // 棒の太さスライダー：ラベルのみ更新（再描画は change で）
+  const barWidthSlider = e.target.closest(".step3-bar-width-slider");
+  if (barWidthSlider) {
+    const val = parseInt(barWidthSlider.value, 10);
+    const ctrl = barWidthSlider.closest(".step3-bar-width-ctrl");
+    if (ctrl) {
+      const valEl = ctrl.querySelector(".step3-bar-width-val");
+      if (valEl) valEl.textContent = val + "%";
+    }
+    return;
+  }
+
+  // 一括棒の太さスライダー：ラベル更新
+  if (e.target.id === "step3-bulk-bar-width") {
+    const valEl = document.getElementById("step3-bulk-bar-width-val");
+    if (valEl) valEl.textContent = e.target.value + "%";
+    return;
+  }
+}
+
 function _onResultsChange(e) {
   // 軸ラジオ（STEP3 軸セレクターと被らないよう step3-orient-radio でフィルタ）
   const orientRadio = e.target.closest(".step3-orient-radio");
@@ -1290,6 +1354,23 @@ function _onResultsChange(e) {
     _rerenderQuestionFull(parseInt(sortSel.dataset.idx, 10));
     return;
   }
+
+  // グラフ高さスライダー（change: 状態保存）
+  const heightSlider = e.target.closest(".step3-chart-height-slider");
+  if (heightSlider) {
+    const val = parseInt(heightSlider.value, 10);
+    setStep3Setting(heightSlider.dataset.q, "chartHeight", val);
+    return;
+  }
+
+  // 棒の太さスライダー（change: 状態保存 + 再描画）
+  const barWidthSlider = e.target.closest(".step3-bar-width-slider");
+  if (barWidthSlider) {
+    const val = parseInt(barWidthSlider.value, 10) / 100;
+    setStep3Setting(barWidthSlider.dataset.q, "barWidth", val);
+    _rerenderQuestionFull(parseInt(barWidthSlider.dataset.idx, 10));
+    return;
+  }
 }
 
 function _onResultsClick(e) {
@@ -1304,6 +1385,7 @@ function _onResultsClick(e) {
       .querySelectorAll(".step3-chart-btn")
       .forEach(b => b.classList.toggle("active", b.dataset.chart === chart));
     _toggleOrientCtrl(idx, chart);
+    _toggleBarWidthCtrl(idx, chart);
     _rerenderQuestionFull(idx);
     return;
   }
@@ -1351,6 +1433,7 @@ function _onResultsClick(e) {
     document.querySelectorAll(`.step3-chart-btn[data-q="${qCode}"]`)
       .forEach(b => b.classList.toggle("active", b.dataset.chart === recommended));
     _toggleOrientCtrl(idx, recommended);
+    _toggleBarWidthCtrl(idx, recommended);
     _rerenderQuestionFull(idx);
     return;
   }
@@ -1415,6 +1498,27 @@ function _onResultsClick(e) {
   if (csvBtn)   { exportSingleCsv(parseInt(csvBtn.dataset.idx, 10));   return; }
   const pngBtn = e.target.closest(".step3-export-png-btn");
   if (pngBtn)   { exportSinglePng(parseInt(pngBtn.dataset.idx, 10));   return; }
+
+  // グラフ高さ「自動」ボタン
+  const heightResetBtn = e.target.closest(".step3-chart-height-reset-btn");
+  if (heightResetBtn) {
+    const idx = parseInt(heightResetBtn.dataset.idx, 10);
+    setStep3Setting(heightResetBtn.dataset.q, "chartHeight", null);
+    const areaEl = document.getElementById(`step3-chart-area-${idx}`);
+    if (areaEl) {
+      areaEl.style.height = "";
+      const chart = _charts.get(areaEl.id);
+      if (chart && !Array.isArray(chart)) chart.resize();
+    }
+    const ctrl = heightResetBtn.closest(".step3-height-ctrl");
+    if (ctrl) {
+      const slider = ctrl.querySelector(".step3-chart-height-slider");
+      if (slider) slider.value = 270;
+      const valEl = ctrl.querySelector(".step3-chart-height-val");
+      if (valEl) valEl.textContent = "自動";
+    }
+    return;
+  }
 
   // 一括適用
   if (e.target.closest(".step3-bulk-apply-btn")) {
@@ -1514,6 +1618,13 @@ function _toggleOrientCtrl(idx, chartType) {
   if (transposeSpan) transposeSpan.style.display = show;
 }
 
+function _toggleBarWidthCtrl(idx, chartType) {
+  const bar = document.querySelector(`#step3-body-${idx} .step3-controls-bar`);
+  if (!bar) return;
+  const span = bar.querySelector(".step3-bar-width-ctrl");
+  if (span) span.style.display = BAR_WIDTH_TYPES.has(chartType) ? "" : "none";
+}
+
 // ---------------------------------------------------------------------------
 // グラフエリアへのレンダリング
 // ---------------------------------------------------------------------------
@@ -1536,26 +1647,27 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
     return;
   }
   areaEl.style.display = "";
-  areaEl.style.height  = "";
+  areaEl.style.height  = settings.chartHeight ? settings.chartHeight + "px" : "";
 
   const hidden = settings.hiddenChoices ?? [];
   const rows   = _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), sortOrder);
   const sorted = { ...result, rows };
   const isH    = orientation === "h";
   const tp     = transpose ?? false;
+  const barWidth = settings.barWidth ?? null;
 
   if (chartType === "pie") {
     areaEl.style.display   = "flex";
     areaEl.style.flexWrap  = "wrap";
     areaEl.style.gap       = "12px";
-    areaEl.style.height    = "auto";
+    if (!settings.chartHeight) areaEl.style.height = "auto";
     _renderPieCharts(areaEl, sorted, axisCategories, areaKey);
     return;
   }
 
+  areaEl.style.position = "relative";
+
   if (chartType === "radar") {
-    areaEl.style.position = "relative";
-    areaEl.style.height   = "300px";
     const canvas = document.createElement("canvas");
     areaEl.appendChild(canvas);
     _charts.set(areaKey, new Chart(canvas, _buildRadarConfig(sorted, axisCategories)));
@@ -1563,25 +1675,21 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
   }
 
   if (chartType === "scatter") {
-    areaEl.style.position = "relative";
-    areaEl.style.height   = "280px";
     const canvas = document.createElement("canvas");
     areaEl.appendChild(canvas);
     _charts.set(areaKey, new Chart(canvas, _buildScatterConfig(sorted, axisCategories)));
     return;
   }
 
-  areaEl.style.position = "relative";
-  areaEl.style.height   = "260px";
   const canvas = document.createElement("canvas");
   areaEl.appendChild(canvas);
 
   let config;
-  if (chartType === "avg_bar")         config = _buildAvgBarConfig(sorted, axisCategories, showPctLabel);
-  else if (chartType === "stacked100") config = _buildStacked100Config(sorted, axisCategories, isH, showPctLabel, tp);
-  else if (chartType === "grouped")    config = _buildGroupedConfig(sorted, axisCategories, isH, showPctLabel, tp);
+  if (chartType === "avg_bar")         config = _buildAvgBarConfig(sorted, axisCategories, showPctLabel, barWidth);
+  else if (chartType === "stacked100") config = _buildStacked100Config(sorted, axisCategories, isH, showPctLabel, tp, barWidth);
+  else if (chartType === "grouped")    config = _buildGroupedConfig(sorted, axisCategories, isH, showPctLabel, tp, barWidth);
   else if (chartType === "line")       config = _buildLineConfig(sorted, axisCategories, showPctLabel, tp);
-  else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel, tp);
+  else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel, tp, barWidth);
 
   _charts.set(areaKey, new Chart(canvas, config));
 }
@@ -1623,7 +1731,8 @@ function _barScales(isH) {
 
 /** 棒グラフ（bar + orientation）
  *  transpose=true → labels=集計軸, datasets=選択肢（grouped 相当） */
-function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = false) {
+function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null) {
+  const bw = barWidth ?? 0.9;
   let labels, datasets;
   if (transpose) {
     const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
@@ -1632,6 +1741,7 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = 
       label: row.label,
       data:  axisCategories.map((_, ci) => row.percents[ci] ?? 0),
       backgroundColor: palette[ri],
+      barPercentage: bw,
     }));
   } else {
     const palette = _getColorsForGraph(result.question_code, axisCategories);
@@ -1640,6 +1750,7 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = 
       label: cat,
       data:  result.rows.map(r => r.percents[ci] ?? 0),
       backgroundColor: palette[ci],
+      barPercentage: bw,
     }));
   }
   return {
@@ -1662,7 +1773,8 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = 
 /** 100%積み上げ棒
  *  transpose=false → labels=選択肢, datasets=集計軸（各軸カテゴリーで正規化）
  *  transpose=true  → labels=集計軸, datasets=選択肢（各軸カテゴリーで正規化） */
-function _buildStacked100Config(result, axisCategories, isH, showPctLabel, transpose = false) {
+function _buildStacked100Config(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null) {
+  const bw = barWidth ?? 0.9;
   // 軸カテゴリーごとの percents 合計（正規化の分母）
   const sums = axisCategories.map((_, ci) =>
     result.rows.reduce((s, r) => s + (r.percents[ci] ?? 0), 0)
@@ -1678,6 +1790,7 @@ function _buildStacked100Config(result, axisCategories, isH, showPctLabel, trans
         return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
       }),
       backgroundColor: palette[ri],
+      barPercentage: bw,
     }));
   } else {
     const palette = _getColorsForGraph(result.question_code, axisCategories);
@@ -1689,6 +1802,7 @@ function _buildStacked100Config(result, axisCategories, isH, showPctLabel, trans
         return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
       }),
       backgroundColor: palette[ci],
+      barPercentage: bw,
     }));
   }
   const stackedScales = isH
@@ -1715,7 +1829,8 @@ function _buildStacked100Config(result, axisCategories, isH, showPctLabel, trans
 
 /** grouped棒（軸カテゴリをX軸、選択肢をデータセット）
  *  transpose=true → labels=選択肢, datasets=集計軸（bar 通常と同じ構造） */
-function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpose = false) {
+function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null) {
+  const bw = barWidth ?? 0.9;
   let labels, datasets;
   if (transpose) {
     const palette = _getColorsForGraph(result.question_code, axisCategories);
@@ -1724,6 +1839,7 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpos
       label: cat,
       data:  result.rows.map(r => r.percents[ci] ?? 0),
       backgroundColor: palette[ci],
+      barPercentage: bw,
     }));
   } else {
     const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
@@ -1732,6 +1848,7 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpos
       label: row.label,
       data:  axisCategories.map((_, ci) => row.percents[ci] ?? 0),
       backgroundColor: palette[ri],
+      barPercentage: bw,
     }));
   }
   const scales = isH
@@ -1757,7 +1874,8 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpos
 }
 
 /** 平均棒（数値ラベルから加重平均を計算） */
-function _buildAvgBarConfig(result, axisCategories, showPctLabel) {
+function _buildAvgBarConfig(result, axisCategories, showPctLabel, barWidth = null) {
+  const bw = barWidth ?? 0.9;
   const avgs = axisCategories.map((_, ci) => {
     let sumV = 0, sumN = 0;
     for (const row of result.rows) {
@@ -1775,6 +1893,7 @@ function _buildAvgBarConfig(result, axisCategories, showPctLabel) {
         label: "平均値",
         data:  avgs,
         backgroundColor: _getColorsForGraph(result.question_code, axisCategories),
+        barPercentage: bw,
       }],
     },
     options: {
@@ -2010,6 +2129,20 @@ function _buildBulkBar() {
         <label style="font-size:.85rem; cursor:pointer"><input type="radio" name="step3-bulk-transpose" value="false" checked> 通常</label>
         <label style="font-size:.85rem; cursor:pointer"><input type="radio" name="step3-bulk-transpose" value="true"> 行列入替</label>
 
+        <span class="step3-bulk-label">高さ：</span>
+        <select id="step3-bulk-height" class="step3-bulk-field">
+          <option value="">自動（16:9）</option>
+          <option value="200">小（200px）</option>
+          <option value="270">中（270px）</option>
+          <option value="360">大（360px）</option>
+          <option value="450">特大（450px）</option>
+          <option value="540">最大（540px）</option>
+        </select>
+
+        <span class="step3-bulk-label">棒の太さ：</span>
+        <input type="range" id="step3-bulk-bar-width" min="10" max="100" step="5" value="90" style="width:70px; accent-color:var(--color-primary,#3B82F6)">
+        <span id="step3-bulk-bar-width-val" style="font-size:.82rem; min-width:30px">90%</span>
+
         <button class="btn btn-primary btn-sm step3-bulk-apply-btn" style="margin-left:auto">一括適用</button>
       </div>
     </div>
@@ -2028,10 +2161,14 @@ function _handleBulkApply() {
   const showPctLabel = document.getElementById("step3-bulk-pct")?.checked ?? true;
   const colorKey     = document.getElementById("step3-bulk-color")?.value ?? "__step1__";
   const transpose    = document.querySelector('[name="step3-bulk-transpose"]:checked')?.value === "true";
+  const heightVal    = document.getElementById("step3-bulk-height")?.value;
+  const chartHeight  = heightVal ? parseInt(heightVal, 10) : null;
+  const barWidthPct  = parseInt(document.getElementById("step3-bulk-bar-width")?.value ?? "90", 10);
+  const barWidth     = barWidthPct / 100;
 
   const updates = {};
   data.results.forEach((result, idx) => {
-    const update = { chartType, orientation, sortOrder, showPctLabel, transpose };
+    const update = { chartType, orientation, sortOrder, showPctLabel, transpose, chartHeight, barWidth };
     if (colorKey !== "__step1__") {
       update.selectedPalette = colorKey;
       update.customColors = null;
@@ -2042,6 +2179,10 @@ function _handleBulkApply() {
     document.querySelectorAll(`.step3-chart-btn[data-q="${result.question_code}"]`)
       .forEach(b => b.classList.toggle("active", b.dataset.chart === chartType));
     _toggleOrientCtrl(idx, chartType);
+    _toggleBarWidthCtrl(idx, chartType);
+    // 高さを DOM に直接適用
+    const areaEl = document.getElementById(`step3-chart-area-${idx}`);
+    if (areaEl) areaEl.style.height = chartHeight ? chartHeight + "px" : "";
     _rerenderQuestionFull(idx);
   });
 
@@ -2220,6 +2361,8 @@ function _getSettings(questionCode, typeCode) {
     overriddenSeriesColors: s.overriddenSeriesColors ?? {},
     hiddenChoices:          s.hiddenChoices          ?? [],
     graphTitle:             s.graphTitle             ?? "",
+    chartHeight:            s.chartHeight            ?? null,
+    barWidth:               s.barWidth               ?? null,
   };
 }
 
