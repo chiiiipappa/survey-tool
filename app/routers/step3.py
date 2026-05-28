@@ -22,8 +22,8 @@ from app.schemas import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# SA / MA / 数値系のみクロス集計対象。FAは除外。
-_CROSSTAB_SA_TYPES = {"SA", "S", "NU", "N"}
+# SA / MA / 数値系のみクロス集計対象。FAは除外。SLはサブ設問が1列1値なのでSA相当。
+_CROSSTAB_SA_TYPES = {"SA", "S", "NU", "N", "SL"}
 _CROSSTAB_MA_TYPES = {"MA", "ML", "M"}
 _SKIP_TYPES = {"FA", "OA", "OE", "FT", "FN", "XL", "F"}
 

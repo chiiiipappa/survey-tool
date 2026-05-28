@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 AXIS_CANDIDATE_TYPES = {"SA", "S", "NU", "N", "ML"}
 MULTI_SELECT_TYPES = {"MA", "ML"}
 _FA_TYPES = {"FA", "F"}
-_SPECIAL_TYPES = {"X", "XL", "SL"}
+_SPECIAL_TYPES = {"X", "XL"}  # SL は SA 相当のため特殊扱い不要
 
 BRACKET_RE = re.compile(r"^(.+)\[(\d+)\]$")
 
