@@ -151,6 +151,7 @@ async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
         step3_crosstab_cache=req.step3_crosstab_cache,
         hidden_question_types=req.hidden_question_types,
         excluded_questions=req.excluded_questions,
+        step3_views=req.step3_views,
     )
 
     buf = io.BytesIO()

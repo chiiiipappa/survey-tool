@@ -1321,6 +1321,7 @@ export function initProjectHeader() {
         getCrosstabCache(),
         AppState.hiddenQuestionTypes,
         AppState.excludedQuestionCodes,
+        AppState.step3Views,
       );
       markClean(new Date());
       showToast("プロジェクトを保存しました。");

@@ -74,11 +74,14 @@ export const AppState = {
   step3CrosstabConfigs: [],
   step3ActiveAxisCode: "",
   step3LastGeneratedAxisCode: "",
-  step3QuestionSettings: {},  // { question_code: QuestionSettings }
+  step3QuestionSettings: {},  // { question_code: QuestionSettings } — 旧形式フォールバック用
   step3SecondaryAxisCode: "",
   step3CompositeDisplayMode: "split",   // "nested" | "flat" | "split"
   step3ColorPriority: "axis1",          // "axis1" | "axis2" | "auto"
   step3MinSampleSize: 0,
+  // STEP3 集計ビュー
+  step3Views: {},         // { [viewId]: ViewRecord } — viewId = `${axisCode}||${secAxisCode}`
+  step3ActiveViewId: "",  // 現在アクティブなビューのID
   // 設問セット
   questionSets: [],      // QuestionSet[] — { setId, setName, questionCodes, isCustom }
   step3ActiveSetId: "",  // STEP3 で現在選択中のセットID
@@ -87,6 +90,28 @@ export const AppState = {
   // 分析対象
   excludedQuestionCodes: [],  // 分析対象 OFF（STEP3 集計・分析セット候補から除外）の設問コード
 };
+
+function _makeViewId(axisCode, secAxisCode) {
+  return `${axisCode || ""}||${secAxisCode || ""}`;
+}
+
+function _ensureView(axisCode, secAxisCode) {
+  const viewId = _makeViewId(axisCode, secAxisCode);
+  if (!AppState.step3Views[viewId]) {
+    AppState.step3Views = {
+      ...AppState.step3Views,
+      [viewId]: {
+        viewId,
+        axisCode: axisCode ?? "",
+        secAxisCode: secAxisCode ?? "",
+        questionSettings: {},
+        createdAt: new Date().toISOString(),
+      },
+    };
+  }
+  AppState.step3ActiveViewId = viewId;
+  return viewId;
+}
 
 function _emit() {
   document.dispatchEvent(new CustomEvent("survey:statechange", { detail: { ...AppState } }));
@@ -120,12 +145,14 @@ export function setStep3Configs(configs) {
 
 export function setStep3ActiveAxis(code) {
   AppState.step3ActiveAxisCode = code ?? "";
+  _ensureView(code, AppState.step3SecondaryAxisCode);
   AppState.isDirty = true;
   _emit();
 }
 
 export function setStep3SecondaryAxis(code) {
   AppState.step3SecondaryAxisCode = code ?? "";
+  _ensureView(AppState.step3ActiveAxisCode, code);
   AppState.isDirty = true;
   _emit();
 }
@@ -160,21 +187,68 @@ export function setStep3ActiveSetId(id) {
 }
 
 export function setStep3Setting(questionCode, key, value) {
-  const existing = AppState.step3QuestionSettings[questionCode] ?? {};
-  AppState.step3QuestionSettings = {
-    ...AppState.step3QuestionSettings,
-    [questionCode]: { ...existing, [key]: value },
-  };
+  const viewId = AppState.step3ActiveViewId;
+  const view = AppState.step3Views[viewId];
+  if (view) {
+    const existing = view.questionSettings[questionCode] ?? {};
+    AppState.step3Views = {
+      ...AppState.step3Views,
+      [viewId]: {
+        ...view,
+        questionSettings: {
+          ...view.questionSettings,
+          [questionCode]: { ...existing, [key]: value },
+        },
+      },
+    };
+  } else {
+    const existing = AppState.step3QuestionSettings[questionCode] ?? {};
+    AppState.step3QuestionSettings = {
+      ...AppState.step3QuestionSettings,
+      [questionCode]: { ...existing, [key]: value },
+    };
+  }
   AppState.isDirty = true;
   _emit();
 }
 
 export function setStep3SettingsBulk(updates) {
-  const next = { ...AppState.step3QuestionSettings };
-  for (const [qCode, partial] of Object.entries(updates)) {
-    next[qCode] = { ...(next[qCode] ?? {}), ...partial };
+  const viewId = AppState.step3ActiveViewId;
+  const view = AppState.step3Views[viewId];
+  if (view) {
+    const nextQS = { ...view.questionSettings };
+    for (const [qCode, partial] of Object.entries(updates)) {
+      nextQS[qCode] = { ...(nextQS[qCode] ?? {}), ...partial };
+    }
+    AppState.step3Views = {
+      ...AppState.step3Views,
+      [viewId]: { ...view, questionSettings: nextQS },
+    };
+  } else {
+    const next = { ...AppState.step3QuestionSettings };
+    for (const [qCode, partial] of Object.entries(updates)) {
+      next[qCode] = { ...(next[qCode] ?? {}), ...partial };
+    }
+    AppState.step3QuestionSettings = next;
   }
-  AppState.step3QuestionSettings = next;
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3ActiveViewId(viewId) {
+  const view = AppState.step3Views[viewId];
+  if (!view) return;
+  AppState.step3ActiveViewId = viewId;
+  AppState.step3ActiveAxisCode = view.axisCode;
+  AppState.step3SecondaryAxisCode = view.secAxisCode;
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function renameStep3View(viewId, newName) {
+  const view = AppState.step3Views[viewId];
+  if (!view) return;
+  AppState.step3Views = { ...AppState.step3Views, [viewId]: { ...view, name: newName } };
   AppState.isDirty = true;
   _emit();
 }
@@ -214,23 +288,48 @@ export function deleteUserPalette(paletteId) {
 }
 
 export function clearQuestionColorState(questionCode) {
-  const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } =
-    AppState.step3QuestionSettings[questionCode] ?? {};
-  AppState.step3QuestionSettings = {
-    ...AppState.step3QuestionSettings,
-    [questionCode]: rest,
-  };
+  const viewId = AppState.step3ActiveViewId;
+  const view = AppState.step3Views[viewId];
+  if (view) {
+    const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } =
+      view.questionSettings[questionCode] ?? {};
+    AppState.step3Views = {
+      ...AppState.step3Views,
+      [viewId]: { ...view, questionSettings: { ...view.questionSettings, [questionCode]: rest } },
+    };
+  } else {
+    const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } =
+      AppState.step3QuestionSettings[questionCode] ?? {};
+    AppState.step3QuestionSettings = {
+      ...AppState.step3QuestionSettings,
+      [questionCode]: rest,
+    };
+  }
   AppState.isDirty = true;
   _emit();
 }
 
 export function clearQuestionColorStateBulk(questionCodes) {
-  const next = { ...AppState.step3QuestionSettings };
-  for (const qCode of questionCodes) {
-    const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } = next[qCode] ?? {};
-    next[qCode] = rest;
+  const viewId = AppState.step3ActiveViewId;
+  const view = AppState.step3Views[viewId];
+  if (view) {
+    const nextQS = { ...view.questionSettings };
+    for (const qCode of questionCodes) {
+      const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } = nextQS[qCode] ?? {};
+      nextQS[qCode] = rest;
+    }
+    AppState.step3Views = {
+      ...AppState.step3Views,
+      [viewId]: { ...view, questionSettings: nextQS },
+    };
+  } else {
+    const next = { ...AppState.step3QuestionSettings };
+    for (const qCode of questionCodes) {
+      const { selectedPalette, overriddenSeriesColors, customColors, valueColorMapping, ...rest } = next[qCode] ?? {};
+      next[qCode] = rest;
+    }
+    AppState.step3QuestionSettings = next;
   }
-  AppState.step3QuestionSettings = next;
   AppState.isDirty = true;
   _emit();
 }
@@ -333,6 +432,28 @@ export function setLoadedProject(resp) {
   AppState.excludedQuestionCodes = resp.layout?.excluded_questions?.length
     ? resp.layout.excluded_questions
     : _deriveExcludedDefaults(AppState.questions);
+  // 集計ビューのロード + マイグレーション
+  AppState.step3Views = resp.layout?.step3_views ?? {};
+  if (!Object.keys(AppState.step3Views).length) {
+    // 旧形式: step3_question_settings があれば保存軸のビューとして移行
+    const axisCode  = AppState.step3ActiveAxisCode;
+    const secAxisCode = AppState.step3SecondaryAxisCode;
+    if (axisCode && Object.keys(AppState.step3QuestionSettings).length) {
+      const viewId = _makeViewId(axisCode, secAxisCode);
+      AppState.step3Views = {
+        [viewId]: {
+          viewId, axisCode, secAxisCode,
+          questionSettings: AppState.step3QuestionSettings,
+          createdAt: new Date().toISOString(),
+        },
+      };
+    }
+  }
+  // アクティブビューIDを復元
+  AppState.step3ActiveViewId = _makeViewId(
+    AppState.step3ActiveAxisCode,
+    AppState.step3SecondaryAxisCode,
+  );
   _emit();
 }
 
@@ -448,6 +569,8 @@ export function resetState() {
   AppState.step3ActiveAxisCode = "";
   AppState.step3LastGeneratedAxisCode = "";
   AppState.step3QuestionSettings = {};
+  AppState.step3Views            = {};
+  AppState.step3ActiveViewId     = "";
   AppState.userPalettes = {};
   AppState.questionSets          = [];
   AppState.step3ActiveSetId      = "";

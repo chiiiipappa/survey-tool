@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
 import { yieldToMain } from "./app.js";
@@ -35,6 +35,7 @@ const RECOMMENDED_CHART = {
   SA: "bar", S: "bar",
   MA: "bar", ML: "bar", M: "bar",
   NU: "avg_bar", N: "avg_bar",
+  SL: "bar",
 };
 
 // 推奨度: "recommended" | "available" | "not_recommended"
@@ -46,10 +47,14 @@ const _MA_SUIT = { bar:"recommended", stacked100:"available",
 const _NU_SUIT = { avg_bar:"recommended", table_only:"available", line:"available", scatter:"available",
                    bar:"not_recommended", stacked100:"not_recommended", pie:"not_recommended",
                    grouped:"not_recommended", radar:"not_recommended" };
+const _MATRIX_SUIT = { bar:"recommended", stacked100:"recommended", grouped:"recommended", radar:"recommended",
+                       pie:"not_recommended", line:"available", scatter:"not_recommended",
+                       avg_bar:"not_recommended", table_only:"available" };
 const CHART_SUITABILITY = {
   SA: _SA_SUIT, S: _SA_SUIT,
   MA: _MA_SUIT, ML: _MA_SUIT, M: _MA_SUIT,
   NU: _NU_SUIT, N: _NU_SUIT,
+  SL: _MATRIX_SUIT,
 };
 
 function _chartSuitability(chartId, typeCode) {
@@ -401,7 +406,11 @@ function _matchValueColorMapping(label, mapping) {
 // 色解決：個別上書き > 固定カラー > valueColorMapping(ファジー) > 選択パレット > STEP1軸パレット > COLORSデフォルト
 // _compositeColorPaletteLookup が設定されている場合、パレット検索にはそのラベルを使用する
 function _getColorsForGraph(questionCode, labels) {
-  const s = AppState.step3QuestionSettings[questionCode] ?? {};
+  const _viewId = AppState.step3ActiveViewId;
+  const _view   = AppState.step3Views?.[_viewId];
+  const s = _view?.questionSettings?.[questionCode]
+    ?? AppState.step3QuestionSettings[questionCode]
+    ?? {};
 
   // 旧形式: selectedPalette キーがなく customColors が存在 → 旧パスにフォールバック
   if (!("selectedPalette" in s) && s.customColors?.length > 0) {
@@ -479,6 +488,7 @@ export function initStep3Panel() {
 function _onStateChange() {
   if (AppState.activePanel !== "step3") return;
   _renderAxisSelector();
+  _renderViewPanel();
   _renderSidebar();
   const nc = document.getElementById("step3-axis-ncount");
   if (nc) { nc.style.display = "none"; nc.innerHTML = ""; }
@@ -654,6 +664,27 @@ function _initSidebar() {
     document.getElementById("step3-sidebar")?.classList.toggle("collapsed");
   });
   document.getElementById("step3-set-search")?.addEventListener("input", () => _renderSidebar());
+}
+
+function _renderViewPanel() {
+  const el = document.getElementById("step3-view-panel");
+  if (!el) return;
+  const views = Object.values(AppState.step3Views ?? {});
+  if (views.length < 2) { el.innerHTML = ""; return; }
+  const activeId = AppState.step3ActiveViewId;
+  const html = views.map(v => {
+    const axis1Label = _getAxisLabel(v.axisCode);
+    const axis2Label = v.secAxisCode ? ` × ${_getAxisLabel(v.secAxisCode)}` : "";
+    const name = `${axis1Label}${axis2Label}`;
+    const isActive = v.viewId === activeId;
+    return `<div class="step3-view-item${isActive ? " active" : ""}" data-viewid="${_esc(v.viewId)}" title="${_esc(name)}">${_esc(name)}</div>`;
+  }).join("");
+  el.innerHTML = `
+    <div class="step3-view-panel-header step3-sidebar-label">集計ビュー</div>
+    <div class="step3-view-list">${html}</div>`;
+  el.querySelectorAll(".step3-view-item").forEach(item => {
+    item.addEventListener("click", () => setStep3ActiveViewId(item.dataset.viewid));
+  });
 }
 
 function _renderSidebar() {
@@ -2342,12 +2373,16 @@ function _sortedRows(rows, sortOrder) {
 }
 
 function _getSettings(questionCode, typeCode) {
-  const s = AppState.step3QuestionSettings[questionCode] ?? {};
+  const viewId = AppState.step3ActiveViewId;
+  const view = AppState.step3Views?.[viewId];
+  const s = view?.questionSettings?.[questionCode]
+    ?? AppState.step3QuestionSettings[questionCode]
+    ?? {};
   let chartType = s.chartType ?? _recommendedType(typeCode);
   // 旧 hbar/vbar の動的マイグレーション
   if (chartType === "hbar") chartType = "bar";
   if (chartType === "vbar") chartType = "bar";
-  const defaultH = ["MA", "ML", "M"].includes(typeCode);
+  const defaultH = ["MA", "ML", "M", "SL"].includes(typeCode);
   return {
     chartType,
     orientation:   s.orientation   ?? (defaultH ? "h" : "v"),
@@ -2374,7 +2409,7 @@ function _recommendedLabel(typeCode) {
   const type = _recommendedType(typeCode);
   const base = _chartLabel(type);
   if (type === "bar") {
-    const defaultH = ["MA", "ML", "M"].includes(typeCode);
+    const defaultH = ["MA", "ML", "M", "SL"].includes(typeCode);
     return base + (defaultH ? "（横）" : "（縦）");
   }
   return base;
@@ -2454,7 +2489,11 @@ function _openColorModal(idx) {
   _colorModalIdx    = idx;
   _colorModalLabels = labels;
 
-  const rawSettings = AppState.step3QuestionSettings[result.question_code] ?? {};
+  const _rsViewId = AppState.step3ActiveViewId;
+  const _rsView   = AppState.step3Views?.[_rsViewId];
+  const rawSettings = _rsView?.questionSettings?.[result.question_code]
+    ?? AppState.step3QuestionSettings[result.question_code]
+    ?? {};
   if ("selectedPalette" in rawSettings) {
     // 新形式: そのまま復元
     _colorModalPaletteKey = rawSettings.selectedPalette;

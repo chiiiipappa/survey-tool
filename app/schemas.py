@@ -284,6 +284,7 @@ class ProjectSaveRequest(BaseModel):
     step3_crosstab_cache: dict = Field(default_factory=dict)
     hidden_question_types: List[str] = Field(default_factory=list)
     excluded_questions: List[str] = Field(default_factory=list)
+    step3_views: dict = Field(default_factory=dict)
 
 
 class LayoutSaveData(BaseModel):
@@ -306,6 +307,7 @@ class LayoutSaveData(BaseModel):
     step3_crosstab_cache: dict = Field(default_factory=dict)
     hidden_question_types: List[str] = Field(default_factory=list)
     excluded_questions: List[str] = Field(default_factory=list)
+    step3_views: dict = Field(default_factory=dict)
 
 
 class Step2SaveData(BaseModel):
