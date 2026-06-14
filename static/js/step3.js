@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
 import { yieldToMain } from "./app.js";
@@ -359,7 +359,10 @@ export function getCrosstabCache() { return { ..._crosstabCache }; }
 export function setCrosstabCache(cache) { Object.assign(_crosstabCache, cache ?? {}); }
 
 function _getCacheKey(axisCode, secAxisCode, setId) {
-  return `${axisCode}||${secAxisCode || ""}||${setId}`;
+  const col  = AppState.step3TargetFilterColumn;
+  const vals = AppState.step3TargetFilterValues;
+  const filterKey = col ? `${col}:${[...vals].sort().join(",")}` : "";
+  return `${axisCode}||${secAxisCode || ""}||${setId}||${filterKey}`;
 }
 
 function _initLazyChartObserver() {
@@ -487,6 +490,7 @@ export function initStep3Panel() {
 
 function _onStateChange() {
   if (AppState.activePanel !== "step3") return;
+  _renderTargetFilterSection();
   _renderAxisSelector();
   _renderViewPanel();
   _renderSidebar();
@@ -495,87 +499,195 @@ function _onStateChange() {
 }
 
 // ---------------------------------------------------------------------------
-// セクション1: ラジオボタン軸セレクター
+// セクション0: 分析対象フィルタ
+// ---------------------------------------------------------------------------
+
+let _filterColumnChoices = [];  // 現在の対象列の選択肢リスト（全件）
+
+function _renderTargetFilterSection() {
+  const colSel   = document.getElementById("step3-target-column");
+  const valSec   = document.getElementById("step3-target-values-section");
+  const valList  = document.getElementById("step3-target-values-list");
+  const valCount = document.getElementById("step3-target-values-count");
+  const badge    = document.getElementById("step3-filter-active-badge");
+  if (!colSel) return;
+
+  const candidates = _getAxisCandidates();
+
+  // 分析対象列の選択肢を構築（軸候補と同じセット）
+  const colOptions = candidates.map(code => {
+    const { text, badge: typeBadge } = _getAxisSelectorLabel(code);
+    return `<option value="${_esc(code)}" ${code === AppState.step3TargetFilterColumn ? "selected" : ""}>${_esc(code)}　${_esc(text)}　[${_esc(typeBadge)}]</option>`;
+  }).join("");
+  colSel.innerHTML = `<option value="">（絞り込みなし — 全回答者）</option>${colOptions}`;
+
+  // イベントを一度だけ登録（early return の前に配置）
+  if (!colSel._filterInitialized) {
+    colSel._filterInitialized = true;
+
+    colSel.addEventListener("change", () => {
+      setStep3TargetFilterColumn(colSel.value);
+      _renderTargetFilterSection();
+      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
+    });
+
+    document.getElementById("step3-target-all-btn")?.addEventListener("click", () => {
+      const searchEl  = document.getElementById("step3-target-value-search");
+      const st = (searchEl?.value ?? "").toLowerCase().trim();
+      const visible2  = st ? _filterColumnChoices.filter(v => v.toLowerCase().includes(st)) : _filterColumnChoices;
+      const prevSel   = new Set(AppState.step3TargetFilterValues);
+      visible2.forEach(v => prevSel.add(v));
+      setStep3TargetFilterValues([...prevSel]);
+      _renderTargetFilterSection();
+      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
+    });
+
+    document.getElementById("step3-target-none-btn")?.addEventListener("click", () => {
+      setStep3TargetFilterValues([]);
+      _renderTargetFilterSection();
+      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
+    });
+
+    document.getElementById("step3-target-value-search")?.addEventListener("input", () => {
+      _renderTargetFilterSection();
+    });
+
+    document.getElementById("step3-target-values-list")?.addEventListener("change", e => {
+      const cb = e.target.closest("input[type=checkbox]");
+      if (!cb) return;
+      const cur = new Set(AppState.step3TargetFilterValues);
+      cb.checked ? cur.add(cb.value) : cur.delete(cb.value);
+      setStep3TargetFilterValues([...cur]);
+      _renderTargetFilterSection();
+      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
+    });
+  }
+
+  // 対象列が選択されていれば値リストを表示
+  const selectedCol = AppState.step3TargetFilterColumn;
+  if (!selectedCol || !candidates.includes(selectedCol)) {
+    if (valSec) valSec.style.display = "none";
+    if (badge) badge.hidden = true;
+    return;
+  }
+
+  if (valSec) valSec.style.display = "";
+
+  // 選択肢を取得（共通ユーティリティを使用）
+  _filterColumnChoices = getTargetValues(selectedCol);
+
+  const selected = new Set(AppState.step3TargetFilterValues);
+
+  // 検索フィルタ
+  const searchInput = document.getElementById("step3-target-value-search");
+  const searchTerm  = (searchInput?.value ?? "").toLowerCase().trim();
+  const visible     = searchTerm
+    ? _filterColumnChoices.filter(v => v.toLowerCase().includes(searchTerm))
+    : _filterColumnChoices;
+
+  if (valList) {
+    valList.innerHTML = visible.map(v => `
+      <label class="step3-target-cb-item">
+        <input type="checkbox" value="${_esc(v)}" ${selected.has(v) ? "checked" : ""}>
+        <span>${_esc(v)}</span>
+      </label>`).join("");
+  }
+
+  if (valCount) {
+    valCount.textContent = selected.size
+      ? `（${selected.size}件選択中 / 全${_filterColumnChoices.length}件）`
+      : `（全${_filterColumnChoices.length}件）`;
+  }
+
+  if (badge) badge.hidden = selected.size === 0;
+}
+
+// ---------------------------------------------------------------------------
+// セクション1: 検索可能ドロップダウン軸セレクター
 // ---------------------------------------------------------------------------
 
 function _renderAxisSelector() {
-  const el  = document.getElementById("step3-axis-selector");
-  const el2 = document.getElementById("step3-secondary-axis-wrapper");
+  const searchInput   = document.getElementById("step3-axis-search");
+  const axisSelect    = document.getElementById("step3-axis-select");
+  const el2           = document.getElementById("step3-secondary-axis-wrapper");
   const compositeCtrl = document.getElementById("step3-composite-controls");
-  if (!el) return;
+  if (!axisSelect) return;
 
   const candidates = _getAxisCandidates();
+
   if (!candidates.length) {
     const hasStep2 = Boolean(AppState.step2Filename);
     const msg = hasStep2
-      ? "STEP1 で選択した集計軸がデータと一致しませんでした。"
+      ? "集計軸候補がありません。回答データの列と設問コードを確認してください。"
       : "STEP2 で回答データをアップロードしてください。";
-    el.innerHTML = `<span class="text-sm" style="color:var(--color-text-muted)">${_esc(msg)}</span>`;
+    axisSelect.innerHTML = `<option value="" disabled>${_esc(msg)}</option>`;
+    if (searchInput) searchInput.value = "";
     if (el2) el2.innerHTML = "";
     if (compositeCtrl) compositeCtrl.style.display = "none";
     return;
   }
 
-  // 集計軸① セレクター
+  // 現在の選択を維持 or デフォルト
   let currentCode = AppState.step3ActiveAxisCode;
   if (!candidates.includes(currentCode)) {
     currentCode = candidates[0];
     setStep3ActiveAxis(currentCode);
   }
 
-  el.innerHTML = candidates
-    .map(code => {
-      const label = _getAxisLabel(code);
-      const checked = code === currentCode ? "checked" : "";
-      const bg = code === currentCode ? "var(--color-primary-light, #EFF6FF)" : "var(--color-surface-1, #fff)";
-      return `
-        <label class="step3-axis-radio-label" style="display:flex; align-items:center; gap:6px; cursor:pointer; padding:6px 12px; border-radius:6px; border:1px solid var(--color-border); background:${bg}">
-          <input type="radio" name="step3-axis" value="${_esc(code)}" ${checked} style="accent-color:var(--color-primary)">
-          <span style="font-size:.9rem">${_esc(label)}</span>
-        </label>`;
-    })
-    .join("");
+  // 検索フィルタ適用
+  const searchTerm = (searchInput?.value ?? "").toLowerCase().trim();
+  const filtered   = searchTerm
+    ? candidates.filter(c => {
+        const { text } = _getAxisSelectorLabel(c);
+        return c.toLowerCase().includes(searchTerm) || text.toLowerCase().includes(searchTerm);
+      })
+    : candidates;
 
-  el.querySelectorAll("input[name='step3-axis']").forEach(radio => {
-    radio.addEventListener("change", () => {
-      if (!radio.checked) return;
-      setStep3ActiveAxis(radio.value);
-      if (AppState.step3SecondaryAxisCode === radio.value) {
+  axisSelect.innerHTML = filtered.map(code => {
+    const { text, badge } = _getAxisSelectorLabel(code);
+    const label = `${code}　${text}　[${badge}]`;
+    return `<option value="${_esc(code)}"${code === currentCode ? " selected" : ""}>${_esc(label)}</option>`;
+  }).join("") || `<option value="" disabled>（検索結果なし）</option>`;
+
+  // イベントを一度だけ登録
+  if (!axisSelect._axisInitialized) {
+    axisSelect._axisInitialized = true;
+    axisSelect.addEventListener("change", () => {
+      if (!axisSelect.value) return;
+      setStep3ActiveAxis(axisSelect.value);
+      if (AppState.step3SecondaryAxisCode === axisSelect.value) {
         setStep3SecondaryAxis("");
       }
     });
-  });
+    searchInput?.addEventListener("input", () => _renderAxisSelector());
+  }
 
-  // 集計軸② セレクター
+  // クロス軸 セレクター（ドロップダウン）
   if (el2) {
     const sec = AppState.step3SecondaryAxisCode;
     const secCandidates = candidates.filter(c => c !== currentCode);
 
-    const radioStyle = (active) =>
-      `display:flex; align-items:center; gap:6px; cursor:pointer; padding:6px 12px; border-radius:6px; border:1px solid var(--color-border); background:${active ? "var(--color-primary-light, #EFF6FF)" : "var(--color-surface-1, #fff)"}`;
-
-    el2.innerHTML = `
-      <div class="step3-axis-section-title">集計軸②（任意）</div>
-      <div style="display:flex; flex-wrap:wrap; gap:10px">
-        <label class="step3-axis-radio-label" style="${radioStyle(!sec)}">
-          <input type="radio" name="step3-axis2" value="" ${!sec ? "checked" : ""} style="accent-color:var(--color-primary)">
-          <span style="font-size:.9rem">なし</span>
-        </label>
-        ${secCandidates.map(code => {
-          const label = _getAxisLabel(code);
-          const checked = code === sec ? "checked" : "";
-          return `<label class="step3-axis-radio-label" style="${radioStyle(code === sec)}">
-            <input type="radio" name="step3-axis2" value="${_esc(code)}" ${checked} style="accent-color:var(--color-primary)">
-            <span style="font-size:.9rem">${_esc(label)}</span>
-          </label>`;
-        }).join("")}
-      </div>`;
-
-    el2.querySelectorAll("input[name='step3-axis2']").forEach(radio => {
-      radio.addEventListener("change", () => {
-        if (radio.checked) setStep3SecondaryAxis(radio.value);
+    if (!el2._sec2Initialized) {
+      el2._sec2Initialized = true;
+      el2.innerHTML = `
+        <div class="step3-axis-section-title" style="margin-top:10px">クロス軸（任意）</div>
+        <select id="step3-secondary-axis-select" class="step3-axis-select" style="height:auto; min-height:unset; padding:5px 8px; font-size:.85rem;">
+          <option value="">なし</option>
+        </select>`;
+      document.getElementById("step3-secondary-axis-select")?.addEventListener("change", e => {
+        setStep3SecondaryAxis(e.target.value);
       });
-    });
+    }
+
+    const sel = document.getElementById("step3-secondary-axis-select");
+    if (sel) {
+      sel.innerHTML = `<option value="${!sec ? "" : ""}">なし</option>` +
+        secCandidates.map(code => {
+          const { text, badge } = _getAxisSelectorLabel(code);
+          return `<option value="${_esc(code)}"${code === sec ? " selected" : ""}>${_esc(code)}　${_esc(text)}　[${_esc(badge)}]</option>`;
+        }).join("");
+      if (!sec) sel.value = "";
+    }
   }
 
   // 複合コントロール（axis② 選択時のみ表示）
@@ -829,7 +941,8 @@ async function _runCrosstab(setId) {
 
   try {
     const data = await generateCrosstab(
-      AppState.sessionToken, axisCode, secAxisCode, targetCodes
+      AppState.sessionToken, axisCode, secAxisCode, targetCodes,
+      AppState.step3TargetFilterColumn, AppState.step3TargetFilterValues
     );
     _crosstabCache[key] = data;
     _currentCacheKey = key;
@@ -1002,6 +1115,7 @@ async function _renderSimpleResults(container, data) {
             <option value="asc"     ${settings.sortOrder === "asc"      ? " selected" : ""}>昇順</option>
           </select>
           ${transposeHtml}
+          ${_buildAggModeHtml(idx, result.question_code, settings.chartType, settings.aggMode)}
           <span class="step3-height-ctrl" style="display:flex; align-items:center; gap:4px; font-size:.82rem">
             <span style="color:var(--color-text-muted)">高さ：</span>
             <input type="range" class="step3-chart-height-slider"
@@ -1241,6 +1355,7 @@ async function _renderSplitResults(container, data) {
             <option value="asc"${settings.sortOrder === "asc" ? " selected" : ""}>昇順</option>
           </select>
           ${transposeHtml}
+          ${_buildAggModeHtml(idx, result.question_code, settings.chartType, settings.aggMode)}
         </div>
         <div class="card-body" style="padding:16px">
           ${splitGroupsHtml}
@@ -1350,7 +1465,7 @@ function _onResultsChange(e) {
   const orientRadio = e.target.closest(".step3-orient-radio");
   if (orientRadio?.checked) {
     setStep3Setting(orientRadio.dataset.q, "orientation", orientRadio.value);
-    _rerenderQuestion(parseInt(orientRadio.dataset.idx, 10));
+    _rerenderQuestionFull(parseInt(orientRadio.dataset.idx, 10));
     return;
   }
 
@@ -1359,6 +1474,14 @@ function _onResultsChange(e) {
   if (transposeRadio?.checked) {
     setStep3Setting(transposeRadio.dataset.q, "transpose", transposeRadio.value === "true");
     _rerenderQuestionFull(parseInt(transposeRadio.dataset.idx, 10));
+    return;
+  }
+
+  // 集計方法ラジオ
+  const aggRadio = e.target.closest(".step3-agg-radio");
+  if (aggRadio?.checked) {
+    setStep3Setting(aggRadio.dataset.q, "aggMode", aggRadio.value);
+    _rerenderQuestionFull(parseInt(aggRadio.dataset.idx, 10));
     return;
   }
 
@@ -1417,6 +1540,8 @@ function _onResultsClick(e) {
       .forEach(b => b.classList.toggle("active", b.dataset.chart === chart));
     _toggleOrientCtrl(idx, chart);
     _toggleBarWidthCtrl(idx, chart);
+    const curAggMode = _getSettings(qCode, "").aggMode ?? "col_pct";
+    _updateAggRadios(idx, chart, curAggMode);
     _rerenderQuestionFull(idx);
     return;
   }
@@ -1465,6 +1590,8 @@ function _onResultsClick(e) {
       .forEach(b => b.classList.toggle("active", b.dataset.chart === recommended));
     _toggleOrientCtrl(idx, recommended);
     _toggleBarWidthCtrl(idx, recommended);
+    const curAggModeR = _getSettings(qCode, "").aggMode ?? "col_pct";
+    _updateAggRadios(idx, recommended, curAggModeR);
     _rerenderQuestionFull(idx);
     return;
   }
@@ -1605,9 +1732,11 @@ function _rerenderQuestionFull(idx) {
     rows: _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), settings.sortOrder),
   };
   const tp = settings.transpose ?? false;
+  // stacked100 は常に構成比モードで表示
+  const effectiveAggMode = settings.chartType === "stacked100" ? "composition" : (settings.aggMode ?? "col_pct");
   const pctPanel = document.getElementById(`step3-tab-pct-${idx}`);
   const nPanel   = document.getElementById(`step3-tab-n-${idx}`);
-  if (pctPanel) pctPanel.innerHTML = _buildPctTable(sortedResult, d.axis_categories, d.axis_totals, tp);
+  if (pctPanel) pctPanel.innerHTML = _buildPctTable(sortedResult, d.axis_categories, d.axis_totals, tp, effectiveAggMode);
   if (nPanel) nPanel.innerHTML = _buildNTable(sortedResult, d.axis_categories, d.axis_totals, tp);
 }
 
@@ -1633,6 +1762,47 @@ function _rerenderCompositeAll() {
     _clearPendingChartRenders();
     _renderResults(container, d); // async だが完了を待つ必要はない
   }
+}
+
+// ---------------------------------------------------------------------------
+// 集計方法コントロールの HTML 生成・DOM 更新
+// ---------------------------------------------------------------------------
+
+const AGG_MODES = [
+  { id: "col_pct",     label: "列%" },
+  { id: "row_pct",     label: "行%" },
+  { id: "composition", label: "構成比" },
+  { id: "count",       label: "実数N" },
+];
+
+/** 集計方法ラジオボタン HTML を生成 */
+function _buildAggModeHtml(idx, qCode, chartType, aggMode) {
+  const isStacked = chartType === "stacked100";
+  const effective = isStacked ? "composition" : aggMode;
+  const radios = AGG_MODES.map(({ id, label }) => {
+    const checked   = effective === id ? "checked" : "";
+    const disabled  = isStacked && id !== "composition" ? "disabled" : "";
+    return `<label style="font-size:.82rem; cursor:pointer${disabled ? "; opacity:.4" : ""}">
+      <input type="radio" class="step3-agg-radio"
+             name="step3-agg-${idx}" value="${id}"
+             data-q="${_esc(qCode)}" data-idx="${idx}"
+             ${checked} ${disabled}> ${label}
+    </label>`;
+  }).join("");
+  return `<span class="step3-agg-ctrl" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap">
+    集計方法：${radios}
+  </span>`;
+}
+
+/** chartType 変更時に集計方法ラジオの状態を DOM 更新 */
+function _updateAggRadios(idx, chartType, aggMode) {
+  const isStacked = chartType === "stacked100";
+  const effective = isStacked ? "composition" : aggMode;
+  document.querySelectorAll(`.step3-agg-radio[data-idx="${idx}"]`).forEach(radio => {
+    radio.checked  = radio.value === effective;
+    radio.disabled = isStacked && radio.value !== "composition";
+    radio.closest("label").style.opacity = (isStacked && radio.value !== "composition") ? "0.4" : "";
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1662,6 +1832,10 @@ function _toggleBarWidthCtrl(idx, chartType) {
 
 function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals) {
   const { chartType, orientation, showPctLabel, sortOrder, transpose } = settings;
+  // stacked100 は常に構成比モード
+  const aggMode = chartType === "stacked100" ? "composition" : (settings.aggMode ?? "col_pct");
+
+  console.debug(`[STEP3] ${result.question_code}: chartType=${chartType}, aggMode=${aggMode}, transpose=${transpose ?? false}, orientation=${orientation}`);
 
   // 既存チャートを破棄
   const areaKey = areaEl.id;
@@ -1718,9 +1892,9 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
   let config;
   if (chartType === "avg_bar")         config = _buildAvgBarConfig(sorted, axisCategories, showPctLabel, barWidth);
   else if (chartType === "stacked100") config = _buildStacked100Config(sorted, axisCategories, isH, showPctLabel, tp, barWidth);
-  else if (chartType === "grouped")    config = _buildGroupedConfig(sorted, axisCategories, isH, showPctLabel, tp, barWidth);
-  else if (chartType === "line")       config = _buildLineConfig(sorted, axisCategories, showPctLabel, tp);
-  else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel, tp, barWidth);
+  else if (chartType === "grouped")    config = _buildGroupedConfig(sorted, axisCategories, isH, showPctLabel, tp, barWidth, aggMode);
+  else if (chartType === "line")       config = _buildLineConfig(sorted, axisCategories, showPctLabel, tp, aggMode);
+  else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel, tp, barWidth, aggMode);
 
   _charts.set(areaKey, new Chart(canvas, config));
 }
@@ -1760,9 +1934,69 @@ function _barScales(isH) {
         y: { beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } } };
 }
 
+// ---------------------------------------------------------------------------
+// aggMode ヘルパー
+// ---------------------------------------------------------------------------
+
+/** 行%: row の全 axis_cat counts 合計を分母として ci の割合を返す */
+function _rowPct(row, ci, axisCategories) {
+  const total = axisCategories.reduce((s, _, i) => s + (row.counts[i] ?? 0), 0);
+  return total > 0 ? Math.round((row.counts[ci] ?? 0) / total * 1000) / 10 : 0;
+}
+
+/**
+ * 構成比マトリクスを返す。[ri][ci] = その棒位置の各要素の%（合計100%）。
+ * transpose=true  → 各 axis_cat の棒が 100%（列方向で正規化）
+ * transpose=false → 各 row の棒が 100%（行方向で正規化）
+ */
+function _compositionPct(result, axisCategories, transpose) {
+  if (transpose) {
+    const colTotals = axisCategories.map((_, ci) =>
+      result.rows.reduce((s, r) => s + (r.counts[ci] ?? 0), 0)
+    );
+    return result.rows.map(r =>
+      axisCategories.map((_, ci) =>
+        colTotals[ci] > 0 ? Math.round((r.counts[ci] ?? 0) / colTotals[ci] * 1000) / 10 : 0
+      )
+    );
+  }
+  return result.rows.map(r => {
+    const total = axisCategories.reduce((s, _, ci) => s + (r.counts[ci] ?? 0), 0);
+    return axisCategories.map((_, ci) =>
+      total > 0 ? Math.round((r.counts[ci] ?? 0) / total * 1000) / 10 : 0
+    );
+  });
+}
+
+/** aggMode に応じたセル値を返す（グラフ用） */
+function _getDataValue(row, ci, axisCategories, aggMode) {
+  if (aggMode === "row_pct")  return _rowPct(row, ci, axisCategories);
+  if (aggMode === "count")    return row.counts[ci] ?? 0;
+  return row.percents[ci] ?? 0;  // "col_pct" default
+}
+
+/** aggMode に応じたツールチップラベルを返す */
+function _tooltipLabel(ctx, isH, aggMode) {
+  const v = ctx.parsed ? (isH ? ctx.parsed.x : ctx.parsed.y) : null;
+  if (aggMode === "count") return `${ctx.dataset.label}: ${v !== null ? Math.round(v) : "N/A"}`;
+  return `${ctx.dataset.label}: ${v !== null ? v.toFixed(1) : "N/A"}%`;
+}
+
+/** aggMode に応じたスケール設定（grouped / bar に使う） */
+function _aggScales(isH, aggMode) {
+  if (aggMode === "count") return _barScales(isH);
+  return {
+    ...(isH
+      ? { x: { beginAtZero: true, ticks: { callback: v => `${v}%` } },
+          y: { ticks: { font: { size: 10 } } } }
+      : { x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+          y: { beginAtZero: true, ticks: { callback: v => `${v}%` } } }),
+  };
+}
+
 /** 棒グラフ（bar + orientation）
  *  transpose=true → labels=集計軸, datasets=選択肢（grouped 相当） */
-function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null) {
+function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null, aggMode = "col_pct") {
   const bw = barWidth ?? 0.9;
   let labels, datasets;
   if (transpose) {
@@ -1770,7 +2004,7 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = 
     labels   = axisCategories;
     datasets = result.rows.map((row, ri) => ({
       label: row.label,
-      data:  axisCategories.map((_, ci) => row.percents[ci] ?? 0),
+      data:  axisCategories.map((_, ci) => _getDataValue(row, ci, axisCategories, aggMode)),
       backgroundColor: palette[ri],
       barPercentage: bw,
     }));
@@ -1779,7 +2013,7 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = 
     labels   = result.rows.map(r => r.label);
     datasets = axisCategories.map((cat, ci) => ({
       label: cat,
-      data:  result.rows.map(r => r.percents[ci] ?? 0),
+      data:  result.rows.map(r => _getDataValue(r, ci, axisCategories, aggMode)),
       backgroundColor: palette[ci],
       barPercentage: bw,
     }));
@@ -1793,33 +2027,29 @@ function _buildBarConfig(result, axisCategories, isH, showPctLabel, transpose = 
       maintainAspectRatio:  false,
       plugins: {
         legend:     { position: "bottom", labels: { font: { size: 11 } } },
-        tooltip:    { callbacks: { label: ctx => { const v = ctx.parsed ? (isH ? ctx.parsed.x : ctx.parsed.y) : null; return `${ctx.dataset.label}: ${v !== null ? v.toFixed(1) : "N/A"}%`; } } },
+        tooltip:    { callbacks: { label: ctx => _tooltipLabel(ctx, isH, aggMode) } },
         datalabels: _datalabels(showPctLabel, isH),
       },
-      scales: _barScales(isH),
+      scales: _aggScales(isH, aggMode),
     },
   };
 }
 
 /** 100%積み上げ棒
- *  transpose=false → labels=選択肢, datasets=集計軸（各軸カテゴリーで正規化）
- *  transpose=true  → labels=集計軸, datasets=選択肢（各軸カテゴリーで正規化） */
+ *  transpose=false → labels=選択肢, datasets=集計軸（行方向で正規化 → 各選択肢棒が100%）
+ *  transpose=true  → labels=集計軸, datasets=選択肢（列方向で正規化 → 各軸カテゴリー棒が100%）
+ *  counts を使って正確に計算する（percents の丸め誤差・MA累積を排除）。 */
 function _buildStacked100Config(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null) {
   const bw = barWidth ?? 0.9;
-  // 軸カテゴリーごとの percents 合計（正規化の分母）
-  const sums = axisCategories.map((_, ci) =>
-    result.rows.reduce((s, r) => s + (r.percents[ci] ?? 0), 0)
-  );
+  const comp = _compositionPct(result, axisCategories, transpose);
+  // comp[ri][ci] = composition%
   let labels, datasets;
   if (transpose) {
     const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
     labels   = axisCategories;
     datasets = result.rows.map((row, ri) => ({
       label: row.label,
-      data: axisCategories.map((_, ci) => {
-        const raw = row.percents[ci] ?? 0;
-        return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
-      }),
+      data:  axisCategories.map((_, ci) => comp[ri][ci]),
       backgroundColor: palette[ri],
       barPercentage: bw,
     }));
@@ -1828,10 +2058,7 @@ function _buildStacked100Config(result, axisCategories, isH, showPctLabel, trans
     labels   = result.rows.map(r => r.label);
     datasets = axisCategories.map((cat, ci) => ({
       label: cat,
-      data: result.rows.map(r => {
-        const raw = r.percents[ci] ?? 0;
-        return sums[ci] > 0 ? Math.round(raw / sums[ci] * 1000) / 10 : 0;
-      }),
+      data:  result.rows.map((_, ri) => comp[ri][ci]),
       backgroundColor: palette[ci],
       barPercentage: bw,
     }));
@@ -1860,7 +2087,7 @@ function _buildStacked100Config(result, axisCategories, isH, showPctLabel, trans
 
 /** grouped棒（軸カテゴリをX軸、選択肢をデータセット）
  *  transpose=true → labels=選択肢, datasets=集計軸（bar 通常と同じ構造） */
-function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null) {
+function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpose = false, barWidth = null, aggMode = "col_pct") {
   const bw = barWidth ?? 0.9;
   let labels, datasets;
   if (transpose) {
@@ -1868,7 +2095,7 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpos
     labels   = result.rows.map(r => r.label);
     datasets = axisCategories.map((cat, ci) => ({
       label: cat,
-      data:  result.rows.map(r => r.percents[ci] ?? 0),
+      data:  result.rows.map(r => _getDataValue(r, ci, axisCategories, aggMode)),
       backgroundColor: palette[ci],
       barPercentage: bw,
     }));
@@ -1877,16 +2104,11 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpos
     labels   = axisCategories;
     datasets = result.rows.map((row, ri) => ({
       label: row.label,
-      data:  axisCategories.map((_, ci) => row.percents[ci] ?? 0),
+      data:  axisCategories.map((_, ci) => _getDataValue(row, ci, axisCategories, aggMode)),
       backgroundColor: palette[ri],
       barPercentage: bw,
     }));
   }
-  const scales = isH
-    ? { x: { beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } },
-        y: { ticks: { font: { size: 10 } } } }
-    : { x: { ticks: { font: { size: 10 } } },
-        y: { beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } } };
   return {
     type: "bar",
     data: { labels, datasets },
@@ -1896,10 +2118,10 @@ function _buildGroupedConfig(result, axisCategories, isH, showPctLabel, transpos
       maintainAspectRatio:  false,
       plugins: {
         legend:     { position: "bottom", labels: { font: { size: 11 } } },
-        tooltip:    { callbacks: { label: ctx => { const v = ctx.parsed ? (isH ? ctx.parsed.x : ctx.parsed.y) : null; return `${ctx.dataset.label}: ${v !== null ? v.toFixed(1) : "N/A"}%`; } } },
+        tooltip:    { callbacks: { label: ctx => _tooltipLabel(ctx, isH, aggMode) } },
         datalabels: _datalabels(showPctLabel, isH),
       },
-      scales,
+      scales: _aggScales(isH, aggMode),
     },
   };
 }
@@ -1993,14 +2215,14 @@ function _renderPieCharts(areaEl, result, axisCategories, areaKey) {
 /** 折れ線グラフ（縦固定, orientation 不使用）
  *  transpose=false → X=選択肢, lines=軸カテゴリ
  *  transpose=true  → X=軸カテゴリ, lines=選択肢 */
-function _buildLineConfig(result, axisCategories, showPctLabel, transpose = false) {
+function _buildLineConfig(result, axisCategories, showPctLabel, transpose = false, aggMode = "col_pct") {
   let labels, datasets;
   if (transpose) {
     const palette = _getColorsForGraph(result.question_code, result.rows.map(r => r.label));
     labels   = axisCategories;
     datasets = result.rows.map((row, ri) => ({
       label:           row.label,
-      data:            axisCategories.map((_, ci) => row.percents[ci] ?? 0),
+      data:            axisCategories.map((_, ci) => _getDataValue(row, ci, axisCategories, aggMode)),
       borderColor:     palette[ri],
       backgroundColor: palette[ri] + "40",
       fill:            false,
@@ -2012,7 +2234,7 @@ function _buildLineConfig(result, axisCategories, showPctLabel, transpose = fals
     labels   = result.rows.map(r => r.label);
     datasets = axisCategories.map((cat, ci) => ({
       label:           cat,
-      data:            result.rows.map(r => r.percents[ci] ?? 0),
+      data:            result.rows.map(r => _getDataValue(r, ci, axisCategories, aggMode)),
       borderColor:     palette[ci],
       backgroundColor: palette[ci] + "40",
       fill:            false,
@@ -2020,6 +2242,7 @@ function _buildLineConfig(result, axisCategories, showPctLabel, transpose = fals
       pointRadius:     4,
     }));
   }
+  const isPct = aggMode !== "count";
   return {
     type: "line",
     data: { labels, datasets },
@@ -2027,14 +2250,16 @@ function _buildLineConfig(result, axisCategories, showPctLabel, transpose = fals
       responsive: true, maintainAspectRatio: false,
       plugins: {
         legend:     { position: "bottom", labels: { font: { size: 11 } } },
-        tooltip:    { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? "N/A"}%` } },
+        tooltip:    { callbacks: { label: ctx => isPct
+          ? `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? "N/A"}%`
+          : `${ctx.dataset.label}: ${ctx.parsed.y !== null ? Math.round(ctx.parsed.y) : "N/A"}` } },
         datalabels: showPctLabel
-          ? { display: true, formatter: v => `${v.toFixed(1)}%`, font: { size: 9 }, color: "#555", anchor: "end", align: "top", clamp: true }
+          ? { display: true, formatter: v => isPct ? `${v.toFixed(1)}%` : Math.round(v), font: { size: 9 }, color: "#555", anchor: "end", align: "top", clamp: true }
           : { display: false },
       },
       scales: {
         x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
-        y: { beginAtZero: true, ticks: { callback: v => `${v}%` } },
+        y: { beginAtZero: true, ticks: { callback: v => isPct ? `${v}%` : v } },
       },
     },
   };
@@ -2277,42 +2502,58 @@ function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
   </div>`;
 }
 
-function _buildPctTable(result, axisCategories, axisTotals, transpose = false) {
+function _buildPctTable(result, axisCategories, axisTotals, transpose = false, aggMode = "col_pct") {
+  // 集計方法ラベル
+  const aggLabel = { col_pct: "列%", row_pct: "行%", composition: "構成比", count: "実数N" }[aggMode] ?? "列%";
+
+  // aggMode に応じたセル値
+  const comp = aggMode === "composition" ? _compositionPct(result, axisCategories, transpose) : null;
+  function cellVal(row, ci, ri) {
+    if (aggMode === "count")       return `${row.counts[ci] ?? 0}`;
+    if (aggMode === "row_pct")     return `${_rowPct(row, ci, axisCategories).toFixed(1)}%`;
+    if (aggMode === "composition") return `${comp[ri][ci].toFixed(1)}%`;
+    return `${row.percents[ci]?.toFixed(1) ?? "0.0"}%`;  // col_pct
+  }
+
+  const tdStyle = `text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap`;
+  const thStyle = `text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem`;
+  const rowLabelStyle = `padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis`;
+
   if (transpose) {
     // 行=集計軸カテゴリー, 列=選択肢
     const headerCols = result.rows
-      .map(row => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem" title="${_esc(row.label)}">${_esc(row.label)}</th>`)
+      .map(row => `<th style="${thStyle}" title="${_esc(row.label)}">${_esc(row.label)}</th>`)
       .join("");
     const rows = axisCategories
       .map((cat, ci) => {
         const cells = result.rows
-          .map(row => `<td style="text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap">${row.percents[ci]?.toFixed(1) ?? "0.0"}%</td>`)
+          .map((row, ri) => `<td style="${tdStyle}">${cellVal(row, ci, ri)}</td>`)
           .join("");
-        return `<tr><td style="padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${cells}</tr>`;
+        return `<tr><td style="${rowLabelStyle}" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${cells}</tr>`;
       })
       .join("");
     return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
       <thead style="background:var(--color-surface-2,#F8F8F8)">
-        <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">集計軸</th>${headerCols}</tr>
+        <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">集計軸 <span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">${aggLabel}</span></th>${headerCols}</tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
   }
   // 通常: 行=選択肢, 列=集計軸カテゴリー
   const headerCols = axisCategories
-    .map((cat, i) => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted)">n=${axisTotals[i] ?? 0}</span></th>`)
+    .map((cat, i) => `<th style="${thStyle}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted)">n=${axisTotals[i] ?? 0}</span></th>`)
     .join("");
   const rows = result.rows
-    .map(row => {
+    .map((row, ri) => {
       const cells = axisCategories
-        .map((_, i) => `<td style="text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap">${row.percents[i]?.toFixed(1) ?? "0.0"}%</td>`)
+        .map((_, ci) => `<td style="${tdStyle}">${cellVal(row, ci, ri)}</td>`)
         .join("");
-      return `<tr><td style="padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis" title="${_esc(row.label)}">${_esc(row.label)}</td>${cells}</tr>`;
+      return `<tr><td style="${rowLabelStyle}" title="${_esc(row.label)}">${_esc(row.label)}</td>${cells}</tr>`;
     })
     .join("");
   return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
     <thead style="background:var(--color-surface-2,#F8F8F8)">
-      <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">選択肢</th>${headerCols}</tr>
+      <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">選択肢 <span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">${aggLabel}</span></th>${headerCols}</tr>
     </thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -2398,6 +2639,7 @@ function _getSettings(questionCode, typeCode) {
     graphTitle:             s.graphTitle             ?? "",
     chartHeight:            s.chartHeight            ?? null,
     barWidth:               s.barWidth               ?? null,
+    aggMode:                s.aggMode                ?? "col_pct",
   };
 }
 
@@ -2419,20 +2661,45 @@ function _chartLabel(id) {
   return CHART_TYPES.find(t => t.id === id)?.label ?? id;
 }
 
+const _BRACKET_RE = /^(.+)\[\d+\]$/;
+
 function _getAxisCandidates() {
-  const step1Codes = new Set(AppState.step1AxisCodes);
-  if (!step1Codes.size) return [];
   const step2Candidates = AppState.step2AxisCandidates;
-  if (step2Candidates.length) {
-    const step2Codes = new Set(step2Candidates.map(c => c.question_code));
-    return [...step1Codes].filter(c => step2Codes.has(c));
+  const matchedCols    = AppState.step2MatchedColumns;
+
+  if (!matchedCols.length && !step2Candidates.length) return [];
+
+  const step2Codes = new Set(step2Candidates.map(c => c.question_code));
+
+  const bracketBaseCodes = new Set();
+  for (const col of matchedCols) {
+    const m = _BRACKET_RE.exec(col);
+    if (m) bracketBaseCodes.add(m[1]);
   }
-  return [];
+
+  return [...new Set([...step2Codes, ...bracketBaseCodes])];
 }
 
 function _getAxisLabel(code) {
   const q = AppState.questions.find(q => q.question_code === code);
   return q ? (q.stub || q.question_text || code) : code;
+}
+
+const _MA_AXIS_TYPES = new Set(["MA", "M", "ML"]);
+
+// セレクター表示用: ラベルテキストと種別バッジを返す
+function _getAxisSelectorLabel(code) {
+  const q = AppState.questions.find(q => q.question_code === code);
+  const text    = q ? (q.stub || q.question_text || code) : code;
+  const typeUp  = (q?.type_code ?? "").toUpperCase();
+  const isBracket = _BRACKET_RE.test(
+    AppState.step2MatchedColumns.find(col => {
+      const m = _BRACKET_RE.exec(col);
+      return m && m[1] === code;
+    }) ?? ""
+  );
+  const badge = (_MA_AXIS_TYPES.has(typeUp) || isBracket) ? "選択肢展開" : "通常カテゴリ";
+  return { text, badge };
 }
 
 function _destroyAllCharts() {

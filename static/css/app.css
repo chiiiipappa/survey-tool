@@ -1011,6 +1011,86 @@ pre.json-pre {
   cursor: pointer;
 }
 
+/* ===== STEP3 分析対象フィルタ ===== */
+.step3-target-ctrl-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.step3-target-search {
+  flex: 1;
+  font-size: .82rem;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface-1, #fff);
+  color: var(--color-text);
+}
+.step3-target-search:focus {
+  outline: none;
+  border-color: var(--color-primary, #4299E1);
+}
+.step3-target-cb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 2px 0;
+  background: var(--color-surface-1, #fff);
+}
+.step3-target-cb-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: .85rem;
+  cursor: pointer;
+  user-select: none;
+}
+.step3-target-cb-item:hover { background: var(--color-surface-alt, #FAFAFA); }
+.step3-target-cb-item input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
+
+/* ===== STEP3 集計軸 検索ドロップダウン ===== */
+.step3-axis-search-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.step3-axis-search-input {
+  width: 100%;
+  font-size: .85rem;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border, #E2E8F0);
+  border-radius: 5px;
+  background: var(--color-surface-1, #fff);
+  color: var(--color-text);
+  box-sizing: border-box;
+}
+.step3-axis-search-input:focus {
+  outline: none;
+  border-color: var(--color-primary, #4299E1);
+  box-shadow: 0 0 0 2px rgba(66,153,225,.2);
+}
+.step3-axis-select {
+  width: 100%;
+  font-size: .85rem;
+  border: 1px solid var(--color-border, #E2E8F0);
+  border-radius: 5px;
+  background: var(--color-surface-1, #fff);
+  color: var(--color-text);
+  padding: 2px 0;
+  cursor: pointer;
+}
+.step3-axis-select option:checked {
+  background: var(--color-primary-light, #EFF6FF);
+  color: var(--color-primary, #2563EB);
+  font-weight: 600;
+}
+
 /* ===== 複合集計軸コントロール ===== */
 .step3-axis-section-title {
   font-size: .8rem;
@@ -1628,4 +1708,849 @@ details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { tra
   padding: 0 0 10px;
   cursor: pointer;
 }
+
+/* =========================================================
+   レポート生成パネル
+   ========================================================= */
+
+.report-layout {
+  display: flex;
+  height: calc(100vh - 96px);
+  overflow: hidden;
+}
+
+/* --- 左サイドバー --- */
+.report-sidebar {
+  width: 300px;
+  min-width: 260px;
+  max-width: 340px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.report-sidebar-header {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 700;
+  font-size: .9rem;
+  background: var(--color-surface-alt);
+  flex-shrink: 0;
+}
+
+.report-sidebar-title { color: var(--color-text); }
+
+.report-section {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.report-section-label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 6px;
+}
+
+.report-mode-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.report-select {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: .82rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.report-checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.report-question-list { max-height: 180px; }
+.report-axis-list     { max-height: 150px; }
+
+.report-checkbox-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: .8rem;
+  line-height: 1.4;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.report-checkbox-list input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.report-axis-check {
+  margin-bottom: 4px;
+}
+.report-axis-check label {
+  font-size: .82rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.report-q-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  font-size: .78rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.report-error {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  font-size: .8rem;
+  color: #dc2626;
+}
+
+/* --- 右メインエリア --- */
+.report-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background: var(--color-surface-alt);
+}
+
+.report-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-muted);
+  font-size: .95rem;
+  text-align: center;
+}
+
+/* --- レポートページ --- */
+.report-pages-container {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.report-pages-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.report-page {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.10);
+  overflow: hidden;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ヘッダー帯: 比較 → 赤→青グラデーション */
+.report-band-comparison {
+  background: linear-gradient(135deg, #DF0515 0%, #0071BC 100%);
+  padding: 14px 20px 12px;
+  color: #fff;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+}
+
+/* ヘッダー帯: 単一 → 青ストライプ */
+.report-band-single {
+  background: repeating-linear-gradient(
+    135deg,
+    #0071BC 0px,
+    #0071BC 4px,
+    #1a90d9 4px,
+    #1a90d9 8px
+  );
+  padding: 14px 20px 12px;
+  color: #fff;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  position: relative;
+}
+
+.report-page-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.3;
+  text-shadow: 0 1px 2px rgba(0,0,0,.25);
+}
+
+.report-page-subtitle {
+  font-size: 8px;
+  opacity: .85;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.report-page-target-badge {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255,255,255,.20);
+  border: 1px solid rgba(255,255,255,.45);
+  padding: 3px 10px;
+  border-radius: 16px;
+  font-size: .8rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.report-page-body {
+  padding: 18px 20px 16px;
+}
+
+.report-page-export-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+/* チャートエリア */
+.report-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  margin-bottom: 16px;
+}
+
+/* スモールマルチプル（比較+軸） */
+.report-small-multiples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.report-small-multiple-item {
+  flex: 1;
+  min-width: 220px;
+  max-width: 340px;
+}
+
+.report-small-multiple-title {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.report-small-multiple-chart {
+  position: relative;
+  width: 100%;
+  height: 220px;
+}
+
+/* 集計表 */
+.report-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 10px;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78rem;
+}
+
+.report-table th, .report-table td {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.report-table th {
+  background: var(--color-surface-alt);
+  font-weight: 600;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.report-table td:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.report-table .report-table-total {
+  font-weight: 700;
+  background: var(--color-surface-alt);
+}
+
+.report-table tr.report-table-total-row th,
+.report-table tr.report-table-total-row td {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-surface-alt) 80%, var(--color-border) 20%);
+}
+
+/* フッター */
+.report-page-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 8px;
+}
+
+.report-n-count {
+  font-size: .78rem;
+  color: var(--color-text-muted);
+}
+
+.report-axis-label {
+  font-size: .78rem;
+  color: var(--color-text-muted);
+}
 .step1-set-back-btn:hover { color: var(--color-primary); text-decoration: underline; }
+
+/* ===== レポート Phase 2: 3ペインレイアウト ===== */
+.report-layout-v2 {
+  display: flex;
+  height: calc(100vh - 96px);
+  overflow: hidden;
+}
+
+/* 左: ページ一覧 */
+.report-pagelist {
+  width: 250px;
+  min-width: 200px;
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-alt);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.report-pagelist-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.report-project-name-input {
+  width: 100%;
+  font-size: .85rem;
+  font-weight: 600;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  box-sizing: border-box;
+}
+.report-project-name-input:hover,
+.report-project-name-input:focus {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  outline: none;
+}
+
+.report-pagelist-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.report-load-label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.report-page-items {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  padding: 6px 0;
+  margin: 0;
+}
+
+.report-page-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background .1s;
+}
+.report-page-item:hover {
+  background: var(--color-border);
+}
+.report-page-item.active {
+  background: var(--color-primary-light);
+  border-left-color: var(--color-primary);
+}
+.report-page-item-num {
+  font-size: .72rem;
+  color: var(--color-text-muted);
+  min-width: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.report-page-item-title {
+  font-size: .79rem;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+
+.report-add-page-btn-primary {
+  margin-left: auto;
+  background: #e53935;
+  color: #fff;
+  border: none;
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.report-add-page-btn-primary:hover {
+  background: #b71c1c;
+}
+
+/* 右: メインエリア */
+.report-main-area {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.report-settings-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 28px;
+  max-width: 720px;
+}
+
+.report-preview-panel {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-preview-toolbar {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.report-preview-canvas-wrap {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  background: #e0e0e0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.report-preview-canvas {
+  aspect-ratio: 16 / 9;
+  width: min(100%, 960px);
+  background: #fff;
+  box-shadow: 0 4px 20px rgba(0,0,0,.18);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* プレビュー内のページ表示調整 */
+.report-preview-canvas .report-page {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.report-preview-canvas .report-band-comparison,
+.report-preview-canvas .report-band-single {
+  padding: 10px 20px 6px;
+}
+.report-preview-canvas .report-page-title {
+  font-size: 1rem;
+}
+.report-preview-canvas .report-page-subtitle {
+  font-size: 8px;
+}
+.report-preview-canvas .report-page-body {
+  padding: 8px 16px 4px;
+  overflow: hidden;
+  height: calc(100% - 72px);
+  display: flex;
+  flex-direction: column;
+}
+.report-preview-canvas .report-page-export-row {
+  display: none;
+}
+.report-preview-canvas .report-chart-wrap {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+.report-preview-canvas .report-page-footer {
+  padding: 4px 0;
+  flex-shrink: 0;
+}
+
+/* btn-danger */
+.btn-danger {
+  background: #dc3545;
+  color: #fff;
+  border: 1px solid #dc3545;
+}
+.btn-danger:hover {
+  background: #b02a37;
+  border-color: #b02a37;
+}
+
+/* btn-xs */
+.btn-xs {
+  font-size: .72rem;
+  padding: 2px 7px;
+}
+
+/* ===== レポート Phase 3: プレビュー＋編集パネル ===== */
+
+/* preview-body: キャンバス + 編集パネルの横並び */
+.report-preview-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+
+/* 既存の canvas-wrap を preview-body 内でも正しく動かす */
+.report-preview-body .report-preview-canvas-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 編集パネル */
+.report-edit-panel {
+  width: 280px;
+  min-width: 240px;
+  border-left: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* タブ行 */
+.report-edit-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.report-edit-tab {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: .78rem;
+  font-weight: 500;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: color .15s;
+}
+.report-edit-tab:hover {
+  color: var(--color-text);
+}
+.report-edit-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* タブコンテンツ */
+.report-edit-tabcontent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+
+/* フィールド */
+.report-edit-field {
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.report-edit-label {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.report-edit-label-sm {
+  font-size: .75rem;
+  color: var(--color-text-muted);
+}
+.report-edit-input {
+  width: 100%;
+  font-size: .82rem;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  box-sizing: border-box;
+}
+.report-edit-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.report-edit-textarea {
+  width: 100%;
+  font-size: .78rem;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.report-edit-textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.report-edit-toggle-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .75rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.report-edit-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.report-edit-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.report-edit-select-sm {
+  font-size: .78rem;
+  padding: 3px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+}
+
+/* グラフモード選択グリッド */
+.report-chart-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.report-chart-mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  cursor: pointer;
+  font-size: .65rem;
+  color: var(--color-text-muted);
+  transition: border-color .1s, background .1s;
+  text-align: center;
+  line-height: 1.2;
+}
+.report-chart-mode-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.report-chart-mode-btn.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.report-chart-mode-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+/* グラフモードグリッド: 4列 */
+#edit-chart-mode-grid.report-chart-mode-grid {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* スライダー */
+.report-edit-range {
+  width: 100%;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+.report-edit-range-sm {
+  flex: 1;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+  min-width: 0;
+}
+
+/* 数値入力（小） */
+.report-edit-number-sm {
+  width: 48px;
+  font-size: .78rem;
+  padding: 2px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  text-align: center;
+}
+
+/* セクション区切り */
+.report-edit-section-divider {
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+/* 分析対象列の複数回答バッジ */
+.report-target-ma-badge {
+  display: inline-block;
+  font-size: .68rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--color-accent-soft, #e8f0fe);
+  color: var(--color-accent, #1a73e8);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* STEP1 選択肢展開バッジ */
+.axis-expand-badge {
+  display: inline-block;
+  font-size: .65rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #fff3cd;
+  color: #856404;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* 選択肢フィルタリスト */
+.report-choice-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.report-choice-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.report-choice-filter-row input[type="checkbox"] {
+  flex-shrink: 0;
+}
+
+/* カラーリスト */
+.report-color-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.report-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.report-color-swatch {
+  width: 28px;
+  height: 22px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.report-color-label {
+  font-size: .78rem;
+  color: var(--color-text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

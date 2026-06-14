@@ -15,7 +15,7 @@ from app.utils import detect_encoding
 
 logger = logging.getLogger(__name__)
 
-AXIS_CANDIDATE_TYPES = {"SA", "S", "NU", "N", "ML"}
+AXIS_CANDIDATE_TYPES = {"SA", "S", "NU", "N", "ML", "SL"}
 MULTI_SELECT_TYPES = {"MA", "ML"}
 _FA_TYPES = {"FA", "F"}
 _SPECIAL_TYPES = {"X", "XL"}  # SL は SA 相当のため特殊扱い不要

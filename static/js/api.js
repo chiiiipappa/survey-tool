@@ -42,7 +42,7 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surv) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}) {
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}, reportProject = {}) {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -56,11 +56,14 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       step3_composite_display_mode: compositeSettings.displayMode ?? "split",
       step3_color_priority: compositeSettings.colorPriority ?? "axis1",
       step3_min_sample_size: compositeSettings.minSampleSize ?? 0,
+      step3_target_filter_column: compositeSettings.targetFilterColumn ?? "",
+      step3_target_filter_values: compositeSettings.targetFilterValues ?? [],
       question_sets: questionSets,
       step3_crosstab_cache: step3CrosstabCache,
       hidden_question_types: hiddenQuestionTypes,
       excluded_questions: excludedQuestions,
       step3_views: step3Views,
+      report_project: reportProject,
     }),
   });
   if (!res.ok) {
@@ -91,23 +94,6 @@ export async function loadProject(file) {
   return res.json();
 }
 
-/** STEP1 の集計軸コードと STEP3 の選択軸をサーバーキャッシュに保存する。 */
-export async function saveStep1AxisSettings(token, axisCodes, step3ActiveAxisCode = "") {
-  const res = await fetch(`${BASE}/step1/axis/settings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      session_token: token,
-      step1_axis_codes: axisCodes,
-      step3_active_axis_code: step3ActiveAxisCode,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail ?? "集計軸設定の保存に失敗しました。");
-  }
-  return res.json();
-}
 
 /** FA 設問選択と属性列選択をサーバーキャッシュに保存する。 */
 export async function saveFaSettings(token, faCodes, attrCols) {
@@ -255,7 +241,7 @@ export async function exportFaData(token, {
 // ---------------------------------------------------------------------------
 
 /** クロス集計を実行する。 */
-export async function generateCrosstab(sessionToken, axisCode, secondaryAxisCode = "", targetCodes = []) {
+export async function generateCrosstab(sessionToken, axisCode, secondaryAxisCode = "", targetCodes = [], targetFilterColumn = "", targetFilterValues = []) {
   const res = await fetch(`${BASE}/step3/crosstab`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -264,6 +250,8 @@ export async function generateCrosstab(sessionToken, axisCode, secondaryAxisCode
       axis_question_code: axisCode,
       secondary_axis_question_code: secondaryAxisCode,
       target_question_codes: targetCodes,
+      target_filter_column: targetFilterColumn,
+      target_filter_values: targetFilterValues,
     }),
   });
   if (!res.ok) {
@@ -336,4 +324,25 @@ export async function exportCrosstabCsv(payload, { single = false, questionCode 
     throw new Error(err.detail ?? "CSV エクスポートに失敗しました。");
   }
   _triggerBlobDownload(await res.blob(), res.headers.get("Content-Disposition") ?? "", single ? "crosstab.csv" : "crosstab.zip");
+}
+
+/** レポートページを生成する。 */
+export async function generateReport(sessionToken, mode, targetColumn, targetValues, questionCodes, axisSpecs) {
+  const res = await fetch(`${BASE}/report/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: sessionToken,
+      mode,
+      target_column: targetColumn,
+      target_values: targetValues,
+      question_codes: questionCodes,
+      axis_specs: axisSpecs,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "レポート生成に失敗しました。");
+  }
+  return res.json();
 }

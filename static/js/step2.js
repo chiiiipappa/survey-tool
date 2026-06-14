@@ -58,8 +58,6 @@ function _initDropZone() {
   const dropZone = document.getElementById("step2-drop-zone");
   const fileInput = document.getElementById("step2-file-input");
 
-  dropZone.addEventListener("click", () => fileInput.click());
-
   dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
     dropZone.classList.add("dragover");
@@ -74,8 +72,8 @@ function _initDropZone() {
 
   fileInput.addEventListener("change", () => {
     const file = fileInput.files?.[0];
-    if (file) _handleFile(file);
     fileInput.value = "";
+    if (file) _handleFile(file);
   });
 }
 
@@ -170,8 +168,7 @@ function _initLoadedCard() {
   const step2ReplaceInput    = document.getElementById("step2-replace-input");
   const step2ReplaceDropZone = document.getElementById("step2-replace-drop-zone");
 
-  if (step2ReplaceDropZone && step2ReplaceInput) {
-    step2ReplaceDropZone.addEventListener("click", () => step2ReplaceInput.click());
+  if (step2ReplaceDropZone) {
     step2ReplaceDropZone.addEventListener("dragover", (e) => {
       e.preventDefault();
       step2ReplaceDropZone.classList.add("dragover");
@@ -188,16 +185,12 @@ function _initLoadedCard() {
 
   step2ReplaceInput?.addEventListener("change", (e) => {
     const file = e.target.files[0];
-    if (file) _handleFile(file);
     e.target.value = "";
+    if (file) _handleFile(file);
   });
 
   document.getElementById("btn-step2-reload")?.addEventListener("click", () => {
     if (_lastFile) _handleFile(_lastFile);
-  });
-
-  document.getElementById("btn-step2-replace")?.addEventListener("click", () => {
-    step2ReplaceInput?.click();
   });
 
   document.getElementById("btn-step2-unload")?.addEventListener("click", _resetStep2);
@@ -237,35 +230,7 @@ export function renderFileInfoBar(resp) {
 // ---------------------------------------------------------------------------
 
 function renderSelectedAxisDisplay(resp) {
-  const matchedSet = new Set(resp.matched_columns ?? []);
-  const validated  = AppState.step1AxisCodes.filter(c => matchedSet.has(c));
-  const missing    = AppState.step1AxisCodes.filter(c => !matchedSet.has(c));
-
-  _faState.validatedStep1Axes = validated;
-
-  const listEl = document.getElementById("step2-selected-axis-list");
-  if (listEl) {
-    if (!AppState.step1AxisCodes.length) {
-      listEl.innerHTML = '<span class="text-sm text-muted">STEP1 で集計軸が選択されていません。</span>';
-    } else {
-      const axisInfoMap = new Map((resp.axis_candidates ?? []).map(c => [c.question_code, c]));
-      listEl.innerHTML = validated.map(code => {
-        const info  = axisInfoMap.get(code);
-        const label = info ? `${code}　${info.question_text}` : code;
-        return `<span class="badge badge-ok">${_esc(label)}</span>`;
-      }).join("");
-    }
-  }
-
-  const warnEl = document.getElementById("step2-missing-axis-warn");
-  if (warnEl) {
-    if (missing.length > 0) {
-      warnEl.innerHTML = `<strong>⚠ 以下の集計軸は回答データに存在しません:</strong> ${missing.map(_esc).join("、")}`;
-      warnEl.classList.remove("hidden");
-    } else {
-      warnEl.classList.add("hidden");
-    }
-  }
+  _faState.validatedStep1Axes = (resp.axis_candidates ?? []).map(c => c.question_code);
 }
 
 // ---------------------------------------------------------------------------
@@ -661,13 +626,10 @@ function _renderExtraAttrCheckboxes(attrCandidates) {
 }
 
 function _updateAttrMultiSelect() {
-  const candidateMap = new Map(AppState.step2AxisCandidates.map(c => [c.question_code, c]));
-  const options = AppState.step1AxisCodes
-    .filter(code => candidateMap.has(code))
-    .map(code => {
-      const info = candidateMap.get(code);
-      return { value: code, label: `${code}　${info.question_text}` };
-    });
+  const options = AppState.step2AxisCandidates.map(c => ({
+    value: c.question_code,
+    label: `${c.question_code}　${c.question_text}`,
+  }));
   _renderAttrCheckboxes(options);
 }
 
@@ -701,12 +663,9 @@ function _updateSortAttrSelect() {
   const sel = document.getElementById("fa-sort-attr-select");
   if (!sel) return;
   const cur = sel.value;
-  const candidateMap = new Map(AppState.step2AxisCandidates.map(c => [c.question_code, c]));
-  const allCols = AppState.step1AxisCodes.filter(code => candidateMap.has(code));
-  sel.innerHTML = allCols.map(code => {
-    const info = candidateMap.get(code);
-    const label = info ? `${code}　${info.question_text}` : code;
-    return `<option value="${_esc(code)}" ${code === cur ? "selected" : ""}>${_esc(label)}</option>`;
+  sel.innerHTML = AppState.step2AxisCandidates.map(c => {
+    const label = `${c.question_code}　${c.question_text}`;
+    return `<option value="${_esc(c.question_code)}" ${c.question_code === cur ? "selected" : ""}>${_esc(label)}</option>`;
   }).join("");
 }
 

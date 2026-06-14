@@ -118,9 +118,20 @@ def _build_axis_cats(df: pd.DataFrame, col: str, q) -> list[str]:
     return cats
 
 
+def _build_bracket_by_base(step2_data: dict) -> dict[str, list[dict]]:
+    """bracket_columns を base_code でグループ化（choice_no 昇順）して返す。"""
+    bracket_by_base: dict[str, list[dict]] = defaultdict(list)
+    for bc in step2_data.get("bracket_columns", []):
+        bracket_by_base[bc["base_code"]].append(bc)
+    for bcs in bracket_by_base.values():
+        bcs.sort(key=lambda b: b["choice_no"])
+    return dict(bracket_by_base)
+
+
 def _resolve_needed_columns(
     body: Step3CrosstabRequest,
     step2_data: dict,
+    bracket_by_base: dict[str, list[dict]] | None = None,
 ) -> list[str] | None:
     """クロス集計に必要な列名リストを返す。target_question_codes が空なら None（全列読込）。"""
     if not body.target_question_codes:
@@ -137,19 +148,102 @@ def _resolve_needed_columns(
     matched_set = set(step2_data.get("matched_columns", []))
     available = matched_set | bracket_headers
 
-    needed: set[str] = {body.axis_question_code}
+    # 軸列の追加（bracket MA軸の場合は展開列を追加）
+    needed: set[str] = set()
+    axis_code = body.axis_question_code
+    if axis_code in bracket_map:
+        needed.update(bracket_map[axis_code])
+    else:
+        needed.add(axis_code)
+
     if body.secondary_axis_question_code:
-        needed.add(body.secondary_axis_question_code)
+        sec = body.secondary_axis_question_code
+        if sec in bracket_map:
+            needed.update(bracket_map[sec])
+        else:
+            needed.add(sec)
 
     for code in body.target_question_codes:
         if code in bracket_map:
             needed.update(bracket_map[code])
         elif code in available:
-            # parquet に存在することが確認できた列のみ追加
             needed.add(code)
-        # else: レイアウトにはあるが回答データに存在しない設問はスキップ
+
+    # 分析対象フィルタ列も追加
+    if body.target_filter_column:
+        fc = body.target_filter_column
+        if fc in bracket_map:
+            needed.update(bracket_map[fc])
+        elif fc in available:
+            needed.add(fc)
 
     return list(needed)
+
+
+def _crosstab_sa_bracket_axis(
+    df: pd.DataFrame,
+    q_col: str,
+    bcs_axis: list[dict],
+    axis_cats: list[str],
+    axis_totals: list[int],
+    q,
+) -> list[CrosstabRow]:
+    """SA設問のクロス集計（bracket MA が集計軸の場合）。"""
+    if q_col not in df.columns:
+        return []
+    values = _build_axis_cats(df, q_col, q)
+    if not values:
+        return []
+
+    rows: list[CrosstabRow] = []
+    for val in values:
+        target_mask = df[q_col].astype(str) == val
+        counts: list[int] = []
+        percents: list[float] = []
+        for bc, total in zip(bcs_axis, axis_totals):
+            dcol = bc["display_header"]
+            if dcol not in df.columns:
+                counts.append(0)
+                percents.append(0.0)
+                continue
+            sel_mask = ~df[dcol].fillna("").astype(str).str.strip().isin(["", "-"])
+            c = int((target_mask & sel_mask).sum())
+            p = _safe_float(c / total * 100) if total > 0 else 0.0
+            counts.append(c)
+            percents.append(p)
+        rows.append(CrosstabRow(label=str(val), counts=counts, percents=percents))
+    return rows
+
+
+def _crosstab_ma_bracket_axis(
+    df: pd.DataFrame,
+    bcs_target: list[dict],
+    bcs_axis: list[dict],
+    axis_cats: list[str],
+    axis_totals: list[int],
+) -> list[CrosstabRow]:
+    """MA設問のクロス集計（bracket MA が集計軸の場合）。"""
+    rows: list[CrosstabRow] = []
+    for bc_target in bcs_target:
+        dcol_t = bc_target["display_header"]
+        if dcol_t not in df.columns:
+            continue
+        target_mask = ~df[dcol_t].fillna("").astype(str).str.strip().isin(["", "-"])
+        counts: list[int] = []
+        percents: list[float] = []
+        for bc_axis, total in zip(bcs_axis, axis_totals):
+            dcol_a = bc_axis["display_header"]
+            if dcol_a not in df.columns:
+                counts.append(0)
+                percents.append(0.0)
+                continue
+            sel_mask = ~df[dcol_a].fillna("").astype(str).str.strip().isin(["", "-"])
+            c = int((target_mask & sel_mask).sum())
+            p = _safe_float(c / total * 100) if total > 0 else 0.0
+            counts.append(c)
+            percents.append(p)
+        rows.append(CrosstabRow(label=bc_target["choice_label"], counts=counts, percents=percents))
+    return rows
 
 
 @router.post("/step3/crosstab", response_model=Step3CrosstabResponse, summary="クロス集計実行")
@@ -167,7 +261,10 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
     if not parquet_path:
         raise HTTPException(422, "ラベル変換済みデータがありません。")
 
-    columns_needed = _resolve_needed_columns(body, step2_data)
+    # bracket_by_base を早期に構築（軸タイプ判定に使用）
+    bracket_by_base = _build_bracket_by_base(step2_data)
+
+    columns_needed = _resolve_needed_columns(body, step2_data, bracket_by_base)
     try:
         df = load_parquet(Path(parquet_path), columns=columns_needed)
     except FileNotFoundError:
@@ -178,23 +275,115 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
             df = load_parquet(Path(parquet_path))
         except FileNotFoundError:
             raise HTTPException(422, "データが失われています。再アップロードしてください。")
-    axis_col = body.axis_question_code
 
+    axis_col_raw = body.axis_question_code
+    q_map = {q.question_code: q for q in questions}
+    axis_q = q_map.get(axis_col_raw)
+    axis_question_text = axis_q.question_text if axis_q else axis_col_raw
+
+    # 分析対象フィルタ（df 絞り込み — 軸カテゴリー計算前に適用）
+    if body.target_filter_column and body.target_filter_values:
+        tcol = body.target_filter_column
+        tvals = body.target_filter_values
+        if tcol in bracket_by_base:
+            mask = pd.Series(False, index=df.index)
+            for val in tvals:
+                bc = next((b for b in bracket_by_base[tcol] if b["choice_label"] == val), None)
+                if bc and bc["display_header"] in df.columns:
+                    col_h = bc["display_header"]
+                    mask |= ~df[col_h].fillna("").astype(str).str.strip().isin(["", "-"])
+            df = df[mask]
+        elif tcol in df.columns:
+            df = df[df[tcol].isin(tvals)]
+
+    # bracket MA軸かどうかを判定
+    is_bracket_ma_axis = (axis_col_raw not in df.columns) and (axis_col_raw in bracket_by_base)
+
+    # --- bracket MA軸モード ---
+    if is_bracket_ma_axis:
+        bcs_axis = [bc for bc in bracket_by_base[axis_col_raw] if bc["display_header"] in df.columns]
+        if not bcs_axis:
+            raise HTTPException(422, f"集計軸設問 '{axis_col_raw}' の展開列がデータに存在しません。")
+
+        axis_cats = [bc["choice_label"] for bc in bcs_axis]
+        axis_totals: list[int] = []
+        for bc in bcs_axis:
+            sel = ~df[bc["display_header"]].fillna("").astype(str).str.strip().isin(["", "-"])
+            axis_totals.append(int(sel.sum()))
+
+        # bracket MA軸は複合軸非対応
+        primary_axis_cats: list[str] = []
+        secondary_axis_cats: list[str] = []
+        secondary_axis_code = ""
+        secondary_axis_q = None
+
+        orig_axis_col = axis_col_raw
+        if body.target_question_codes:
+            target_codes = [c for c in body.target_question_codes if c in q_map]
+        else:
+            exclude = {orig_axis_col}
+            target_codes = [q.question_code for q in questions if q.question_code not in exclude]
+
+        results: list[CrosstabResult] = []
+        warnings: list[str] = []
+
+        for code in target_codes:
+            q = q_map.get(code)
+            if q is None:
+                continue
+            tc = q.type_code.upper()
+            if tc in _SKIP_TYPES:
+                continue
+
+            if tc in _CROSSTAB_SA_TYPES:
+                if code not in df.columns:
+                    warnings.append(f"列 '{code}' がデータに存在しないためスキップしました。")
+                    continue
+                rows = _crosstab_sa_bracket_axis(df, code, bcs_axis, axis_cats, axis_totals, q)
+            elif tc in _CROSSTAB_MA_TYPES:
+                bcs = bracket_by_base.get(code, [])
+                if not bcs:
+                    warnings.append(f"MA設問 '{code}' のbracket列が見つかりませんでした。")
+                    continue
+                rows = _crosstab_ma_bracket_axis(df, bcs, bcs_axis, axis_cats, axis_totals)
+            else:
+                continue
+
+            if rows:
+                results.append(CrosstabResult(
+                    question_code=code,
+                    question_text=q.question_text,
+                    type_code=q.type_code,
+                    rows=rows,
+                ))
+
+        logger.info(
+            "クロス集計完了(bracket MA軸): axis=%s, 設問数=%d, 警告=%d",
+            axis_col_raw, len(results), len(warnings),
+        )
+        return Step3CrosstabResponse(
+            axis_question_code=axis_col_raw,
+            axis_question_text=axis_question_text,
+            axis_categories=axis_cats,
+            axis_totals=axis_totals,
+            results=results,
+            warnings=warnings,
+            secondary_axis_question_code="",
+            secondary_axis_question_text="",
+            primary_axis_categories=[],
+            secondary_axis_categories=[],
+        )
+
+    # --- 通常軸モード ---
+    axis_col = axis_col_raw
     if axis_col not in df.columns:
         raise HTTPException(422, f"集計軸列 '{axis_col}' がデータに存在しません。")
 
-    # 軸の設問情報を取得
-    q_map = {q.question_code: q for q in questions}
-    axis_q = q_map.get(axis_col)
-    axis_question_text = axis_q.question_text if axis_q else axis_col
-
-    # 軸①カテゴリーを決定
     axis_cats = _build_axis_cats(df, axis_col, axis_q)
     axis_totals = [int((df[axis_col] == cat).sum()) for cat in axis_cats]
 
-    # 複合軸: 軸② が指定されている場合
-    primary_axis_cats: list[str] = []    # axis2 の値（外ループ）
-    secondary_axis_cats: list[str] = []  # axis1 の値（内ループ）
+    primary_axis_cats = []
+    secondary_axis_cats = []
     secondary_axis_code = body.secondary_axis_question_code or ""
     secondary_axis_q = None
 
@@ -204,11 +393,9 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
         secondary_axis_q = q_map.get(secondary_axis_code)
         sec_cats = _build_axis_cats(df, secondary_axis_code, secondary_axis_q)
 
-        # primary = axis2 (外ループ), secondary = axis1 (内ループ)
         primary_axis_cats = sec_cats
         secondary_axis_cats = axis_cats
 
-        # 複合列生成: "axis2値 × axis1値"
         df["__composite__"] = (
             df[secondary_axis_code].fillna("").astype(str)
             + _COMPOSITE_SEP
@@ -222,24 +409,15 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
         axis_totals = [int((df["__composite__"] == cat).sum()) for cat in axis_cats]
         axis_col = "__composite__"
 
-    # bracket_columns を base_code でグループ化
-    bracket_columns: list[dict] = step2_data.get("bracket_columns", [])
-    bracket_by_base: dict[str, list[dict]] = defaultdict(list)
-    for bc in bracket_columns:
-        bracket_by_base[bc["base_code"]].append(bc)
-    for bcs in bracket_by_base.values():
-        bcs.sort(key=lambda b: b["choice_no"])
-
-    # 対象設問を決定（元の axis_question_code と secondary_axis を除外）
-    orig_axis_col = body.axis_question_code
+    orig_axis_col = axis_col_raw
     if body.target_question_codes:
         target_codes = [c for c in body.target_question_codes if c in q_map]
     else:
         exclude = {orig_axis_col, secondary_axis_code}
         target_codes = [q.question_code for q in questions if q.question_code not in exclude]
 
-    results: list[CrosstabResult] = []
-    warnings: list[str] = []
+    results = []
+    warnings = []
 
     for code in target_codes:
         q = q_map.get(code)
@@ -247,7 +425,6 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
             continue
 
         tc = q.type_code.upper()
-
         if tc in _SKIP_TYPES:
             continue
 
@@ -282,11 +459,11 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
 
     logger.info(
         "クロス集計完了: axis=%s, secondary=%s, 設問数=%d, 警告=%d",
-        body.axis_question_code, secondary_axis_code, len(results), len(warnings),
+        axis_col_raw, secondary_axis_code, len(results), len(warnings),
     )
 
     return Step3CrosstabResponse(
-        axis_question_code=body.axis_question_code,
+        axis_question_code=axis_col_raw,
         axis_question_text=axis_question_text,
         axis_categories=axis_cats,
         axis_totals=axis_totals,

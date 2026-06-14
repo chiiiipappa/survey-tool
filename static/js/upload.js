@@ -22,8 +22,6 @@ export function initUploadPanel() {
   const fileInput    = document.getElementById("file-input");
   const projectInput = document.getElementById("project-input");
 
-  dropZone.addEventListener("click", () => fileInput.click());
-
   dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
     dropZone.classList.add("dragover");
@@ -37,8 +35,9 @@ export function initUploadPanel() {
   });
 
   fileInput.addEventListener("change", () => {
-    if (fileInput.files[0]) handleCsvFile(fileInput.files[0]);
+    const f = fileInput.files[0];
     fileInput.value = "";
+    if (f) handleCsvFile(f);
   });
 
   // プロジェクト復元

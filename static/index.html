@@ -39,6 +39,7 @@
   <button id="btn-step-step1" class="step-btn active">① 調査票レイアウト確認</button>
   <button id="btn-step-step2" class="step-btn" disabled>② 回答データ読込・FA表形成</button>
   <button id="btn-step-step3" class="step-btn" disabled>③ クロス集計・グラフ作成</button>
+  <button id="btn-step-report" class="step-btn" disabled>④ レポート生成</button>
 </nav>
 
 <!-- ===== メインコンテンツ ===== -->
@@ -52,13 +53,13 @@
         <span class="card-title">レイアウトファイルを読み込む</span>
       </div>
       <div class="card-body">
-        <div id="drop-zone" class="drop-zone">
+        <label id="drop-zone" class="drop-zone" for="file-input">
           <div class="drop-icon">📂</div>
           <p>
             <strong>クリックしてファイルを選択</strong>、またはここにドラッグ&ドロップ<br>
             <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8 自動判定）・Excel (.xlsx)</span>
           </p>
-        </div>
+        </label>
         <input type="file" id="file-input" accept=".csv,.xlsx" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
 
         <!-- ファイル情報バー -->
@@ -111,12 +112,7 @@
     <div class="card">
       <div class="card-header">
         <span class="card-title">設問一覧</span>
-        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
-          <div id="axis-summary" style="display:none; align-items:center; gap:4px; font-size:.8rem;">
-            <span style="color:var(--color-text-muted); white-space:nowrap;">集計軸:</span>
-            <div id="axis-summary-badges" style="display:flex; gap:4px; flex-wrap:wrap;"></div>
-          </div>
-        </div>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;"></div>
       </div>
       <!-- 検索・フィルタ -->
       <div class="card-body" style="border-bottom:1px solid var(--color-border); padding-top:12px; padding-bottom:12px">
@@ -140,17 +136,10 @@
           <button id="q-apply-btn" class="btn btn-primary btn-sm">適用</button>
         </div>
       </div>
-      <!-- 上部コントロールバー -->
-      <div id="q-axis-ctrl-top" class="axis-ctrl-bar" style="display:none">
-        <button id="q-select-all-top" class="btn btn-secondary btn-sm">☑ 全て選択</button>
-        <button id="q-deselect-all-top" class="btn btn-secondary btn-sm">□ 全て解除</button>
-        <button id="q-update-axis-btn" class="btn btn-primary btn-sm">集計軸を更新して次へ →</button>
-      </div>
       <div class="table-wrap" id="questions-table-wrap">
         <table id="questions-table">
           <thead>
             <tr>
-              <th style="width:64px; text-align:center">集計軸</th>
               <th style="width:52px">No.</th>
               <th style="width:100px">コード</th>
               <th style="width:90px">種別</th>
@@ -162,7 +151,7 @@
           </thead>
           <tbody>
             <tr>
-              <td colspan="8" style="text-align:center; padding:32px; color:var(--color-text-muted)">
+              <td colspan="7" style="text-align:center; padding:32px; color:var(--color-text-muted)">
                 CSV をアップロードすると設問一覧が表示されます。
               </td>
             </tr>
@@ -232,13 +221,13 @@
         <span class="card-title">回答データ CSV / Excel を読み込む</span>
       </div>
       <div class="card-body">
-        <div id="step2-drop-zone" class="drop-zone">
+        <label id="step2-drop-zone" class="drop-zone" for="step2-file-input">
           <div class="drop-icon">📊</div>
           <p>
             <strong>クリックしてファイルを選択</strong>、またはここにドラッグ&ドロップ<br>
             <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8）・xlsx</span>
           </p>
-        </div>
+        </label>
         <input type="file" id="step2-file-input" accept=".csv,.xlsx" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
 
         <!-- ファイル情報バー -->
@@ -388,18 +377,18 @@
         <span class="card-title">回答データ CSV / Excel を読み込む</span>
       </div>
       <div class="card-body">
-        <div id="step2-replace-drop-zone" class="drop-zone">
+        <label id="step2-replace-drop-zone" class="drop-zone" for="step2-replace-input">
           <div class="drop-icon">📂</div>
           <p>
             <strong>クリックしてファイルを選択</strong>、またはここにドラッグ&ドロップして差し替え<br>
             <span class="text-sm text-muted">対応形式: CSV（Shift-JIS / UTF-8）・xlsx</span>
           </p>
-        </div>
+        </label>
         <input type="file" id="step2-replace-input" accept=".csv,.xlsx" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;">
         <div id="step2-loaded-info" class="file-info-bar" style="margin-top:16px;"></div>
         <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
           <button id="btn-step2-reload"  class="btn btn-secondary btn-sm">↺ 再読込</button>
-          <button id="btn-step2-replace" class="btn btn-secondary btn-sm">差し替え</button>
+          <label id="btn-step2-replace" class="btn btn-secondary btn-sm" for="step2-replace-input" style="cursor:pointer">差し替え</label>
           <button id="btn-step2-unload"  class="btn btn-secondary btn-sm">× 読込解除</button>
         </div>
       </div>
@@ -429,30 +418,56 @@
       <!-- 右メインエリア: 集計軸 + 結果 -->
       <div id="step3-main" class="step3-main">
 
+        <!-- 分析対象フィルタカード -->
+        <div class="card" id="step3-filter-card" style="margin-bottom:12px">
+          <div class="card-header">
+            <span class="card-title">分析対象</span>
+            <span id="step3-filter-active-badge" hidden
+              style="font-size:.75rem; background:#FEF3C7; color:#92400E; border:1px solid #FDE68A;
+                     padding:2px 8px; border-radius:10px; margin-left:8px;">絞り込み中</span>
+          </div>
+          <div class="card-body">
+            <div class="step3-axis-section-title">分析対象列</div>
+            <select id="step3-target-column"
+              style="width:100%; font-size:.85rem; padding:5px 8px;
+                     border:1px solid var(--color-border); border-radius:5px; margin-bottom:4px;">
+              <option value="">（絞り込みなし — 全回答者）</option>
+            </select>
+            <div id="step3-target-values-section" style="display:none; margin-top:10px">
+              <div class="step3-axis-section-title">
+                分析対象値
+                <span id="step3-target-values-count"
+                  style="font-weight:400; font-size:.78rem; color:var(--color-text-muted)"></span>
+              </div>
+              <div class="step3-target-ctrl-bar">
+                <button id="step3-target-all-btn" class="btn btn-secondary btn-sm">全選択</button>
+                <button id="step3-target-none-btn" class="btn btn-secondary btn-sm">全解除</button>
+                <input type="text" id="step3-target-value-search"
+                  class="step3-target-search" placeholder="検索…" autocomplete="off">
+              </div>
+              <div id="step3-target-values-list" class="step3-target-cb-list"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- 集計軸① + 集計軸② + 複合コントロール -->
         <div class="card" style="margin-bottom:16px">
           <div class="card-header">
             <span class="card-title">集計軸を選択</span>
           </div>
           <div class="card-body">
-            <div class="step3-axis-section-title">集計軸①</div>
-            <div id="step3-axis-selector" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:4px">
-              <span class="text-sm" style="color:var(--color-text-muted)">集計軸候補がありません。</span>
+            <div class="step3-axis-section-title">分析軸</div>
+            <div id="step3-axis-selector" style="margin-bottom:4px">
+              <div class="step3-axis-search-wrap">
+                <input type="text" id="step3-axis-search" class="step3-axis-search-input" placeholder="集計軸を検索…" autocomplete="off">
+                <select id="step3-axis-select" class="step3-axis-select" size="6">
+                  <option value="" disabled>集計軸候補がありません。</option>
+                </select>
+              </div>
             </div>
             <div id="step3-secondary-axis-wrapper"></div>
             <div id="step3-composite-controls" style="display:none"></div>
             <div id="step3-axis-ncount" style="margin-top:12px; display:none"></div>
-          </div>
-        </div>
-
-        <!-- 集計軸カラー設定カード -->
-        <div class="card" id="step1-axis-color-card" style="display:none; margin-bottom:16px">
-          <div class="card-header">
-            <span class="card-title">集計軸カラー設定</span>
-            <span style="font-size:.8rem; color:var(--color-text-muted); margin-left:8px">集計軸ごとのデフォルトカラーを設定します（個別グラフで上書き可）</span>
-          </div>
-          <div class="card-body" id="step1-axis-color-body" style="padding:12px 16px">
-            <!-- questions.js で動的生成 -->
           </div>
         </div>
 
@@ -475,6 +490,276 @@
 
       </div><!-- /.step3-main -->
     </div><!-- /.step3-layout -->
+  </section>
+
+  <!-- ========== PANEL: レポート生成 ========== -->
+  <section id="panel-report" class="panel">
+    <div class="report-layout-v2">
+
+      <!-- 左: ページ一覧 -->
+      <aside class="report-pagelist">
+        <ol id="report-page-items" class="report-page-items"></ol>
+      </aside>
+
+      <!-- 右: メインエリア -->
+      <div class="report-main-area">
+
+        <!-- 設定モード -->
+        <div id="report-settings-panel" class="report-settings-panel">
+
+          <!-- モード選択 -->
+          <div class="report-section">
+            <div class="report-section-label">レポートモード</div>
+            <div class="report-mode-btns">
+              <button id="report-mode-comparison" class="btn btn-primary btn-sm report-mode-btn">比較レポート</button>
+              <button id="report-mode-single" class="btn btn-secondary btn-sm report-mode-btn">単一対象レポート</button>
+            </div>
+          </div>
+
+          <!-- 分析対象列 -->
+          <div class="report-section">
+            <div class="report-section-label">
+              分析対象列
+              <span class="text-sm text-muted">（ブランド・商品・IP 等）</span>
+            </div>
+            <select id="report-target-column" class="report-select">
+              <option value="">指定なし（全体集計）</option>
+            </select>
+          </div>
+
+          <!-- 分析対象値 -->
+          <div class="report-section" id="report-target-values-section" style="display:none">
+            <div class="report-section-label">
+              <span id="report-target-values-label">分析対象値</span>
+              <span id="report-target-values-hint" class="text-sm text-muted">（複数選択可）</span>
+            </div>
+            <div id="report-target-values-list" class="report-checkbox-list"></div>
+          </div>
+
+          <!-- 分析設問 -->
+          <div class="report-section">
+            <div class="report-section-label" style="display:flex; align-items:center; gap:8px;">
+              分析設問
+              <button id="report-q-select-all" class="btn btn-secondary btn-sm" style="font-size:.7rem; padding:1px 6px;">全選択</button>
+              <button id="report-q-deselect-all" class="btn btn-secondary btn-sm" style="font-size:.7rem; padding:1px 6px;">全解除</button>
+            </div>
+            <input type="text" id="report-q-search" class="report-q-search" placeholder="設問コード・質問文で検索…">
+            <div id="report-question-list" class="report-checkbox-list report-question-list"></div>
+          </div>
+
+          <!-- 分析軸 -->
+          <div class="report-section">
+            <div class="report-section-label">分析軸（複数選択で一括生成）</div>
+            <div class="report-axis-check">
+              <label><input type="checkbox" id="report-axis-total" checked> 全体</label>
+            </div>
+            <div id="report-axis-list" class="report-checkbox-list report-axis-list"></div>
+          </div>
+
+          <!-- 生成ボタン -->
+          <div class="report-section">
+            <button id="report-generate-btn" class="btn btn-primary" style="width:100%">
+              ▶ ページを追加生成
+            </button>
+            <div id="report-generate-error" class="report-error" style="display:none"></div>
+          </div>
+
+        </div>
+
+        <!-- プレビューモード -->
+        <div id="report-preview-panel" class="report-preview-panel" style="display:none">
+          <div class="report-preview-toolbar">
+            <button id="report-edit-page-btn" class="btn btn-secondary btn-sm">✎ 設定を編集</button>
+            <button id="report-duplicate-page-btn" class="btn btn-secondary btn-sm">複製</button>
+            <button id="report-delete-page-btn" class="btn btn-danger btn-sm">削除</button>
+            <button id="report-export-png-btn" class="btn btn-secondary btn-sm">📥 PNG</button>
+            <button id="report-add-page-btn" class="btn report-add-page-btn-primary">＋ ページを追加</button>
+          </div>
+          <div class="report-preview-body">
+            <!-- 16:9 キャンバス -->
+            <div class="report-preview-canvas-wrap">
+              <div id="report-preview-canvas" class="report-preview-canvas"></div>
+            </div>
+            <!-- 右: 編集パネル -->
+            <div id="report-edit-panel" class="report-edit-panel">
+              <div class="report-edit-tabs">
+                <button class="report-edit-tab active" data-tab="title">タイトル</button>
+                <button class="report-edit-tab" data-tab="chart">グラフ</button>
+                <button class="report-edit-tab" data-tab="display">表示</button>
+                <button class="report-edit-tab" data-tab="color">カラー</button>
+              </div>
+
+              <!-- タイトル・設問文タブ -->
+              <div class="report-edit-tabcontent" data-tabcontent="title">
+                <div class="report-edit-field">
+                  <label class="report-edit-label">タイトル</label>
+                  <input id="edit-title-input" type="text" class="report-edit-input" placeholder="自動生成タイトル">
+                  <button id="edit-title-reset-btn" class="btn btn-secondary btn-xs">自動に戻す</button>
+                </div>
+                <div class="report-edit-field">
+                  <label class="report-edit-label">
+                    <span>設問文</span>
+                    <label class="report-edit-toggle-inline">
+                      <input type="checkbox" id="edit-show-question-text" checked>
+                      <span>表示</span>
+                    </label>
+                  </label>
+                  <textarea id="edit-subtitle-input" class="report-edit-textarea" rows="3" placeholder="設問文（自動取得）"></textarea>
+                  <button id="edit-subtitle-reset-btn" class="btn btn-secondary btn-xs">自動に戻す</button>
+                  <div class="report-edit-inline" style="margin-top:4px">
+                    <label class="report-edit-label-sm">フォントサイズ</label>
+                    <input type="number" id="edit-subtitle-font-size" min="7" max="18" step="1" value="8" class="report-edit-number-sm">px
+                  </div>
+                </div>
+              </div>
+
+              <!-- グラフタブ -->
+              <div class="report-edit-tabcontent" data-tabcontent="chart" style="display:none">
+                <div class="report-edit-field">
+                  <label class="report-edit-label">グラフモード</label>
+                  <div id="edit-chart-mode-grid" class="report-chart-mode-grid"></div>
+                </div>
+                <!-- グラフ高さ -->
+                <div class="report-edit-field">
+                  <label class="report-edit-label">グラフ高さ
+                    <span id="edit-chart-height-val" class="report-edit-label-sm">自動</span>
+                  </label>
+                  <input type="range" id="edit-chart-height" min="0" max="450" step="10" value="0" class="report-edit-range">
+                </div>
+                <!-- グラフ幅 -->
+                <div class="report-edit-field">
+                  <label class="report-edit-label">グラフ幅
+                    <span id="edit-chart-width-val" class="report-edit-label-sm">自動</span>
+                  </label>
+                  <input type="range" id="edit-chart-width" min="0" max="800" step="10" value="0" class="report-edit-range">
+                </div>
+                <!-- ラベル表示 -->
+                <div class="report-edit-field">
+                  <label class="report-edit-toggle-row">
+                    <input type="checkbox" id="edit-show-labels">
+                    <span>データラベル表示</span>
+                  </label>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">小数点</label>
+                    <select id="edit-label-decimals" class="report-edit-select-sm">
+                      <option value="0">0桁</option>
+                      <option value="1" selected>1桁</option>
+                      <option value="2">2桁</option>
+                    </select>
+                  </div>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">最小表示%</label>
+                    <input type="number" id="edit-label-min" min="0" max="20" step="1" value="2" class="report-edit-number-sm">
+                  </div>
+                </div>
+                <!-- 凡例 -->
+                <div class="report-edit-field">
+                  <label class="report-edit-toggle-row">
+                    <input type="checkbox" id="edit-show-legend">
+                    <span>凡例表示</span>
+                  </label>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">位置</label>
+                    <select id="edit-legend-position" class="report-edit-select-sm">
+                      <option value="top">上</option>
+                      <option value="bottom" selected>下</option>
+                      <option value="left">左</option>
+                      <option value="right">右</option>
+                    </select>
+                  </div>
+                </div>
+                <!-- 表示密度 -->
+                <div class="report-edit-field report-edit-section-divider">
+                  <label class="report-edit-label">表示密度</label>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">棒の幅</label>
+                    <input type="range" id="edit-bar-pct" min="20" max="100" step="5" value="90" class="report-edit-range-sm">
+                    <span id="edit-bar-pct-val" class="report-edit-label-sm">90%</span>
+                  </div>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">カテゴリ幅</label>
+                    <input type="range" id="edit-cat-pct" min="20" max="100" step="5" value="80" class="report-edit-range-sm">
+                    <span id="edit-cat-pct-val" class="report-edit-label-sm">80%</span>
+                  </div>
+                </div>
+                <!-- フォントサイズ -->
+                <div class="report-edit-field">
+                  <label class="report-edit-label">フォントサイズ</label>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">軸ラベル</label>
+                    <input type="number" id="edit-axis-font-size" min="7" max="18" step="1" value="10" class="report-edit-number-sm">px
+                  </div>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">データラベル</label>
+                    <input type="number" id="edit-label-font-size" min="7" max="18" step="1" value="10" class="report-edit-number-sm">px
+                  </div>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">凡例</label>
+                    <input type="number" id="edit-legend-font-size" min="7" max="18" step="1" value="11" class="report-edit-number-sm">px
+                  </div>
+                </div>
+              </div>
+
+              <!-- 表示タブ -->
+              <div class="report-edit-tabcontent" data-tabcontent="display" style="display:none">
+                <!-- 行列入れ替え -->
+                <div class="report-edit-field">
+                  <label class="report-edit-toggle-row">
+                    <input type="checkbox" id="edit-transpose">
+                    <span>行列入れ替え</span>
+                  </label>
+                </div>
+                <!-- 選択肢フィルタ -->
+                <div class="report-edit-field report-edit-section-divider">
+                  <label class="report-edit-label">選択肢の表示／非表示</label>
+                  <div id="edit-choice-filter-list" class="report-choice-filter-list"></div>
+                </div>
+                <!-- 集計表 -->
+                <div class="report-edit-field report-edit-section-divider">
+                  <label class="report-edit-toggle-row">
+                    <input type="checkbox" id="edit-show-table">
+                    <span>集計表を表示</span>
+                  </label>
+                  <div class="report-edit-inline" style="margin-top:4px">
+                    <label class="report-edit-label-sm">表示内容</label>
+                    <select id="edit-table-content-mode" class="report-edit-select-sm">
+                      <option value="percent">% のみ</option>
+                      <option value="count">N数のみ</option>
+                      <option value="both">% と N数</option>
+                    </select>
+                  </div>
+                  <div class="report-edit-inline" style="margin-top:4px">
+                    <label class="report-edit-toggle-row">
+                      <input type="checkbox" id="edit-show-row-total">
+                      <span>合計列（行合計）</span>
+                    </label>
+                  </div>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-toggle-row">
+                      <input type="checkbox" id="edit-show-col-total">
+                      <span>合計行（列合計）</span>
+                    </label>
+                  </div>
+                  <div class="report-edit-inline" style="margin-top:4px">
+                    <label class="report-edit-label-sm">フォントサイズ</label>
+                    <input type="number" id="edit-table-font-size" min="7" max="16" step="1" value="9" class="report-edit-number-sm">px
+                  </div>
+                </div>
+              </div>
+
+              <!-- カラータブ -->
+              <div class="report-edit-tabcontent" data-tabcontent="color" style="display:none">
+                <div class="report-edit-field">
+                  <button id="edit-sync-colors-btn" class="btn btn-secondary btn-sm" style="width:100%">③のカラー設定を反映</button>
+                </div>
+                <div id="edit-color-list" class="report-color-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
   </section>
 
 </main>
@@ -739,5 +1024,6 @@
 </div>
 
 <script type="module" src="/static/js/app.js?v=12"></script>
+<script type="module" src="/static/js/report.js?v=1"></script>
 </body>
 </html>

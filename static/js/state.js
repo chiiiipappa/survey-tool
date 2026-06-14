@@ -2,18 +2,7 @@
  * アプリケーション状態管理シングルトン。
  * カスタムイベント "survey:statechange" で変更を通知する。
  */
-const _AXIS_TYPE_CODES = new Set(["SA", "S", "NU", "N"]);
 const _AUTO_EXCLUDE_TYPES = new Set(["OA_AUX", "FLAG", "DERIVED"]);
-
-function deriveStep1AxisDefaults(questions) {
-  return (questions ?? [])
-    .filter(q =>
-      _AXIS_TYPE_CODES.has((q.type_code ?? "").toUpperCase()) &&
-      !q.has_children &&
-      /[*＊]ファンラベル/.test(q.question_text ?? "")
-    )
-    .map(q => q.question_code);
-}
 
 function _deriveExcludedDefaults(questions) {
   return (questions ?? [])
@@ -35,8 +24,6 @@ export const AppState = {
   questions: [],
   allTypeCodes: [],
   parseWarnings: [],
-  // STEP1: 集計軸選択
-  step1AxisCodes: [],
   // UI
   activePanel: "upload",
   searchText: "",
@@ -79,6 +66,8 @@ export const AppState = {
   step3CompositeDisplayMode: "split",   // "nested" | "flat" | "split"
   step3ColorPriority: "axis1",          // "axis1" | "axis2" | "auto"
   step3MinSampleSize: 0,
+  step3TargetFilterColumn: "",   // 分析対象列 (question_code or "")
+  step3TargetFilterValues: [],   // 分析対象値 (string[])
   // STEP3 集計ビュー
   step3Views: {},         // { [viewId]: ViewRecord } — viewId = `${axisCode}||${secAxisCode}`
   step3ActiveViewId: "",  // 現在アクティブなビューのID
@@ -89,6 +78,21 @@ export const AppState = {
   hiddenQuestionTypes: ["OA_AUX", "FLAG", "DERIVED"],  // STEP3 で初期非表示にする question_type
   // 分析対象
   excludedQuestionCodes: [],  // 分析対象 OFF（STEP3 集計・分析セット候補から除外）の設問コード
+  // レポート生成（設定フォームの一時状態）
+  reportMode: "comparison",           // "comparison" | "single"
+  reportTargetColumn: "",             // 分析対象列 (question_code)
+  reportTargetValues: [],             // 選択された対象値
+  reportSelectedQuestions: [],        // 分析設問コード
+  reportAxisSpecs: [],                // [{type, column_code}]
+  reportPages: [],                    // 生成済みページデータ（廃止予定・後方互換）
+  reportLoading: false,
+  // レポートプロジェクト（プロジェクト保存に統合）
+  reportProject: {
+    projectId: "",
+    pages: [],           // ReportProjectPage[]
+    activePageId: null,  // 現在プレビュー中のページID
+  },
+  reportMainMode: "settings",  // "settings" | "preview"
 };
 
 function _makeViewId(axisCode, secAxisCode) {
@@ -345,7 +349,6 @@ export function setUploadResult(resp) {
   AppState.questions       = resp.questions ?? [];
   AppState.allTypeCodes    = resp.all_type_codes ?? [];
   AppState.parseWarnings   = resp.parse_warnings ?? [];
-  AppState.step1AxisCodes        = deriveStep1AxisDefaults(AppState.questions);
   AppState.excludedQuestionCodes = _deriveExcludedDefaults(AppState.questions);
   AppState.isDirty               = true;
   _emit();
@@ -363,9 +366,6 @@ export function setLoadedProject(resp) {
   AppState.allTypeCodes    = layout.all_type_codes?.length
     ? layout.all_type_codes
     : [...new Set((layout.questions ?? []).map(q => q.type_code).filter(Boolean))].sort();
-  AppState.step1AxisCodes  = layout.step1_axis_codes?.length
-    ? layout.step1_axis_codes
-    : deriveStep1AxisDefaults(AppState.questions);
   AppState.choiceColumnMode = layout.choice_column_mode ?? "";
 
   if (resp.has_step2 && resp.step2) {
@@ -397,6 +397,8 @@ export function setLoadedProject(resp) {
   AppState.step3CompositeDisplayMode = resp.layout?.step3_composite_display_mode ?? "split";
   AppState.step3ColorPriority        = resp.layout?.step3_color_priority ?? "axis1";
   AppState.step3MinSampleSize        = resp.layout?.step3_min_sample_size ?? 0;
+  AppState.step3TargetFilterColumn   = resp.layout?.step3_target_filter_column ?? "";
+  AppState.step3TargetFilterValues   = resp.layout?.step3_target_filter_values ?? [];
   AppState.questionSets   = (resp.layout?.question_sets ?? []).map(s => {
     const isCustom = s.isCustom === true || (typeof s.setId === "string" && s.setId.startsWith("custom_"));
     if (!isCustom) return { ...s, isCustom: false };
@@ -517,11 +519,6 @@ export function setStep2AttrSelection(cols) {
   _emit();
 }
 
-export function setStep1AxisCodes(codes) {
-  AppState.step1AxisCodes = Array.isArray(codes) ? [...codes] : [];
-  AppState.isDirty = true;
-  _emit();
-}
 
 export function setExcludedQuestionCodes(codes) {
   AppState.excludedQuestionCodes = Array.isArray(codes) ? [...codes] : [];
@@ -560,7 +557,6 @@ export function resetState() {
   AppState.step2MultiSelectColumns = [];
   AppState.step2AttrCandidates = [];
   AppState.step2SelectedAttrColumns = [];
-  AppState.step1AxisCodes = [];
   AppState.step2SelectedFaCodes = [];
   AppState.projectName     = "";
   AppState.projectSavedAt  = null;
@@ -576,5 +572,194 @@ export function resetState() {
   AppState.step3ActiveSetId      = "";
   AppState.hiddenQuestionTypes   = ["OA_AUX", "FLAG", "DERIVED"];
   AppState.excludedQuestionCodes = [];
+  AppState.step3TargetFilterColumn = "";
+  AppState.step3TargetFilterValues = [];
+  AppState.reportMode              = "comparison";
+  AppState.reportTargetColumn      = "";
+  AppState.reportTargetValues      = [];
+  AppState.reportSelectedQuestions = [];
+  AppState.reportAxisSpecs         = [];
+  AppState.reportPages             = [];
+  AppState.reportLoading           = false;
+  AppState.reportProject           = { projectId: "", pages: [], activePageId: null };
+  AppState.reportMainMode          = "settings";
+  _emit();
+}
+
+export function setStep3TargetFilterColumn(code) {
+  AppState.step3TargetFilterColumn = code ?? "";
+  AppState.step3TargetFilterValues = [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3TargetFilterValues(values) {
+  AppState.step3TargetFilterValues = Array.isArray(values) ? [...values] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+/** 指定 question_code の選択肢テキスト一覧を返す（STEP3 / STEP4 共通）。 */
+export function getTargetValues(code) {
+  if (!code) return [];
+  const q = (AppState.questions ?? []).find(q => q.question_code === code);
+  return (q?.choices ?? []).map(c => c.choice_text).filter(Boolean);
+}
+
+export function setReportMode(mode) {
+  AppState.reportMode = mode ?? "comparison";
+  _emit();
+}
+
+export function setReportTargetColumn(code) {
+  AppState.reportTargetColumn = code ?? "";
+  AppState.reportTargetValues = [];
+  _emit();
+}
+
+export function setReportTargetValues(values) {
+  AppState.reportTargetValues = Array.isArray(values) ? [...values] : [];
+  _emit();
+}
+
+export function setReportSelectedQuestions(codes) {
+  AppState.reportSelectedQuestions = Array.isArray(codes) ? [...codes] : [];
+  _emit();
+}
+
+export function setReportAxisSpecs(specs) {
+  AppState.reportAxisSpecs = Array.isArray(specs) ? [...specs] : [];
+  _emit();
+}
+
+export function setReportPages(pages) {
+  AppState.reportPages = Array.isArray(pages) ? [...pages] : [];
+  _emit();
+}
+
+export function setReportLoading(loading) {
+  AppState.reportLoading = !!loading;
+  _emit();
+}
+
+function _uuid() {
+  return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+export function setReportProject(project) {
+  AppState.reportProject = project ?? { projectId: "", pages: [], activePageId: null };
+  _emit();
+}
+
+export function setReportProjectFromLoad(data) {
+  if (!data) return;
+  AppState.reportProject = {
+    projectId: data.projectId ?? AppState.reportProject.projectId,
+    pages: data.pages ?? [],
+    activePageId: data.activePageId ?? null,
+  };
+  if (data.reportMode) AppState.reportMode = data.reportMode;
+  if (data.reportTargetColumn != null) AppState.reportTargetColumn = data.reportTargetColumn;
+  if (Array.isArray(data.reportTargetValues)) AppState.reportTargetValues = data.reportTargetValues;
+  if (Array.isArray(data.reportSelectedQuestions)) AppState.reportSelectedQuestions = data.reportSelectedQuestions;
+  if (Array.isArray(data.reportAxisSpecs)) AppState.reportAxisSpecs = data.reportAxisSpecs;
+  if (data.activePageId) AppState.reportMainMode = "preview";
+  _emit();
+}
+
+export function addReportProjectPages(apiPages) {
+  // STEP3 のアクティブビューから色設定を取得（ページ生成時にコピー）
+  const _s3View = AppState.step3Views[AppState.step3ActiveViewId];
+  const _s3QS = (qCode) =>
+    _s3View?.questionSettings?.[qCode] ?? AppState.step3QuestionSettings?.[qCode] ?? {};
+
+  const newPages = (apiPages ?? []).map(p => {
+    const s3 = _s3QS(p.question_code);
+    return {
+      pageId: p.page_id || _uuid(),
+      title: p.title,
+      mode: p.mode,
+      targetColumn: AppState.reportTargetColumn,
+      targetValues: [...AppState.reportTargetValues],
+      questionCode: p.question_code,
+      axisSpec: p.axis_code ? { type: "column", column_code: p.axis_code } : { type: "total", column_code: "" },
+      chartSettings: {
+        titleOverride: null,
+        questionTextOverride: null,
+        showQuestionText: true,
+        chartMode: "auto",
+        showLabels: true,
+        labelDecimalPlaces: 1,
+        showLegend: true,
+        legendPosition: "bottom",
+        showTable: false,
+        chartHeightPx: null,
+        barThickness: null,
+        categoryPercentage: 0.8,
+        barPercentage: 0.9,
+        axisFontSize: 10,
+        labelFontSize: 10,
+        legendFontSize: 11,
+        labelMinPercent: 2,
+        labelAnchor: "center",
+        labelAlign: "center",
+        colorSettings: {
+          selectedPalette: s3.selectedPalette ?? null,
+          valueColorMapping: s3.valueColorMapping ?? null,
+          overriddenSeriesColors: {},
+        },
+      },
+      generatedData: p,
+    };
+  });
+  const allPages = [...AppState.reportProject.pages, ...newPages];
+  const lastId = newPages.length > 0 ? newPages[newPages.length - 1].pageId : AppState.reportProject.activePageId;
+  AppState.reportProject = { ...AppState.reportProject, pages: allPages, activePageId: lastId };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function updateReportProjectPage(pageId, patch) {
+  AppState.reportProject = {
+    ...AppState.reportProject,
+    pages: AppState.reportProject.pages.map(p => p.pageId === pageId ? { ...p, ...patch } : p),
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function removeReportProjectPage(pageId) {
+  const pages = AppState.reportProject.pages.filter(p => p.pageId !== pageId);
+  let activePageId = AppState.reportProject.activePageId;
+  if (activePageId === pageId) {
+    activePageId = pages.length > 0 ? pages[pages.length - 1].pageId : null;
+  }
+  AppState.reportProject = { ...AppState.reportProject, pages, activePageId };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function duplicateReportProjectPage(pageId) {
+  const src = AppState.reportProject.pages.find(p => p.pageId === pageId);
+  if (!src) return;
+  const clone = { ...src, pageId: _uuid() };
+  const idx = AppState.reportProject.pages.findIndex(p => p.pageId === pageId);
+  const pages = [
+    ...AppState.reportProject.pages.slice(0, idx + 1),
+    clone,
+    ...AppState.reportProject.pages.slice(idx + 1),
+  ];
+  AppState.reportProject = { ...AppState.reportProject, pages, activePageId: clone.pageId };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setActiveReportPageId(pageId) {
+  AppState.reportProject = { ...AppState.reportProject, activePageId: pageId };
+  _emit();
+}
+
+export function setReportMainMode(mode) {
+  AppState.reportMainMode = mode ?? "settings";
   _emit();
 }

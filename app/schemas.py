@@ -263,11 +263,6 @@ class Step2FaSettingsRequest(BaseModel):
     selected_attr_columns: List[str] = Field(default_factory=list)
 
 
-class Step1AxisSettingsRequest(BaseModel):
-    session_token: str
-    step1_axis_codes: List[str] = Field(default_factory=list)
-    step3_active_axis_code: str = ""
-
 
 class ProjectSaveRequest(BaseModel):
     session_token: str
@@ -280,18 +275,20 @@ class ProjectSaveRequest(BaseModel):
     step3_composite_display_mode: str = "split"
     step3_color_priority: str = "axis1"
     step3_min_sample_size: int = 0
+    step3_target_filter_column: str = ""
+    step3_target_filter_values: List[str] = Field(default_factory=list)
     question_sets: List[dict] = Field(default_factory=list)
     step3_crosstab_cache: dict = Field(default_factory=dict)
     hidden_question_types: List[str] = Field(default_factory=list)
     excluded_questions: List[str] = Field(default_factory=list)
     step3_views: dict = Field(default_factory=dict)
+    report_project: dict = Field(default_factory=dict)
 
 
 class LayoutSaveData(BaseModel):
     layout_file: LayoutFileInfo
     questions: List[QuestionItem] = Field(default_factory=list)
     parse_warnings: List[str] = Field(default_factory=list)
-    step1_axis_codes: List[str] = Field(default_factory=list)
     choice_column_mode: str = "none"
     all_type_codes: List[str] = Field(default_factory=list)
     step3_active_axis_code: str = ""
@@ -307,7 +304,10 @@ class LayoutSaveData(BaseModel):
     step3_crosstab_cache: dict = Field(default_factory=dict)
     hidden_question_types: List[str] = Field(default_factory=list)
     excluded_questions: List[str] = Field(default_factory=list)
+    step3_target_filter_column: str = ""
+    step3_target_filter_values: List[str] = Field(default_factory=list)
     step3_views: dict = Field(default_factory=dict)
+    report_project: dict = Field(default_factory=dict)
 
 
 class Step2SaveData(BaseModel):
@@ -361,6 +361,7 @@ class FullProjectLoadResponse(BaseModel):
     step3_crosstab_configs: List[CrosstabConfig] = Field(default_factory=list)
     step3_active_axis_code: str = ""
     load_warnings: List[str] = Field(default_factory=list)
+    report_project: dict = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +373,8 @@ class Step3CrosstabRequest(BaseModel):
     axis_question_code: str
     secondary_axis_question_code: str = ""
     target_question_codes: List[str] = Field(default_factory=list)
+    target_filter_column: str = ""
+    target_filter_values: List[str] = Field(default_factory=list)
 
 
 class CrosstabRow(BaseModel):
@@ -429,3 +432,56 @@ class Step3ExportRequest(BaseModel):
     axis_categories: List[str]
     axis_totals: List[int]
     questions: List[ExportQuestion]
+
+
+# ---------------------------------------------------------------------------
+# レポート生成
+# ---------------------------------------------------------------------------
+
+class ReportAxisSpec(BaseModel):
+    type: Literal["total", "column"]
+    column_code: str = ""   # type=column のとき使用
+
+
+class ReportGenerateRequest(BaseModel):
+    session_token: str
+    mode: Literal["comparison", "single"]
+    target_column: str = ""       # 分析対象列（空=フィルタなし）
+    target_values: List[str] = Field(default_factory=list)  # 分析対象値
+    question_codes: List[str]     # 分析設問コード
+    axis_specs: List[ReportAxisSpec]  # 分析軸設定
+
+
+class ReportRow(BaseModel):
+    label: str
+    percents: List[float]
+    counts: List[int]
+
+
+class ReportComparisonDataset(BaseModel):
+    target_value: str
+    axis_categories: List[str]
+    axis_totals: List[int]
+    rows: List[ReportRow]
+
+
+class ReportPageData(BaseModel):
+    page_id: str
+    mode: str
+    title: str
+    question_code: str
+    question_text: str
+    type_code: str
+    axis_code: str       # "" for total
+    axis_label: str      # "全体" / 軸の質問文
+    # 比較+全体 / 単一+軸: 通常クロス集計形式
+    axis_categories: List[str]
+    axis_totals: List[int]
+    rows: List[ReportRow]
+    # 比較+軸: 対象ごとのサブデータ（スモールマルチプル用）
+    comparison_datasets: List[ReportComparisonDataset] = Field(default_factory=list)
+
+
+class ReportGenerateResponse(BaseModel):
+    pages: List[ReportPageData]
+    warnings: List[str] = Field(default_factory=list)

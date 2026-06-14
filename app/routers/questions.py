@@ -25,7 +25,6 @@ from app.schemas import (
     QuestionsJsonResponse,
     QuestionsResponse,
     QuestionItem,
-    Step1AxisSettingsRequest,
     Step2SaveData,
 )
 
@@ -100,16 +99,6 @@ async def get_questions_json(
     return QuestionsJsonResponse(session_token=session_token, questions=questions)
 
 
-@router.post("/step1/axis/settings", summary="STEP1 集計軸設定を保存")
-async def save_step1_axis_settings(body: Step1AxisSettingsRequest) -> dict:
-    """選択中の集計軸コードとSTEP3の選択軸をセッションメタキャッシュに保存する。"""
-    questions = _require_session(body.session_token)
-    meta = survey_cache.get_meta(body.session_token)
-    meta["step1_axis_codes"] = body.step1_axis_codes
-    meta["step3_active_axis_code"] = body.step3_active_axis_code
-    survey_cache.set(body.session_token, questions, meta)
-    return {"status": "ok"}
-
 
 @router.post("/project/save", summary="プロジェクト ZIP (.surv) ダウンロード")
 async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
@@ -135,7 +124,6 @@ async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
         ),
         questions=questions,
         parse_warnings=meta.get("parse_warnings", []),
-        step1_axis_codes=meta.get("step1_axis_codes", []),
         choice_column_mode=meta.get("choice_column_mode", "none"),
         all_type_codes=meta.get("all_type_codes", []),
         step3_active_axis_code=meta.get("step3_active_axis_code", ""),
@@ -147,11 +135,14 @@ async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
         step3_composite_display_mode=req.step3_composite_display_mode,
         step3_color_priority=req.step3_color_priority,
         step3_min_sample_size=req.step3_min_sample_size,
+        step3_target_filter_column=req.step3_target_filter_column,
+        step3_target_filter_values=req.step3_target_filter_values,
         question_sets=req.question_sets,
         step3_crosstab_cache=req.step3_crosstab_cache,
         hidden_question_types=req.hidden_question_types,
         excluded_questions=req.excluded_questions,
         step3_views=req.step3_views,
+        report_project=req.report_project,
     )
 
     buf = io.BytesIO()
@@ -252,7 +243,6 @@ def _load_surv(raw: bytes, load_warnings: list[str]) -> FullProjectLoadResponse:
         "parse_warnings": layout.parse_warnings,
         "unknown_types": [],
         "all_type_codes": layout.all_type_codes,
-        "step1_axis_codes": layout.step1_axis_codes,
     }
     survey_cache.set(token, layout.questions, meta)
 
@@ -273,6 +263,7 @@ def _load_surv(raw: bytes, load_warnings: list[str]) -> FullProjectLoadResponse:
         step2=step2,
         step3_active_axis_code=layout.step3_active_axis_code,
         load_warnings=load_warnings,
+        report_project=layout.report_project,
     )
 
 
@@ -306,7 +297,6 @@ def _load_legacy_json(raw: bytes, load_warnings: list[str]) -> FullProjectLoadRe
         "parse_warnings": project.parse_warnings,
         "unknown_types": [],
         "all_type_codes": all_type_codes,
-        "step1_axis_codes": [],
     }
     survey_cache.set(token, project.questions, meta)
 
@@ -314,7 +304,6 @@ def _load_legacy_json(raw: bytes, load_warnings: list[str]) -> FullProjectLoadRe
         layout_file=project.layout_file,
         questions=project.questions,
         parse_warnings=project.parse_warnings,
-        step1_axis_codes=[],
         choice_column_mode="none",
         all_type_codes=all_type_codes,
     )

@@ -114,7 +114,7 @@ export function showError(msg) {
 // ステップナビゲーション
 // ---------------------------------------------------------------------------
 
-const PANELS = ["upload", "questions", "step2", "step3"];
+const PANELS = ["upload", "questions", "step2", "step3", "report"];
 
 export function activatePanel(name) {
   PANELS.forEach((p) => {
@@ -125,6 +125,7 @@ export function activatePanel(name) {
   document.getElementById("btn-step-step1")?.classList.toggle("active", step1Active);
   document.getElementById("btn-step-step2")?.classList.toggle("active", name === "step2");
   document.getElementById("btn-step-step3")?.classList.toggle("active", name === "step3");
+  document.getElementById("btn-step-report")?.classList.toggle("active", name === "report");
 
   setActivePanel(name);
   if (name === "questions") refreshQuestions();
@@ -166,6 +167,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-step-step3")?.addEventListener("click", () => {
     if (AppState.sessionToken) activatePanel("step3");
   });
+  document.getElementById("btn-step-report")?.addEventListener("click", () => {
+    if (AppState.step2Filename) activatePanel("report");
+  });
 
   // パネル内ナビゲーションボタン
   document.getElementById("btn-to-questions")?.addEventListener("click", () => {
@@ -183,6 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const hasSession = !!AppState.sessionToken;
     document.getElementById("btn-step-step2").disabled = !hasSession;
     document.getElementById("btn-step-step3").disabled = !hasSession;
+    document.getElementById("btn-step-report").disabled = !AppState.step2Filename;
     document.getElementById("btn-to-step2").disabled = !hasSession;
     document.getElementById("btn-to-questions").disabled = !hasSession;
   });
