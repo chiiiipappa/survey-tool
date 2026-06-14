@@ -3,7 +3,7 @@
  */
 import { uploadFile, loadProject } from "./api.js";
 import { setUploadResult, setLoadedProject } from "./state.js";
-import { showToast, showError, showSpinner, hideSpinner } from "./app.js";
+import { showToast, showError, showSpinner, hideSpinner, activatePanel } from "./app.js";
 
 const CHOICE_MODE_LABEL = {
   multi_col:            "複数列（選択肢1, 選択肢2…）",
@@ -63,6 +63,7 @@ export async function handleCsvFile(file) {
     renderWarnings(resp.parse_warnings ?? []);
     document.getElementById("btn-to-questions").disabled = false;
     showToast(`${resp.row_count} 設問を読み込みました。`);
+    activatePanel("questions");
   } catch (err) {
     showError(err.message);
   } finally {

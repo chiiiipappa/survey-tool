@@ -507,53 +507,17 @@
         <!-- 設定モード -->
         <div id="report-settings-panel" class="report-settings-panel">
 
-          <!-- モード選択 -->
-          <div class="report-section">
-            <div class="report-section-label">レポートモード</div>
-            <div class="report-mode-btns">
-              <button id="report-mode-comparison" class="btn btn-primary btn-sm report-mode-btn">比較レポート</button>
-              <button id="report-mode-single" class="btn btn-secondary btn-sm report-mode-btn">単一対象レポート</button>
-            </div>
-          </div>
-
-          <!-- 分析対象列 -->
+          <!-- 集計結果選択 -->
           <div class="report-section">
             <div class="report-section-label">
-              分析対象列
-              <span class="text-sm text-muted">（ブランド・商品・IP 等）</span>
+              集計結果を選択
+              <span class="text-sm text-muted">（STEP3で集計済みの設問）</span>
             </div>
-            <select id="report-target-column" class="report-select">
-              <option value="">指定なし（全体集計）</option>
-            </select>
-          </div>
-
-          <!-- 分析対象値 -->
-          <div class="report-section" id="report-target-values-section" style="display:none">
-            <div class="report-section-label">
-              <span id="report-target-values-label">分析対象値</span>
-              <span id="report-target-values-hint" class="text-sm text-muted">（複数選択可）</span>
+            <div id="report-chart-result-list" class="report-checkbox-list"></div>
+            <div id="report-chart-result-empty"
+                 style="font-size:.8rem;color:var(--color-text-muted);display:none">
+              STEP3で集計を実行すると、ここに一覧が表示されます
             </div>
-            <div id="report-target-values-list" class="report-checkbox-list"></div>
-          </div>
-
-          <!-- 分析設問 -->
-          <div class="report-section">
-            <div class="report-section-label" style="display:flex; align-items:center; gap:8px;">
-              分析設問
-              <button id="report-q-select-all" class="btn btn-secondary btn-sm" style="font-size:.7rem; padding:1px 6px;">全選択</button>
-              <button id="report-q-deselect-all" class="btn btn-secondary btn-sm" style="font-size:.7rem; padding:1px 6px;">全解除</button>
-            </div>
-            <input type="text" id="report-q-search" class="report-q-search" placeholder="設問コード・質問文で検索…">
-            <div id="report-question-list" class="report-checkbox-list report-question-list"></div>
-          </div>
-
-          <!-- 分析軸 -->
-          <div class="report-section">
-            <div class="report-section-label">分析軸（複数選択で一括生成）</div>
-            <div class="report-axis-check">
-              <label><input type="checkbox" id="report-axis-total" checked> 全体</label>
-            </div>
-            <div id="report-axis-list" class="report-checkbox-list report-axis-list"></div>
           </div>
 
           <!-- 生成ボタン -->

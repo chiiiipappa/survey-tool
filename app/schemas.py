@@ -283,6 +283,7 @@ class ProjectSaveRequest(BaseModel):
     excluded_questions: List[str] = Field(default_factory=list)
     step3_views: dict = Field(default_factory=dict)
     report_project: dict = Field(default_factory=dict)
+    chart_results: List[dict] = Field(default_factory=list)
 
 
 class LayoutSaveData(BaseModel):
@@ -308,6 +309,7 @@ class LayoutSaveData(BaseModel):
     step3_target_filter_values: List[str] = Field(default_factory=list)
     step3_views: dict = Field(default_factory=dict)
     report_project: dict = Field(default_factory=dict)
+    chart_results: List[dict] = Field(default_factory=list)
 
 
 class Step2SaveData(BaseModel):

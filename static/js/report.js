@@ -3,13 +3,10 @@
  */
 import {
   AppState,
-  setReportMode, setReportTargetColumn, setReportTargetValues,
-  setReportSelectedQuestions, setReportAxisSpecs, setReportLoading,
-  setReportProject, addReportProjectPages,
+  setReportProject, addReportProjectPages, addChartResultsAsReportPages,
   updateReportProjectPage, duplicateReportProjectPage, removeReportProjectPage,
-  setActiveReportPageId, setReportMainMode, getTargetValues,
+  setActiveReportPageId, setReportMainMode,
 } from "./state.js";
-import { generateReport } from "./api.js";
 import { showToast } from "./app.js";
 
 // Chart.js インスタンス管理
@@ -98,36 +95,7 @@ export function initReport() {
 }
 
 function _bindEvents() {
-  document.getElementById("report-mode-comparison")?.addEventListener("click", () => {
-    setReportMode("comparison");
-    _renderModeButtons();
-    _syncTargetValuesHint();
-  });
-  document.getElementById("report-mode-single")?.addEventListener("click", () => {
-    setReportMode("single");
-    _renderModeButtons();
-    _syncTargetValuesHint();
-  });
-
-  document.getElementById("report-target-column")?.addEventListener("change", (e) => {
-    setReportTargetColumn(e.target.value);
-    _renderTargetValues();
-    _syncTargetValuesHint();
-  });
-
   document.getElementById("report-generate-btn")?.addEventListener("click", _onGenerate);
-
-  document.getElementById("report-q-search")?.addEventListener("input", _renderQuestionList);
-  document.getElementById("report-q-select-all")?.addEventListener("click", () => {
-    document.querySelectorAll("#report-question-list input[type='checkbox']").forEach(cb => { cb.checked = true; });
-    _syncSelectedQuestions();
-  });
-  document.getElementById("report-q-deselect-all")?.addEventListener("click", () => {
-    document.querySelectorAll("#report-question-list input[type='checkbox']").forEach(cb => { cb.checked = false; });
-    _syncSelectedQuestions();
-  });
-
-  document.getElementById("report-axis-total")?.addEventListener("change", _syncAxisSpecs);
 
   document.getElementById("report-add-page-btn")?.addEventListener("click", () => {
     setReportMainMode("settings");
@@ -290,12 +258,7 @@ function _bindEditPanelEvents() {
 function _onStateChange() {
   if (AppState.activePanel !== "report") return;
 
-  _renderModeButtons();
-  _renderTargetColumnOptions();
-  _renderTargetValues();
-  _syncTargetValuesHint();
-  _renderQuestionList();
-  _renderAxisList();
+  _renderChartResultList();
   _renderPageList();
 
   const activePageId = AppState.reportProject.activePageId;
@@ -307,7 +270,7 @@ function _onStateChange() {
     _lastPreviewPageId = activePageId;
     _lastPreviewMode = AppState.reportMainMode;
     const activePage = AppState.reportProject.pages.find(p => p.pageId === activePageId);
-    if (activePage?.generatedData) {
+    if (activePage && _getPageDisplayData(activePage)) {
       _renderPreview(activePage);
     }
   }
@@ -326,146 +289,23 @@ function _onStateChange() {
 // 設定フォーム描画
 // ---------------------------------------------------------------------------
 
-function _renderModeButtons() {
-  const isCmp = AppState.reportMode === "comparison";
-  document.getElementById("report-mode-comparison")?.classList.toggle("btn-primary", isCmp);
-  document.getElementById("report-mode-comparison")?.classList.toggle("btn-secondary", !isCmp);
-  document.getElementById("report-mode-single")?.classList.toggle("btn-primary", !isCmp);
-  document.getElementById("report-mode-single")?.classList.toggle("btn-secondary", isCmp);
-}
-
-function _renderTargetColumnOptions() {
-  const sel = document.getElementById("report-target-column");
-  if (!sel) return;
-  const current = AppState.reportTargetColumn;
-  const SA_TYPES = new Set(["SA", "S", "NU", "N"]);
-  const MA_TYPES = new Set(["MA", "M", "ML"]);
-  const candidates = (AppState.questions ?? []).filter(q => {
-    const tc = (q.type_code ?? "").toUpperCase();
-    if (!SA_TYPES.has(tc) && !MA_TYPES.has(tc)) return false;
-    if (q.has_children) return false;
-    if (MA_TYPES.has(tc) && !q.choices?.length) return false;
-    return true;
-  });
-  sel.innerHTML = `<option value="">指定なし（全体集計）</option>` +
-    candidates.map(q => {
-      const tc = (q.type_code ?? "").toUpperCase();
-      const isMA = MA_TYPES.has(tc);
-      const badge = isMA ? "【複数回答】" : "";
-      const label = `${q.question_code} — ${q.stub || q.question_text}${badge ? " " + badge : ""}`;
-      return `<option value="${_esc(q.question_code)}" ${q.question_code === current ? "selected" : ""}>${_esc(label)}</option>`;
-    }).join("");
-}
-
-function _renderTargetValues() {
-  const section = document.getElementById("report-target-values-section");
-  const list = document.getElementById("report-target-values-list");
-  if (!section || !list) return;
-  const col = AppState.reportTargetColumn;
-  if (!col) { section.style.display = "none"; return; }
-  const choices = getTargetValues(col);
-  if (choices.length === 0) { section.style.display = "none"; return; }
-  section.style.display = "";
-  const selected = new Set(AppState.reportTargetValues);
-  list.innerHTML = choices.map(v =>
+function _renderChartResultList() {
+  const list  = document.getElementById("report-chart-result-list");
+  const empty = document.getElementById("report-chart-result-empty");
+  if (!list) return;
+  const results = AppState.chartResults ?? [];
+  if (results.length === 0) {
+    list.innerHTML = "";
+    if (empty) empty.style.display = "";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+  list.innerHTML = results.map(cr =>
     `<label>
-      <input type="checkbox" name="report-target-val" value="${_esc(v)}"
-             ${selected.has(v) ? "checked" : ""}>
-      <span>${_esc(v)}</span>
+      <input type="checkbox" name="report-chart-result" value="${_esc(cr.id)}">
+      <span title="${_esc(cr.title)}">${_esc(cr.title)}</span>
     </label>`
   ).join("");
-  list.querySelectorAll("input[type='checkbox']").forEach(cb => {
-    cb.addEventListener("change", _syncTargetValues);
-  });
-}
-
-function _syncTargetValues() {
-  const vals = [...document.querySelectorAll("#report-target-values-list input:checked")]
-    .map(cb => cb.value);
-  setReportTargetValues(vals);
-}
-
-function _syncTargetValuesHint() {
-  const hint = document.getElementById("report-target-values-hint");
-  if (!hint) return;
-  const col = AppState.reportTargetColumn;
-  const q = (AppState.questions ?? []).find(q => q.question_code === col);
-  const isMA = new Set(["MA", "M", "ML"]).has((q?.type_code ?? "").toUpperCase());
-  if (AppState.reportMode === "comparison") {
-    hint.textContent = isMA
-      ? "（複数選択可 — 選択肢ごとに1ページ生成）"
-      : "（複数選択可）";
-  } else {
-    hint.textContent = isMA
-      ? "（1つ選択 — 選択者に絞り込み）"
-      : "（1つ選択）";
-  }
-}
-
-function _renderQuestionList() {
-  const list = document.getElementById("report-question-list");
-  if (!list) return;
-  const SKIP = new Set(["FA", "OA", "OE", "FT", "FN", "XL", "F"]);
-  const questions = (AppState.questions ?? []).filter(q =>
-    !SKIP.has((q.type_code ?? "").toUpperCase())
-  );
-  const selected = new Set(AppState.reportSelectedQuestions);
-  const searchVal = (document.getElementById("report-q-search")?.value ?? "").toLowerCase();
-  list.innerHTML = questions
-    .filter(q => {
-      if (!searchVal) return true;
-      return q.question_code.toLowerCase().includes(searchVal) ||
-             (q.question_text ?? "").toLowerCase().includes(searchVal);
-    })
-    .map(q =>
-      `<label>
-        <input type="checkbox" name="report-q" value="${_esc(q.question_code)}"
-               ${selected.has(q.question_code) ? "checked" : ""}>
-        <span title="${_esc(q.question_text)}">[${_esc(q.question_code)}] ${_esc(q.stub || q.question_text)}</span>
-      </label>`
-    ).join("");
-  list.querySelectorAll("input[type='checkbox']").forEach(cb => {
-    cb.addEventListener("change", _syncSelectedQuestions);
-  });
-}
-
-function _syncSelectedQuestions() {
-  const codes = [...document.querySelectorAll("#report-question-list input:checked")]
-    .map(cb => cb.value);
-  setReportSelectedQuestions(codes);
-}
-
-function _renderAxisList() {
-  const list = document.getElementById("report-axis-list");
-  if (!list) return;
-  const AXIS_TYPES = new Set(["SA", "S", "NU", "N"]);
-  const axes = (AppState.questions ?? []).filter(q =>
-    AXIS_TYPES.has((q.type_code ?? "").toUpperCase()) && !q.has_children
-  );
-  const columnCodes = new Set(
-    (AppState.reportAxisSpecs ?? []).filter(s => s.type === "column").map(s => s.column_code)
-  );
-  list.innerHTML = axes.map(q =>
-    `<label>
-      <input type="checkbox" name="report-axis" value="${_esc(q.question_code)}"
-             ${columnCodes.has(q.question_code) ? "checked" : ""}>
-      <span>${_esc(q.question_code)} — ${_esc(q.stub || q.question_text)}</span>
-    </label>`
-  ).join("");
-  list.querySelectorAll("input[type='checkbox']").forEach(cb => {
-    cb.addEventListener("change", _syncAxisSpecs);
-  });
-}
-
-function _syncAxisSpecs() {
-  const specs = [];
-  if (document.getElementById("report-axis-total")?.checked) {
-    specs.push({ type: "total", column_code: "" });
-  }
-  document.querySelectorAll("#report-axis-list input:checked").forEach(cb => {
-    specs.push({ type: "column", column_code: cb.value });
-  });
-  setReportAxisSpecs(specs);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +341,17 @@ function _displayTitle(page) {
 }
 
 // ---------------------------------------------------------------------------
+// 後方互換: generatedData（旧形式）と chartResultId（新形式）を統一取得
+// ---------------------------------------------------------------------------
+
+function _getPageDisplayData(page) {
+  if (page.chartResultId) {
+    return (AppState.chartResults ?? []).find(r => r.id === page.chartResultId) ?? null;
+  }
+  return page.generatedData ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // プレビュー描画
 // ---------------------------------------------------------------------------
 
@@ -511,11 +362,17 @@ function _renderPreview(page) {
   _charts.forEach(c => c.destroy());
   _charts.clear();
 
+  const displayData = _getPageDisplayData(page);
+  if (!displayData) {
+    canvas.innerHTML = `<div style="padding:20px;color:var(--color-text-muted)">集計データが見つかりません</div>`;
+    return;
+  }
+
   canvas.innerHTML = "";
   const cs = { ..._defaultChartSettings(), ...(page.chartSettings ?? {}) };
-  const el = _buildPageElement(page.generatedData, "preview", cs);
+  const el = _buildPageElement(displayData, "preview", cs);
   canvas.appendChild(el);
-  _renderPageChart(page.generatedData, "preview", cs);
+  _renderPageChart(displayData, "preview", cs);
 }
 
 // ---------------------------------------------------------------------------
@@ -525,18 +382,20 @@ function _renderPreview(page) {
 function _renderEditPanel(page) {
   const cs = { ..._defaultChartSettings(), ...(page.chartSettings ?? {}) };
 
+  const displayData = _getPageDisplayData(page);
+
   // タイトル
   const titleInput = document.getElementById("edit-title-input");
   if (titleInput && titleInput !== document.activeElement) {
     titleInput.value = cs.titleOverride ?? "";
-    titleInput.placeholder = page.generatedData?.title ?? "自動生成タイトル";
+    titleInput.placeholder = displayData?.title ?? "自動生成タイトル";
   }
 
   // 設問文
   const subtitleInput = document.getElementById("edit-subtitle-input");
   if (subtitleInput && subtitleInput !== document.activeElement) {
     subtitleInput.value = cs.questionTextOverride ?? "";
-    subtitleInput.placeholder = page.generatedData?.question_text ?? "設問文（自動取得）";
+    subtitleInput.placeholder = displayData?.question_text ?? "設問文（自動取得）";
   }
   const showQtEl = document.getElementById("edit-show-question-text");
   if (showQtEl) showQtEl.checked = cs.showQuestionText;
@@ -684,7 +543,7 @@ function _renderChoiceFilterList(page, cs) {
   const listEl = document.getElementById("edit-choice-filter-list");
   if (!listEl) return;
 
-  const data = page.generatedData;
+  const data = _getPageDisplayData(page);
   if (!data) { listEl.innerHTML = ""; return; }
 
   // 選択肢ラベルを取得（comparison_datasets の場合は最初のデータセットのrows）
@@ -718,7 +577,7 @@ function _renderChoiceFilterList(page, cs) {
 }
 
 function _getPageColorLabels(page) {
-  const data = page.generatedData;
+  const data = _getPageDisplayData(page);
   if (!data) return [];
   if (data.comparison_datasets?.length) {
     // ブランドモードでは axis_categories を使う
@@ -759,62 +618,25 @@ function _syncColorsFromStep3(pageId) {
 // レポート生成
 // ---------------------------------------------------------------------------
 
-async function _onGenerate() {
+function _onGenerate() {
   const errEl = document.getElementById("report-generate-error");
   if (errEl) errEl.style.display = "none";
 
-  const questionCodes = [...document.querySelectorAll("#report-question-list input:checked")]
+  const selectedIds = [...document.querySelectorAll("#report-chart-result-list input:checked")]
     .map(cb => cb.value);
-  if (questionCodes.length === 0) {
-    _showError("分析設問を1つ以上選択してください。");
+  if (selectedIds.length === 0) {
+    _showError("集計結果を1つ以上選択してください。");
     return;
   }
-
-  const axisSpecs = [];
-  if (document.getElementById("report-axis-total")?.checked) {
-    axisSpecs.push({ type: "total", column_code: "" });
-  }
-  document.querySelectorAll("#report-axis-list input:checked").forEach(cb => {
-    axisSpecs.push({ type: "column", column_code: cb.value });
-  });
-  if (axisSpecs.length === 0) {
-    _showError("分析軸を1つ以上選択してください。");
+  const selectedResults = selectedIds
+    .map(id => (AppState.chartResults ?? []).find(r => r.id === id))
+    .filter(Boolean);
+  if (selectedResults.length === 0) {
+    _showError("選択した集計結果が見つかりません。STEP3で集計を再実行してください。");
     return;
   }
-
-  const targetColumn = document.getElementById("report-target-column")?.value ?? "";
-  const targetValues = [...document.querySelectorAll("#report-target-values-list input:checked")]
-    .map(cb => cb.value);
-
-  setReportLoading(true);
-  document.getElementById("report-generate-btn").disabled = true;
-
-  try {
-    const resp = await generateReport(
-      AppState.sessionToken,
-      AppState.reportMode,
-      targetColumn,
-      targetValues,
-      questionCodes,
-      axisSpecs,
-    );
-
-    if (resp.warnings?.length) {
-      resp.warnings.forEach(w => showToast(w, false));
-    }
-
-    addReportProjectPages(resp.pages);
-
-    if (resp.pages.length > 0) {
-      setReportMainMode("preview");
-    }
-
-  } catch (e) {
-    _showError(e.message);
-  } finally {
-    setReportLoading(false);
-    document.getElementById("report-generate-btn").disabled = false;
-  }
+  addChartResultsAsReportPages(selectedResults);
+  setReportMainMode("preview");
 }
 
 function _showError(msg) {

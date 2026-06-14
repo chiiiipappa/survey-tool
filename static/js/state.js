@@ -93,6 +93,7 @@ export const AppState = {
     activePageId: null,  // 現在プレビュー中のページID
   },
   reportMainMode: "settings",  // "settings" | "preview"
+  chartResults: [],            // ChartResult[] — STEP3集計結果をSTEP4で参照
 };
 
 function _makeViewId(axisCode, secAxisCode) {
@@ -456,6 +457,7 @@ export function setLoadedProject(resp) {
     AppState.step3ActiveAxisCode,
     AppState.step3SecondaryAxisCode,
   );
+  AppState.chartResults = resp.layout?.chart_results ?? [];
   _emit();
 }
 
@@ -583,6 +585,7 @@ export function resetState() {
   AppState.reportLoading           = false;
   AppState.reportProject           = { projectId: "", pages: [], activePageId: null };
   AppState.reportMainMode          = "settings";
+  AppState.chartResults            = [];
   _emit();
 }
 
@@ -604,6 +607,61 @@ export function getTargetValues(code) {
   if (!code) return [];
   const q = (AppState.questions ?? []).find(q => q.question_code === code);
   return (q?.choices ?? []).map(c => c.choice_text).filter(Boolean);
+}
+
+export function addChartResults(newResults) {
+  const existing = [...AppState.chartResults];
+  for (const r of newResults) {
+    const idx = existing.findIndex(e => e.id === r.id);
+    if (idx >= 0) existing[idx] = r;
+    else existing.push(r);
+  }
+  AppState.chartResults = existing;
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function removeChartResult(id) {
+  AppState.chartResults = AppState.chartResults.filter(r => r.id !== id);
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function addChartResultsAsReportPages(chartResults) {
+  const _s3View = AppState.step3Views[AppState.step3ActiveViewId];
+  const _s3QS = qCode =>
+    _s3View?.questionSettings?.[qCode] ?? AppState.step3QuestionSettings?.[qCode] ?? {};
+  const newPages = (chartResults ?? []).map(cr => {
+    const s3 = _s3QS(cr.question_code);
+    return {
+      pageId: _uuid(),
+      title: cr.title,
+      questionCode: cr.question_code,
+      chartResultId: cr.id,
+      chartSettings: {
+        titleOverride: null, questionTextOverride: null, showQuestionText: true,
+        chartMode: "auto", showLabels: true, labelDecimalPlaces: 1,
+        showLegend: true, legendPosition: "bottom", showTable: false,
+        chartHeightPx: null, chartWidthPx: null, chartMaxWidthPx: null,
+        barThickness: null, categoryPercentage: 0.8, barPercentage: 0.9,
+        axisFontSize: 10, labelFontSize: 10, legendFontSize: 11,
+        labelMinPercent: 2, labelAnchor: "center", labelAlign: "center",
+        transpose: false, hiddenChoices: [],
+        tableContentMode: "percent", showTableRowTotal: false, showTableColTotal: false,
+        tableFontSize: 9, tableDecimalPlaces: 1,
+        colorSettings: {
+          selectedPalette: s3.selectedPalette ?? null,
+          valueColorMapping: s3.valueColorMapping ?? null,
+          overriddenSeriesColors: {},
+        },
+      },
+    };
+  });
+  const allPages = [...AppState.reportProject.pages, ...newPages];
+  const lastId = newPages.length > 0 ? newPages[newPages.length - 1].pageId : AppState.reportProject.activePageId;
+  AppState.reportProject = { ...AppState.reportProject, pages: allPages, activePageId: lastId };
+  AppState.isDirty = true;
+  _emit();
 }
 
 export function setReportMode(mode) {

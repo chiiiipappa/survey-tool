@@ -143,6 +143,7 @@ async def save_project(req: ProjectSaveRequest) -> StreamingResponse:
         excluded_questions=req.excluded_questions,
         step3_views=req.step3_views,
         report_project=req.report_project,
+        chart_results=req.chart_results,
     )
 
     buf = io.BytesIO()

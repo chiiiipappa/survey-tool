@@ -1151,6 +1151,7 @@ export function initProjectHeader() {
           reportSelectedQuestions: AppState.reportSelectedQuestions,
           reportAxisSpecs: AppState.reportAxisSpecs,
         },
+        AppState.chartResults,
       );
       markClean(new Date());
       showToast("プロジェクトを保存しました。");

@@ -4,10 +4,10 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, setActivePanel } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
-import { yieldToMain } from "./app.js";
+import { yieldToMain, showToast } from "./app.js";
 import {
   exportSingleExcel, exportAllExcel,
   exportSingleCsv,   exportAllCsv,
@@ -948,6 +948,29 @@ async function _runCrosstab(setId) {
     _currentCacheKey = key;
     AppState.step3LastGeneratedAxisCode = axisCode;
     _lastCrosstabData = data;
+    // ChartResult として自動保存（STEP4 が参照する）
+    if (!data.secondary_axis_question_code) {
+      const col = AppState.step3TargetFilterColumn;
+      const vals = AppState.step3TargetFilterValues;
+      const filterKey = col ? `${col}:${[...vals].sort().join(",")}` : "";
+      const newChartResults = (data.results ?? []).map(result => ({
+        id: `${result.question_code}||${axisCode}||${filterKey}`,
+        title: `${result.question_text} × ${data.axis_question_text ?? axisCode}`,
+        mode: "comparison",
+        question_code: result.question_code,
+        question_text: result.question_text,
+        type_code: result.type_code,
+        axis_code: axisCode,
+        axis_label: data.axis_question_text ?? axisCode,
+        axis_categories: data.axis_categories,
+        axis_totals: data.axis_totals,
+        rows: result.rows,
+        target_filter_column: col,
+        target_filter_values: [...vals],
+        created_at: new Date().toISOString(),
+      }));
+      addChartResults(newChartResults);
+    }
     if (placeholder) placeholder.style.display = "none";
     await _renderResults(resultsEl, data);
     _renderSidebar();
@@ -988,6 +1011,10 @@ function _updateAxisNcount(axisLabel, categories, totals, warningsHtml) {
 
 async function _renderSimpleResults(container, data) {
   const { axis_question_text, axis_categories, axis_totals, results, warnings } = data;
+  const axisCode = AppState.step3LastGeneratedAxisCode || AppState.step3ActiveAxisCode;
+  const _filterCol = AppState.step3TargetFilterColumn;
+  const _filterVals = AppState.step3TargetFilterValues;
+  const filterKey = _filterCol ? `${_filterCol}:${[..._filterVals].sort().join(",")}` : "";
 
   // ヘッダー（一括変更バー + 一括エクスポートバー）を先に挿入してUIを即時表示
   container.innerHTML =
@@ -1088,6 +1115,10 @@ async function _renderSimpleResults(container, data) {
           <button class="btn btn-secondary btn-sm step3-export-excel-btn" data-idx="${idx}" title="Excelとして保存">📊 Excel</button>
           <button class="btn btn-secondary btn-sm step3-export-csv-btn"   data-idx="${idx}" title="CSVとして保存">📄 CSV</button>
           <button class="btn btn-secondary btn-sm step3-export-png-btn"   data-idx="${idx}" title="PNGとして保存">🖼 PNG</button>
+          <button class="btn btn-sm step3-add-report-btn"
+                  data-cr-id="${_esc(`${result.question_code}||${axisCode}||${filterKey}`)}"
+                  style="background:var(--color-primary,#3B82F6);color:#fff"
+                  title="この設問をレポートに追加">＋ レポート</button>
         </div>
       </div>
 
@@ -1656,6 +1687,18 @@ function _onResultsClick(e) {
   if (csvBtn)   { exportSingleCsv(parseInt(csvBtn.dataset.idx, 10));   return; }
   const pngBtn = e.target.closest(".step3-export-png-btn");
   if (pngBtn)   { exportSinglePng(parseInt(pngBtn.dataset.idx, 10));   return; }
+
+  // レポートに追加
+  const addReportBtn = e.target.closest(".step3-add-report-btn");
+  if (addReportBtn) {
+    const crId = addReportBtn.dataset.crId;
+    const cr = (AppState.chartResults ?? []).find(r => r.id === crId);
+    if (!cr) { showToast("集計結果が見つかりません。STEP3で集計を実行してください。", true); return; }
+    addChartResultsAsReportPages([cr]);
+    setActivePanel("report");
+    showToast("レポートに追加しました。");
+    return;
+  }
 
   // グラフ高さ「自動」ボタン
   const heightResetBtn = e.target.closest(".step3-chart-height-reset-btn");
