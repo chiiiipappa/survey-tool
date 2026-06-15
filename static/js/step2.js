@@ -131,15 +131,43 @@ async function _handleFile(file) {
 
 function _renderAll(resp) {
   renderFileInfoBar(resp);
-  renderAdvancedCard(resp);          // ② 折りたたみ
+  renderAdvancedCard(resp);
   renderPreviewCard(resp);
-  renderSelectedAxisDisplay(resp);   // validatedStep1Axes を設定（FA表形成で使用）
+  renderSelectedAxisDisplay(resp);
   document.getElementById("step2-upload-card").style.display = "none";
   _renderStep2LoadedInfo(resp);
-  document.getElementById("step2-loaded-card").style.display = "";
-  document.getElementById("step2-fa-form-card").style.display = "";  // ④ 即時表示
+  _renderDataInfoItems(resp);
+  document.getElementById("step2-data-info-card").style.display = "";
+  document.getElementById("step2-match-result-card").style.display = "";
   document.getElementById("step2-to-step3-card").style.display = "";
+  document.getElementById("step2-fa-form-card").style.display = "";
+  document.getElementById("step2-loaded-card").style.display = "";
   _loadFaMeta();
+}
+
+function _renderDataInfoItems(resp) {
+  const el = document.getElementById("step2-data-info-items");
+  if (!el) return;
+  const fmt = (n) => typeof n === "number" ? n.toLocaleString("ja-JP") : (n ?? "–");
+  const now = new Date().toLocaleString("ja-JP", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  el.innerHTML = `
+    <div class="step1-info-item">
+      <span class="step1-info-label">ファイル名</span>
+      <span class="step1-info-value">${_esc(resp.filename)}</span>
+    </div>
+    <div class="step1-info-item">
+      <span class="step1-info-label">回答件数</span>
+      <span class="step1-info-value">${fmt(resp.response_row_count)} 件</span>
+    </div>
+    <div class="step1-info-item">
+      <span class="step1-info-label">列数</span>
+      <span class="step1-info-value">${fmt(resp.response_col_count)} 列</span>
+    </div>
+    <div class="step1-info-item">
+      <span class="step1-info-label">読込日時</span>
+      <span class="step1-info-value">${now}</span>
+    </div>
+  `;
 }
 
 function _renderStep2LoadedInfo(resp) {
@@ -157,11 +185,12 @@ function _renderStep2LoadedInfo(resp) {
 function _resetStep2() {
   _lastFile = null;
   document.getElementById("step2-upload-card").style.display = "";
-  document.getElementById("step2-loaded-card").style.display = "none";
-  document.getElementById("step2-advanced-card").style.display = "none";
+  document.getElementById("step2-data-info-card").style.display = "none";
+  document.getElementById("step2-match-result-card").style.display = "none";
+  document.getElementById("step2-to-step3-card").style.display = "none";
   document.getElementById("step2-fa-form-card").style.display = "none";
   document.getElementById("step2-fa-card").style.display = "none";
-  document.getElementById("step2-to-step3-card").style.display = "none";
+  document.getElementById("step2-loaded-card").style.display = "none";
 }
 
 function _initLoadedCard() {
@@ -238,8 +267,6 @@ function renderSelectedAxisDisplay(resp) {
 // ---------------------------------------------------------------------------
 
 export function renderAdvancedCard(resp) {
-  document.getElementById("step2-advanced-card").style.display = "";
-  document.getElementById("step2-advanced-body").style.display = "";
   renderMatchCard(resp);
 }
 
@@ -321,6 +348,36 @@ export function renderMatchCard(resp) {
 
   detail.innerHTML = sections.join("") ||
     '<p class="text-sm" style="color:var(--color-success,#1E8A7A)">✅ すべての設問コードが正常に照合されました。</p>';
+
+  // コンパクト表示（step2-match-result-card 上部）
+  const compactEl = document.getElementById("step2-match-compact");
+  if (compactEl) {
+    const unmatchedValCount = (resp.unmatched_values ?? []).length;
+    const hasIssues = needCheck.length > 0 || unmatched.length > 0;
+    if (!hasIssues) {
+      compactEl.innerHTML = `
+        <div class="step2-match-compact-row">
+          <div class="step2-match-status-badge step2-match-status-ok">✓ 全設問照合完了</div>
+          <div class="step2-match-stats">
+            <span>照合数: <strong>${okTotal}問</strong></span>
+            <span>変換不可値: <strong>${unmatchedValCount}件</strong></span>
+          </div>
+        </div>
+      `;
+    } else {
+      compactEl.innerHTML = `
+        <div class="step2-match-compact-row">
+          <div class="step2-match-status-badge step2-match-status-warn">⚠ ${unmatched.length ? "照合に問題があります" : "要確認の項目があります"}</div>
+          <div class="step2-match-stats">
+            <span>照合済: <strong>${okTotal}問</strong></span>
+            ${needCheck.length ? `<span>要確認: <strong>${needCheck.length}</strong></span>` : ""}
+            ${unmatched.length ? `<span>未照合: <strong>${unmatched.length}</strong></span>` : ""}
+            <span>変換不可値: <strong>${unmatchedValCount}件</strong></span>
+          </div>
+        </div>
+      `;
+    }
+  }
 }
 
 function _missingTable(items) {

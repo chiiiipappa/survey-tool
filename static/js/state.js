@@ -68,6 +68,13 @@ export const AppState = {
   step3MinSampleSize: 0,
   step3TargetFilterColumn: "",   // 分析対象列 (question_code or "")
   step3TargetFilterValues: [],   // 分析対象値 (string[])
+  // STEP3 分析モード（新UI）
+  step3Mode: "brand_comparison",           // "brand_comparison" | "deep_dive" | "question_comparison"
+  step3BasicAxisCode: "",                   // 基本軸 question_code
+  step3ComparisonAxisCode: "",              // 比較軸 question_code (optional)
+  step3DeepDiveTarget: "",                  // 特定対象深掘りの対象値
+  step3QuestionPageMode: "per_question",    // "per_question" | "integrated"
+  step3SelectedQuestionCodes: [],           // 集計対象設問（明示選択分）
   // STEP3 集計ビュー
   step3Views: {},         // { [viewId]: ViewRecord } — viewId = `${axisCode}||${secAxisCode}`
   step3ActiveViewId: "",  // 現在アクティブなビューのID
@@ -395,6 +402,10 @@ export function setLoadedProject(resp) {
   AppState.step3ActiveAxisCode = resp.step3_active_axis_code ?? "";
   AppState.step3LastGeneratedAxisCode = "";
   AppState.step3SecondaryAxisCode    = resp.layout?.step3_secondary_axis_code ?? "";
+  AppState.step3Mode             = resp.layout?.step3_mode             ?? "brand_comparison";
+  AppState.step3BasicAxisCode    = resp.layout?.step3_basic_axis_code    ?? "";
+  AppState.step3ComparisonAxisCode = resp.layout?.step3_comparison_axis_code ?? "";
+  AppState.step3DeepDiveTarget   = resp.layout?.step3_deep_dive_target   ?? "";
   AppState.step3CompositeDisplayMode = resp.layout?.step3_composite_display_mode ?? "split";
   AppState.step3ColorPriority        = resp.layout?.step3_color_priority ?? "axis1";
   AppState.step3MinSampleSize        = resp.layout?.step3_min_sample_size ?? 0;
@@ -452,10 +463,10 @@ export function setLoadedProject(resp) {
       };
     }
   }
-  // アクティブビューIDを復元
+  // アクティブビューIDを復元（basicAxis||compAxis が最も安定）
   AppState.step3ActiveViewId = _makeViewId(
-    AppState.step3ActiveAxisCode,
-    AppState.step3SecondaryAxisCode,
+    AppState.step3BasicAxisCode || AppState.step3ActiveAxisCode,
+    AppState.step3ComparisonAxisCode || AppState.step3SecondaryAxisCode,
   );
   AppState.chartResults = resp.layout?.chart_results ?? [];
   _emit();
@@ -576,6 +587,12 @@ export function resetState() {
   AppState.excludedQuestionCodes = [];
   AppState.step3TargetFilterColumn = "";
   AppState.step3TargetFilterValues = [];
+  AppState.step3Mode                  = "brand_comparison";
+  AppState.step3BasicAxisCode         = "";
+  AppState.step3ComparisonAxisCode    = "";
+  AppState.step3DeepDiveTarget        = "";
+  AppState.step3QuestionPageMode      = "per_question";
+  AppState.step3SelectedQuestionCodes = [];
   AppState.reportMode              = "comparison";
   AppState.reportTargetColumn      = "";
   AppState.reportTargetValues      = [];
@@ -598,6 +615,46 @@ export function setStep3TargetFilterColumn(code) {
 
 export function setStep3TargetFilterValues(values) {
   AppState.step3TargetFilterValues = Array.isArray(values) ? [...values] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3Mode(mode) {
+  AppState.step3Mode = mode ?? "brand_comparison";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3BasicAxis(code) {
+  AppState.step3BasicAxisCode = code ?? "";
+  AppState.step3ActiveAxisCode = code ?? "";
+  _ensureView(code, AppState.step3ComparisonAxisCode);
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3ComparisonAxis(code) {
+  AppState.step3ComparisonAxisCode = code ?? "";
+  AppState.step3SecondaryAxisCode = code ?? "";
+  _ensureView(AppState.step3BasicAxisCode, code);
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3DeepDiveTarget(value) {
+  AppState.step3DeepDiveTarget = value ?? "";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3QuestionPageMode(mode) {
+  AppState.step3QuestionPageMode = mode ?? "per_question";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3SelectedQuestionCodes(codes) {
+  AppState.step3SelectedQuestionCodes = Array.isArray(codes) ? [...codes] : [];
   AppState.isDirty = true;
   _emit();
 }
@@ -627,38 +684,363 @@ export function removeChartResult(id) {
   _emit();
 }
 
+function _deriveChartMode(cr, s3) {
+  const chartType = s3.chartType ?? "bar";
+  const orient    = s3.orientation ?? "v";
+  const hasComp   = Array.isArray(cr.comparison_datasets) && cr.comparison_datasets.length > 0;
+  if (chartType === "stacked100") return orient === "h" ? "stacked100_hbar" : "stacked100_vbar";
+  if (chartType === "grouped")    return orient === "h" ? "grouped_hbar"    : "grouped_vbar";
+  if (chartType === "bar") {
+    if (hasComp) return orient === "h" ? "brand_hbar" : "brand_vbar";
+    return orient === "h" ? "hbar" : "vbar";
+  }
+  return "auto";  // pie, line, radar, scatter, avg_bar, table_only
+}
+
+function _buildDefaultTitle(cr) {
+  let title = `${cr.question_text ?? cr.question_code} × ${cr.axis_label ?? cr.axis_code}`;
+  if (cr.secondary_axis_label || cr.secondary_axis_code) {
+    title += ` × ${cr.secondary_axis_label ?? cr.secondary_axis_code}`;
+  }
+  if (cr.target_filter_column && cr.target_filter_values?.length) {
+    title += ` [${cr.target_filter_column}: ${cr.target_filter_values.join("・")}]`;
+  }
+  return title;
+}
+
+function _buildAggregationConfig(cr) {
+  return {
+    chartResultId: cr.id,
+    questionCode:  cr.question_code,
+    axisCode:      cr.axis_code      ?? "",
+    secAxisCode:   cr.secondary_axis_code ?? "",
+    filterColumn:  cr.target_filter_column  ?? "",
+    filterValues:  [...(cr.target_filter_values ?? [])],
+  };
+}
+
+function _buildChartConfig(cr, s3) {
+  return {
+    chartMode:          _deriveChartMode(cr, s3),
+    aggMode:            s3.aggMode          ?? "col_pct",
+    sortOrder:          s3.sortOrder        ?? "original",
+    transpose:          s3.transpose        ?? false,
+    hiddenChoices:      [...(s3.hiddenChoices ?? [])],
+    showLabels:         s3.showPctLabel     ?? true,
+    showLegend:         true,
+    legendPosition:     "bottom",
+    labelDecimalPlaces: 1,
+    labelMinPercent:    2,
+    barThickness:       s3.barWidth         ?? null,
+    chartHeightPx:      s3.chartHeight      ?? null,
+    chartWidthPx:       null,
+    splitMode:          s3.splitMode        ?? "normal",
+    splitColumns:       s3.splitColumns     ?? null,
+    itemsPerPage:       s3.itemsPerPage     ?? null,
+    pageLayout:         s3.pageLayout       ?? "auto",
+    colorSettings: {
+      selectedPalette:        s3.selectedPalette        ?? null,
+      valueColorMapping:      s3.valueColorMapping      ?? null,
+      overriddenSeriesColors: { ...(s3.overriddenSeriesColors ?? {}) },
+    },
+  };
+}
+
+function _defaultLayoutConfig() {
+  return {
+    titleOverride: null, questionTextOverride: null, showQuestionText: true,
+    subtitleFontSize: 8,
+    chartHeightPx: null, chartWidthPx: null, chartMaxWidthPx: null,
+    categoryPercentage: 0.8, barPercentage: 0.9,
+    axisFontSize: 10, labelFontSize: 10, legendFontSize: 11,
+    labelAnchor: "center", labelAlign: "center",
+    showTable: false, tableContentMode: "percent",
+    showTableRowTotal: false, showTableColTotal: false,
+    tableFontSize: 9, tableDecimalPlaces: 1,
+    rowChoiceOrder: null,  // null=STEP1順、string[]=手動並び替え順
+  };
+}
+
+function _buildReportPage(cr, s3) {
+  const lc = _defaultLayoutConfig();
+  if ((s3.chartType ?? "bar") === "table_only") lc.showTable = true;
+  lc.titleOverride = _buildDefaultTitle(cr);
+  return {
+    id: _uuid(),
+    aggregationConfig: _buildAggregationConfig(cr),
+    chartConfig:       _buildChartConfig(cr, s3),
+    layoutConfig:      lc,
+  };
+}
+
+// 分割モードで生成される仮想データセット数を求める
+function _calcVirtualDatasetCount(cr, splitMode) {
+  if (splitMode === "by_axis")       return (cr.axis_categories ?? []).length;
+  if (splitMode === "by_comparison") return (cr.rows ?? []).length;
+  return 0;
+}
+
+// 1ページあたりのアイテム数（explicitIpp=null なら pageLayout から自動推定）
+function _resolveItemsPerPage(pageLayout, explicitIpp) {
+  if (explicitIpp) return explicitIpp;
+  if (pageLayout === "grid3x2") return 6;
+  if (pageLayout === "grid2x2") return 4;
+  if (pageLayout === "cols3")   return 6;
+  if (pageLayout === "cols2")   return 4;
+  if (pageLayout === "cols1")   return 2;
+  return 4; // auto / vertical
+}
+
+// total を size ごとに chunk 化（[{start, end}] の配列）
+function _chunksOf(total, size) {
+  const chunks = [];
+  for (let start = 0; start < total; start += size) {
+    chunks.push({ start, end: Math.min(start + size, total) });
+  }
+  return chunks.length > 0 ? chunks : [{ start: 0, end: 0 }];
+}
+
+// STEP3→STEP4 ページ追加（type_code 依存デフォルト込みの s3 settings を受け取る）
+export function addReportPageFromStep3(cr, s3) {
+  const splitMode = s3.splitMode ?? "normal";
+
+  if (splitMode === "normal") {
+    const newPage = _buildReportPage(cr, s3);
+    AppState.reportProject = {
+      ...AppState.reportProject,
+      pages: [...AppState.reportProject.pages, newPage],
+      activePageId: newPage.id,
+    };
+    AppState.isDirty = true;
+    _emit();
+    return;
+  }
+
+  // 分割モード: 自動ページ分割
+  const totalItems   = _calcVirtualDatasetCount(cr, splitMode);
+  const pageLayout   = s3.pageLayout   ?? "auto";
+  const itemsPerPage = _resolveItemsPerPage(pageLayout, s3.itemsPerPage ?? null);
+  const chunks       = _chunksOf(totalItems, itemsPerPage);
+  const baseTitle    = _buildDefaultTitle(cr);
+
+  // デバッグログ: ページ分割の概要を出力
+  console.group(`[STEP4追加] splitMode=${splitMode} "${cr.question_code}"`);
+  console.log(`  STEP3グラフ数: ${totalItems}`);
+  console.log(`  件/ページ: ${itemsPerPage}  配置: ${pageLayout}  → ${chunks.length}ページ`);
+  chunks.forEach((c, i) =>
+    console.log(`  ページ${i + 1}: チャート${c.start + 1}〜${c.end} (${c.end - c.start}件)`)
+  );
+  const totalAcrossPages = chunks.reduce((sum, c) => sum + (c.end - c.start), 0);
+  if (totalAcrossPages !== totalItems) {
+    console.warn(`  ⚠️ 合計不一致！ STEP3=${totalItems}件 vs ページ合計=${totalAcrossPages}件`);
+  } else {
+    console.log(`  ✅ 合計一致: ${totalItems}件`);
+  }
+  console.groupEnd();
+
+  const allIndices = Array.from({ length: totalItems }, (_, i) => i);
+
+  const newPages = chunks.map((chunk, chunkIdx) => {
+    const lc = _defaultLayoutConfig();
+    if ((s3.chartType ?? "bar") === "table_only") lc.showTable = true;
+    lc.titleOverride = chunks.length > 1
+      ? `${baseTitle}（${chunkIdx + 1}/${chunks.length}）`
+      : baseTitle;
+    return {
+      id: _uuid(),
+      aggregationConfig: _buildAggregationConfig(cr),
+      chartConfig: {
+        ..._buildChartConfig(cr, s3),
+        splitDatasetIndices: allIndices.slice(chunk.start, chunk.end),
+        pageLayout,
+        itemsPerPage,
+      },
+      layoutConfig: lc,
+    };
+  });
+
+  const firstId = newPages[0]?.id ?? AppState.reportProject.activePageId;
+  AppState.reportProject = {
+    ...AppState.reportProject,
+    pages: [...AppState.reportProject.pages, ...newPages],
+    activePageId: firstId,
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
+// 既存ページを STEP3 最新状態で上書き（layoutConfig は保持）
+export function overwriteReportPageFromStep3(pageId, cr, s3) {
+  AppState.reportProject = {
+    ...AppState.reportProject,
+    pages: AppState.reportProject.pages.map(p => {
+      const pid = p.id ?? p.pageId;
+      if (pid !== pageId) return p;
+      return {
+        ...p,
+        aggregationConfig: _buildAggregationConfig(cr),
+        chartConfig: _buildChartConfig(cr, s3),
+        // layoutConfig は保持
+      };
+    }),
+    activePageId: pageId,
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
+// 同一 chartResultId のページを探す（重複検出）
+export function findDuplicateReportPage(chartResultId) {
+  return AppState.reportProject.pages.find(p =>
+    (p.aggregationConfig?.chartResultId ?? p.chartResultId) === chartResultId
+  ) ?? null;
+}
+
+// 同一 chartResultId を持つ分割ページを全取得（splitMode != "normal"）
+export function getSplitGroupPages(chartResultId) {
+  return AppState.reportProject.pages.filter(p =>
+    (p.aggregationConfig?.chartResultId ?? p.chartResultId) === chartResultId &&
+    (p.chartConfig?.splitMode ?? "normal") !== "normal"
+  );
+}
+
+// 自動再配置: visibleIndices を itemsPerPage/pageLayout で再分配しページを更新
+// hiddenIndices: 非表示として維持したい index 配列
+export function reflowSplitPages(chartResultId, itemsPerPage, pageLayout, hiddenIndices = []) {
+  const groupPages = getSplitGroupPages(chartResultId);
+  if (!groupPages.length) return;
+
+  const first = groupPages[0];
+  const cr = AppState.chartResults.find(r => r.id === chartResultId);
+  const total = _calcVirtualDatasetCount(cr, first.chartConfig?.splitMode ?? "normal");
+  const hiddenSet = new Set(hiddenIndices);
+  const visibleIndices = Array.from({ length: total }, (_, i) => i).filter(i => !hiddenSet.has(i));
+
+  const resolvedIpp = _resolveItemsPerPage(pageLayout, itemsPerPage);
+  const chunks = _chunksOf(visibleIndices.length, resolvedIpp);
+  const rawTitle = first.layoutConfig?.titleOverride ?? "";
+  const baseTitle = rawTitle.replace(/（\d+\/\d+）$/, "");
+
+  const newPages = chunks.map((chunk, i) => {
+    const existing = groupPages[i];
+    const base = existing ?? first;
+    return {
+      ...base,
+      id: existing?.id ?? _uuid(),
+      chartConfig: {
+        ...(base.chartConfig ?? {}),
+        splitDatasetIndices: visibleIndices.slice(chunk.start, chunk.end),
+        pageLayout,
+        itemsPerPage,
+      },
+      layoutConfig: {
+        ...(base.layoutConfig ?? {}),
+        titleOverride: chunks.length > 1 ? `${baseTitle}（${i + 1}/${chunks.length}）` : baseTitle,
+      },
+    };
+  });
+
+  const allPages   = AppState.reportProject.pages;
+  const firstIdx   = allPages.findIndex(p => _pid(p) === _pid(groupPages[0]));
+  const groupIdSet = new Set(groupPages.map(p => _pid(p)));
+  const nonGroup   = allPages.filter(p => !groupIdSet.has(_pid(p)));
+  const updatedPages = [
+    ...nonGroup.slice(0, firstIdx),
+    ...newPages,
+    ...nonGroup.slice(firstIdx),
+  ];
+
+  AppState.reportProject = {
+    ...AppState.reportProject,
+    pages: updatedPages,
+    activePageId: newPages[0]?.id ?? AppState.reportProject.activePageId,
+  };
+  AppState.isDirty = true;
+  _emit();
+}
+
+// グラフを同ページ内で移動（dir: -1=上, +1=下）
+function _moveSplitGraphWithin(dsIndex, pageId, dir) {
+  const page = AppState.reportProject.pages.find(p => _pid(p) === pageId);
+  if (!page) return;
+  const indices = [...(page.chartConfig?.splitDatasetIndices ?? [])];
+  const pos  = indices.indexOf(dsIndex);
+  if (pos < 0) return;
+  const swap = pos + dir;
+  if (swap < 0 || swap >= indices.length) return;
+  [indices[pos], indices[swap]] = [indices[swap], indices[pos]];
+  updateReportProjectPage(pageId, { chartConfig: { ...page.chartConfig, splitDatasetIndices: indices } });
+}
+
+export function moveSplitGraphUp(dsIndex, pageId) {
+  _moveSplitGraphWithin(dsIndex, pageId, -1);
+}
+
+export function moveSplitGraphDown(dsIndex, pageId) {
+  _moveSplitGraphWithin(dsIndex, pageId, +1);
+}
+
+// グラフを前/次ページへ移動（dir: -1=前, +1=次）
+export function moveSplitGraphToAdjacentPage(dsIndex, fromPageId, dir) {
+  const fromPage = AppState.reportProject.pages.find(p => _pid(p) === fromPageId);
+  if (!fromPage) return;
+  const chartResultId = fromPage.aggregationConfig?.chartResultId ?? fromPage.chartResultId;
+  const groupPages = getSplitGroupPages(chartResultId);
+  const fromIdx = groupPages.findIndex(p => _pid(p) === fromPageId);
+  const toIdx   = fromIdx + dir;
+  if (toIdx < 0 || toIdx >= groupPages.length) return;
+
+  const toPage     = groupPages[toIdx];
+  const fromIndices = (fromPage.chartConfig?.splitDatasetIndices ?? []).filter(i => i !== dsIndex);
+  const toIndices   = dir === -1
+    ? [...(toPage.chartConfig?.splitDatasetIndices ?? []), dsIndex]
+    : [dsIndex, ...(toPage.chartConfig?.splitDatasetIndices ?? [])];
+
+  updateReportProjectPage(_pid(fromPage), { chartConfig: { ...fromPage.chartConfig, splitDatasetIndices: fromIndices } });
+  updateReportProjectPage(_pid(toPage),   { chartConfig: { ...toPage.chartConfig,   splitDatasetIndices: toIndices   } });
+
+  // 空になったページを削除
+  if (fromIndices.length === 0) {
+    const pages = AppState.reportProject.pages.filter(p => _pid(p) !== _pid(fromPage));
+    AppState.reportProject = { ...AppState.reportProject, pages };
+    AppState.isDirty = true;
+    _emit();
+  }
+}
+
+// グラフの表示/非表示切り替え（非表示 = どのページにも含めない）
+export function toggleSplitGraphVisibility(dsIndex, chartResultId) {
+  const groupPages = getSplitGroupPages(chartResultId);
+  const isVisible  = groupPages.some(p =>
+    (p.chartConfig?.splitDatasetIndices ?? []).includes(dsIndex)
+  );
+
+  if (isVisible) {
+    groupPages.forEach(p => {
+      const newIndices = (p.chartConfig?.splitDatasetIndices ?? []).filter(i => i !== dsIndex);
+      updateReportProjectPage(_pid(p), { chartConfig: { ...p.chartConfig, splitDatasetIndices: newIndices } });
+    });
+  } else {
+    // 最後のページの末尾に追加
+    const lastPage = groupPages[groupPages.length - 1];
+    if (lastPage) {
+      const newIndices = [...(lastPage.chartConfig?.splitDatasetIndices ?? []), dsIndex];
+      updateReportProjectPage(_pid(lastPage), { chartConfig: { ...lastPage.chartConfig, splitDatasetIndices: newIndices } });
+    }
+  }
+}
+
+// 旧フロー（report.js _onGenerate 経由）互換 — raw s3 settings で動作
 export function addChartResultsAsReportPages(chartResults) {
   const _s3View = AppState.step3Views[AppState.step3ActiveViewId];
   const _s3QS = qCode =>
     _s3View?.questionSettings?.[qCode] ?? AppState.step3QuestionSettings?.[qCode] ?? {};
   const newPages = (chartResults ?? []).map(cr => {
-    const s3 = _s3QS(cr.question_code);
-    return {
-      pageId: _uuid(),
-      title: cr.title,
-      questionCode: cr.question_code,
-      chartResultId: cr.id,
-      chartSettings: {
-        titleOverride: null, questionTextOverride: null, showQuestionText: true,
-        chartMode: "auto", showLabels: true, labelDecimalPlaces: 1,
-        showLegend: true, legendPosition: "bottom", showTable: false,
-        chartHeightPx: null, chartWidthPx: null, chartMaxWidthPx: null,
-        barThickness: null, categoryPercentage: 0.8, barPercentage: 0.9,
-        axisFontSize: 10, labelFontSize: 10, legendFontSize: 11,
-        labelMinPercent: 2, labelAnchor: "center", labelAlign: "center",
-        transpose: false, hiddenChoices: [],
-        tableContentMode: "percent", showTableRowTotal: false, showTableColTotal: false,
-        tableFontSize: 9, tableDecimalPlaces: 1,
-        colorSettings: {
-          selectedPalette: s3.selectedPalette ?? null,
-          valueColorMapping: s3.valueColorMapping ?? null,
-          overriddenSeriesColors: {},
-        },
-      },
-    };
+    const s3raw = _s3QS(cr.question_code);
+    return _buildReportPage(cr, s3raw);
   });
   const allPages = [...AppState.reportProject.pages, ...newPages];
-  const lastId = newPages.length > 0 ? newPages[newPages.length - 1].pageId : AppState.reportProject.activePageId;
+  const lastId = newPages.length > 0 ? newPages[newPages.length - 1].id : AppState.reportProject.activePageId;
   AppState.reportProject = { ...AppState.reportProject, pages: allPages, activePageId: lastId };
   AppState.isDirty = true;
   _emit();
@@ -777,20 +1159,22 @@ export function addReportProjectPages(apiPages) {
   _emit();
 }
 
+const _pid = p => p.id ?? p.pageId;
+
 export function updateReportProjectPage(pageId, patch) {
   AppState.reportProject = {
     ...AppState.reportProject,
-    pages: AppState.reportProject.pages.map(p => p.pageId === pageId ? { ...p, ...patch } : p),
+    pages: AppState.reportProject.pages.map(p => _pid(p) === pageId ? { ...p, ...patch } : p),
   };
   AppState.isDirty = true;
   _emit();
 }
 
 export function removeReportProjectPage(pageId) {
-  const pages = AppState.reportProject.pages.filter(p => p.pageId !== pageId);
+  const pages = AppState.reportProject.pages.filter(p => _pid(p) !== pageId);
   let activePageId = AppState.reportProject.activePageId;
   if (activePageId === pageId) {
-    activePageId = pages.length > 0 ? pages[pages.length - 1].pageId : null;
+    activePageId = pages.length > 0 ? _pid(pages[pages.length - 1]) : null;
   }
   AppState.reportProject = { ...AppState.reportProject, pages, activePageId };
   AppState.isDirty = true;
@@ -798,16 +1182,17 @@ export function removeReportProjectPage(pageId) {
 }
 
 export function duplicateReportProjectPage(pageId) {
-  const src = AppState.reportProject.pages.find(p => p.pageId === pageId);
+  const src = AppState.reportProject.pages.find(p => _pid(p) === pageId);
   if (!src) return;
-  const clone = { ...src, pageId: _uuid() };
-  const idx = AppState.reportProject.pages.findIndex(p => p.pageId === pageId);
+  const newId = _uuid();
+  const clone = { ...src, id: newId, pageId: undefined };
+  const idx = AppState.reportProject.pages.findIndex(p => _pid(p) === pageId);
   const pages = [
     ...AppState.reportProject.pages.slice(0, idx + 1),
     clone,
     ...AppState.reportProject.pages.slice(idx + 1),
   ];
-  AppState.reportProject = { ...AppState.reportProject, pages, activePageId: clone.pageId };
+  AppState.reportProject = { ...AppState.reportProject, pages, activePageId: newId };
   AppState.isDirty = true;
   _emit();
 }
@@ -819,5 +1204,26 @@ export function setActiveReportPageId(pageId) {
 
 export function setReportMainMode(mode) {
   AppState.reportMainMode = mode ?? "settings";
+  _emit();
+}
+
+export function addReportPagesFromConfig(pages) {
+  if (!pages?.length) return;
+  const allPages = [...AppState.reportProject.pages, ...pages];
+  const lastId = pages[pages.length - 1].pageId;
+  AppState.reportProject = { ...AppState.reportProject, pages: allPages, activePageId: lastId };
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function reorderReportPage(pageId, direction) {
+  const pages = [...AppState.reportProject.pages];
+  const idx = pages.findIndex(p => p.pageId === pageId);
+  if (idx < 0) return;
+  const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= pages.length) return;
+  [pages[idx], pages[targetIdx]] = [pages[targetIdx], pages[idx]];
+  AppState.reportProject = { ...AppState.reportProject, pages };
+  AppState.isDirty = true;
   _emit();
 }

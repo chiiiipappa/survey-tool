@@ -65,13 +65,44 @@
         <!-- ファイル情報バー -->
         <div id="file-info-bar" class="file-info-bar hidden"></div>
 
+        <!-- 形式判定結果 -->
+        <div id="format-detect-box" class="format-detect-box" style="display:none"></div>
+
+        <!-- 手動マッピングパネル -->
+        <div id="manual-mapping-panel" class="manual-mapping-panel" style="display:none">
+          <div class="manual-mapping-title">列の対応を手動で設定してください</div>
+          <div class="manual-mapping-form">
+            <div class="mmap-row">
+              <label>コード列</label>
+              <select id="mmap-code"></select>
+            </div>
+            <div class="mmap-row">
+              <label>種別列</label>
+              <select id="mmap-type"></select>
+            </div>
+            <div class="mmap-row">
+              <label>質問文列</label>
+              <select id="mmap-text"></select>
+            </div>
+            <div class="mmap-row">
+              <label>質問文補助列 <span class="optional">省略可</span></label>
+              <select id="mmap-text-sub"></select>
+            </div>
+            <div class="mmap-row">
+              <label>選択肢列（開始〜終了）<span class="optional">省略可</span></label>
+              <select id="mmap-choices-from"></select>〜<select id="mmap-choices-to"></select>
+            </div>
+          </div>
+          <button id="mmap-apply-btn" class="btn btn-primary" style="margin-top:8px">この設定で読み込む</button>
+        </div>
+
         <!-- パース警告 -->
         <div id="parse-warnings-box" class="warning-box hidden"></div>
 
         <!-- 次へボタン -->
         <div style="margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
           <button id="btn-to-questions" class="btn btn-primary btn-next-step" disabled>
-            次のステップへ →
+            回答データ読み込みへ →
           </button>
           <label class="btn btn-secondary btn-sm" style="cursor:pointer">
             プロジェクトを復元
@@ -108,12 +139,31 @@
   <!-- ========== PANEL 2: 設問構造確認 ========== -->
   <section id="panel-questions" class="panel">
 
-    <!-- 設問一覧テーブルカード（検索・フィルタ統合） -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">設問一覧</span>
-        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;"></div>
+    <!-- 1. レイアウト情報（読込後に表示） -->
+    <div class="card step1-info-card" id="step1-layout-info-card" style="display:none">
+      <div class="card-body step1-info-body">
+        <div class="step1-info-status">調査票読込完了</div>
+        <div id="step1-layout-info-items" class="step1-info-items">
+          <!-- questions.js で動的生成 -->
+        </div>
       </div>
+    </div>
+
+    <!-- 2. 次のステップへ（最優先導線） -->
+    <div class="card">
+      <div class="card-body" style="display:flex; flex-direction:column; align-items:center; padding:24px 20px;">
+        <button id="btn-to-step2" class="btn btn-primary btn-next-step btn-step1-next" disabled>
+          ▶ 次のステップへ（回答データ読込）
+        </button>
+      </div>
+    </div>
+
+    <!-- 3. 設問一覧（折りたたみ） -->
+    <details class="card step1-collapsible">
+      <summary class="step1-details-summary">
+        <span class="card-title">設問一覧を確認</span>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:12px;"></div>
+      </summary>
       <!-- 検索・フィルタ -->
       <div class="card-body" style="border-bottom:1px solid var(--color-border); padding-top:12px; padding-bottom:12px">
         <div class="filter-bar">
@@ -159,14 +209,14 @@
         </table>
       </div>
       <div id="questions-count-bar" class="count-bar">–</div>
-    </div>
+    </details>
 
-    <!-- 集計セット管理カード -->
-    <div class="card" id="step1-set-card" style="display:none; margin-top:12px">
-      <div class="card-header">
-        <span class="card-title">集計セット</span>
-        <span style="font-size:.8rem; color:var(--color-text-muted); margin-left:8px">STEP3 クロス集計・グラフ生成の対象を設定します。</span>
-      </div>
+    <!-- 4. 集計セット管理（折りたたみ） -->
+    <details class="card step1-collapsible" id="step1-set-card" style="display:none">
+      <summary class="step1-details-summary">
+        <span class="card-title">集計セット管理</span>
+        <span id="step1-set-summary-hint" style="font-size:.8rem; color:var(--color-text-muted); margin-left:4px"></span>
+      </summary>
       <div class="card-body" id="step1-set-summary" style="padding:10px 16px; display:flex; flex-wrap:wrap; gap:6px">
         <!-- questions.js で動的生成 -->
       </div>
@@ -175,21 +225,12 @@
           集計対象の管理
         </button>
       </div>
-    </div>
+    </details>
 
-    <!-- STEP2 ナビカード -->
-    <div class="card">
-      <div class="card-body" style="display:flex; flex-direction:column; align-items:center; padding: 24px 20px;">
-        <button id="btn-to-step2" class="btn btn-primary btn-next-step" disabled>
-          次のステップへ →
-        </button>
-      </div>
-    </div>
-
-    <!-- 読込済みCSVカード（最下部・読込後に表示） -->
+    <!-- 5. レイアウトCSV差し替え（読込後に表示） -->
     <div class="card" id="csv-loaded-card" style="display:none">
       <div class="card-header">
-        <span class="card-title">レイアウトCSVを読み込む</span>
+        <span class="card-title">レイアウトCSVを差し替え</span>
       </div>
       <div class="card-body">
         <div id="csv-replace-drop-zone" class="drop-zone">
@@ -214,10 +255,9 @@
   <!-- ========== PANEL 3: STEP2 回答データ ========== -->
   <section id="panel-step2" class="panel">
 
-    <!-- ① 回答データアップロード -->
+    <!-- ① 回答データアップロード（初回のみ表示） -->
     <div class="card" id="step2-upload-card">
       <div class="card-header">
-        <span class="step2-step-num">①</span>
         <span class="card-title">回答データ CSV / Excel を読み込む</span>
       </div>
       <div class="card-body">
@@ -238,67 +278,81 @@
       </div>
     </div>
 
-    <!-- ② データ変換・出力 -->
-    <div class="card" id="step2-advanced-card" style="display:none">
-      <div class="card-header">
-        <span class="step2-step-num">②</span>
-        <span class="card-title">データ変換・出力</span>
-        <div id="step2-match-summary" style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;"></div>
-      </div>
-      <div id="step2-advanced-body">
-
-        <!-- 照合結果（要確認のみ） -->
-        <div class="card-body" style="border-top:1px solid var(--color-border)">
-          <div id="step2-match-detail"></div>
+    <!-- ② 回答データ情報（読込後に表示） -->
+    <div class="card step1-info-card" id="step2-data-info-card" style="display:none">
+      <div class="card-body step1-info-body">
+        <div class="step1-info-status step2-info-status">回答データ読込完了</div>
+        <div id="step2-data-info-items" class="step1-info-items">
+          <!-- step2.js で動的生成 -->
         </div>
-
-        <!-- ラベル変換プレビュー -->
-        <div style="border-top:1px solid var(--color-border)">
-          <div class="card-header" style="border-bottom:0; padding-bottom:0">
-            <span class="card-title" style="font-size:.875rem">ラベル変換プレビュー</span>
-            <input id="step2-col-search" type="text" placeholder="設問コード・文言で検索…"
-                   style="width:180px; margin-left:12px; font-size:.8rem; padding:3px 8px; border:1px solid var(--color-border); border-radius:4px">
-            <div class="tab-bar" id="step2-preview-tabs" style="margin-left:auto;">
-              <button class="tab-btn active" data-tab="raw">元データ</button>
-              <button class="tab-btn" data-tab="labeled">変換後</button>
-              <button class="tab-btn" data-tab="unmatched">変換不可値</button>
-            </div>
-          </div>
-          <div style="padding:0">
-            <div id="step2-preview-raw" class="step2-tab-pane table-wrap"></div>
-            <div id="step2-preview-labeled" class="step2-tab-pane table-wrap" style="display:none"></div>
-            <div id="step2-preview-unmatched" class="step2-tab-pane" style="display:none; padding:16px;"></div>
-          </div>
-        </div>
-
-        <!-- ラベル変換済みCSV出力 -->
-        <div style="border-top:1px solid var(--color-border); padding:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
-          <div style="flex:1; min-width:200px;">
-            <div style="font-weight:600; margin-bottom:4px">ラベル変換済みデータ（全列）</div>
-            <div class="text-sm text-muted">UTF-8 BOM 付き CSV でダウンロードします。</div>
-          </div>
-          <button id="step2-export-btn" class="btn btn-primary">📥 CSV ダウンロード</button>
-        </div>
-
       </div>
     </div>
 
-    <!-- ③ STEP3 ナビカード -->
+    <!-- ③ データ変換結果（読込後に表示） -->
+    <div class="card" id="step2-match-result-card" style="display:none">
+      <div class="step2-match-compact-body">
+        <div id="step2-match-compact"><!-- step2.js で動的生成 --></div>
+      </div>
+      <details class="step2-preview-details">
+        <summary class="step2-preview-summary">
+          <span style="font-size:.85rem; font-weight:600">データ変換プレビューを確認</span>
+          <div id="step2-match-summary" style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap;"></div>
+        </summary>
+        <div id="step2-advanced-card">
+          <div id="step2-advanced-body">
+
+            <!-- 照合結果（要確認のみ） -->
+            <div class="card-body" style="border-top:1px solid var(--color-border)">
+              <div id="step2-match-detail"></div>
+            </div>
+
+            <!-- ラベル変換プレビュー -->
+            <div style="border-top:1px solid var(--color-border)">
+              <div class="card-header" style="border-bottom:0; padding-bottom:0">
+                <span class="card-title" style="font-size:.875rem">ラベル変換プレビュー</span>
+                <input id="step2-col-search" type="text" placeholder="設問コード・文言で検索…"
+                       style="width:180px; margin-left:12px; font-size:.8rem; padding:3px 8px; border:1px solid var(--color-border); border-radius:4px">
+                <div class="tab-bar" id="step2-preview-tabs" style="margin-left:auto;">
+                  <button class="tab-btn active" data-tab="raw">元データ</button>
+                  <button class="tab-btn" data-tab="labeled">変換後</button>
+                  <button class="tab-btn" data-tab="unmatched">変換不可値</button>
+                </div>
+              </div>
+              <div style="padding:0">
+                <div id="step2-preview-raw" class="step2-tab-pane table-wrap"></div>
+                <div id="step2-preview-labeled" class="step2-tab-pane table-wrap" style="display:none"></div>
+                <div id="step2-preview-unmatched" class="step2-tab-pane" style="display:none; padding:16px;"></div>
+              </div>
+            </div>
+
+            <!-- ラベル変換済みCSV出力 -->
+            <div style="border-top:1px solid var(--color-border); padding:16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+              <div style="flex:1; min-width:200px;">
+                <div style="font-weight:600; margin-bottom:4px">ラベル変換済みデータ（全列）</div>
+                <div class="text-sm text-muted">UTF-8 BOM 付き CSV でダウンロードします。</div>
+              </div>
+              <button id="step2-export-btn" class="btn btn-primary">📥 CSV ダウンロード</button>
+            </div>
+
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ④ クロス集計・グラフ生成へ（最優先導線） -->
     <div class="card" id="step2-to-step3-card" style="display:none">
-      <div class="card-body" style="display:flex; flex-direction:column; align-items:center; padding: 24px 20px;">
-        <button id="btn-to-step3" class="btn btn-primary btn-next-step">
-          次のステップへ →
+      <div class="card-body" style="display:flex; flex-direction:column; align-items:center; padding:24px 20px;">
+        <button id="btn-to-step3" class="btn btn-primary btn-next-step btn-step1-next">
+          ▶ クロス集計・グラフ生成へ
         </button>
       </div>
     </div>
 
-    <!-- ④ FA 表形成（回答データ読込後に表示） -->
-    <div class="card" id="step2-fa-form-card" style="display:none">
-      <div class="card-header">
-        <span class="step2-step-num">④</span>
-        <span class="card-title">FA 表形成</span>
-
-      </div>
+    <!-- ⑤ FA 表形成（任意）- 折りたたみ -->
+    <details class="card step1-collapsible" id="step2-fa-form-card" style="display:none">
+      <summary class="step1-details-summary">
+        <span class="card-title">FA 表形成（任意）</span>
+      </summary>
       <div class="card-body">
         <div class="step2-ctrl-grid">
 
@@ -335,12 +389,11 @@
 
         </div>
       </div>
-    </div>
+    </details>
 
-    <!-- ⑤ FA 一覧（「表を更新」後に表示） -->
+    <!-- ⑥ FA 一覧（「表を更新」後に表示） -->
     <div class="card" id="step2-fa-card" style="display:none">
       <div class="card-header">
-        <span class="step2-step-num">⑤</span>
         <span class="card-title">FA 一覧</span>
 
         <div class="fa-inline-filter">
@@ -371,11 +424,11 @@
       <div id="fa-table-wrap" class="table-wrap fa-table-wrap"></div>
     </div>
 
-    <!-- 読込済み回答データカード（初回読込後に最下部に表示） -->
-    <div class="card" id="step2-loaded-card" style="display:none">
-      <div class="card-header">
-        <span class="card-title">回答データ CSV / Excel を読み込む</span>
-      </div>
+    <!-- ⑦ 回答データ差し替え（折りたたみ） -->
+    <details class="card step1-collapsible" id="step2-loaded-card" style="display:none">
+      <summary class="step1-details-summary">
+        <span class="card-title">回答データを差し替える</span>
+      </summary>
       <div class="card-body">
         <label id="step2-replace-drop-zone" class="drop-zone" for="step2-replace-input">
           <div class="drop-icon">📂</div>
@@ -392,7 +445,7 @@
           <button id="btn-step2-unload"  class="btn btn-secondary btn-sm">× 読込解除</button>
         </div>
       </div>
-    </div>
+    </details>
 
   </section>
 
@@ -415,59 +468,143 @@
         </nav>
       </aside>
 
-      <!-- 右メインエリア: 集計軸 + 結果 -->
+      <!-- 右メインエリア: 分析設定 + 結果 -->
       <div id="step3-main" class="step3-main">
 
-        <!-- 分析対象フィルタカード -->
-        <div class="card" id="step3-filter-card" style="margin-bottom:12px">
-          <div class="card-header">
-            <span class="card-title">分析対象</span>
-            <span id="step3-filter-active-badge" hidden
-              style="font-size:.75rem; background:#FEF3C7; color:#92400E; border:1px solid #FDE68A;
-                     padding:2px 8px; border-radius:10px; margin-left:8px;">絞り込み中</span>
-          </div>
-          <div class="card-body">
-            <div class="step3-axis-section-title">分析対象列</div>
-            <select id="step3-target-column"
-              style="width:100%; font-size:.85rem; padding:5px 8px;
-                     border:1px solid var(--color-border); border-radius:5px; margin-bottom:4px;">
-              <option value="">（絞り込みなし — 全回答者）</option>
-            </select>
-            <div id="step3-target-values-section" style="display:none; margin-top:10px">
-              <div class="step3-axis-section-title">
-                分析対象値
-                <span id="step3-target-values-count"
-                  style="font-weight:400; font-size:.78rem; color:var(--color-text-muted)"></span>
-              </div>
-              <div class="step3-target-ctrl-bar">
-                <button id="step3-target-all-btn" class="btn btn-secondary btn-sm">全選択</button>
-                <button id="step3-target-none-btn" class="btn btn-secondary btn-sm">全解除</button>
-                <input type="text" id="step3-target-value-search"
-                  class="step3-target-search" placeholder="検索…" autocomplete="off">
-              </div>
-              <div id="step3-target-values-list" class="step3-target-cb-list"></div>
+        <!-- ① 分析モード選択 -->
+        <div class="card" id="step3-mode-card" style="margin-bottom:12px">
+          <div class="card-body" style="padding:10px 16px">
+            <div class="step3-mode-tabs">
+              <button class="step3-mode-tab" data-mode="brand_comparison">ブランド比較</button>
+              <button class="step3-mode-tab" data-mode="deep_dive">特定対象深掘り</button>
+              <button class="step3-mode-tab" data-mode="question_comparison">設問比較</button>
             </div>
           </div>
         </div>
 
-        <!-- 集計軸① + 集計軸② + 複合コントロール -->
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-header">
-            <span class="card-title">集計軸を選択</span>
-          </div>
+        <!-- ② 設定カード（モード別） -->
+        <div class="card" id="step3-config-card" style="margin-bottom:16px">
           <div class="card-body">
-            <div class="step3-axis-section-title">分析軸</div>
-            <div id="step3-axis-selector" style="margin-bottom:4px">
-              <div class="step3-axis-search-wrap">
-                <input type="text" id="step3-axis-search" class="step3-axis-search-input" placeholder="集計軸を検索…" autocomplete="off">
-                <select id="step3-axis-select" class="step3-axis-select" size="6">
-                  <option value="" disabled>集計軸候補がありません。</option>
+
+            <!-- ブランド比較パネル -->
+            <div id="step3-panel-brand_comparison">
+              <div class="step3-config-row">
+                <label class="step3-config-label">基本軸</label>
+                <select id="step3-basic-axis-select" class="step3-config-select">
+                  <option value="">（未選択）</option>
                 </select>
               </div>
+              <div class="step3-config-row">
+                <label class="step3-config-label">比較軸</label>
+                <select id="step3-comparison-axis-select" class="step3-config-select">
+                  <option value="">（なし）</option>
+                </select>
+              </div>
+              <details id="step3-filter-details-brand" class="step3-filter-details">
+                <summary class="step3-filter-summary">
+                  絞り込み条件
+                  <span id="step3-filter-badge-brand" class="step3-filter-badge" hidden>絞り込み中</span>
+                </summary>
+                <div class="step3-filter-inner">
+                  <select id="step3-target-column" class="step3-config-select" style="margin-bottom:4px">
+                    <option value="">（絞り込みなし — 全回答者）</option>
+                  </select>
+                  <div id="step3-target-values-section" style="display:none; margin-top:8px">
+                    <div class="step3-config-sublabel">
+                      絞り込み値
+                      <span id="step3-target-values-count" style="font-weight:400; font-size:.78rem; color:var(--color-text-muted)"></span>
+                    </div>
+                    <div class="step3-target-ctrl-bar">
+                      <button id="step3-target-all-btn" class="btn btn-secondary btn-sm">全選択</button>
+                      <button id="step3-target-none-btn" class="btn btn-secondary btn-sm">全解除</button>
+                      <input type="text" id="step3-target-value-search" class="step3-target-search" placeholder="検索…" autocomplete="off">
+                    </div>
+                    <div id="step3-target-values-list" class="step3-target-cb-list"></div>
+                  </div>
+                </div>
+              </details>
+              <div class="step3-config-row" style="margin-top:12px">
+                <label class="step3-config-label">集計対象設問</label>
+                <div id="step3-question-checkboxes" class="step3-question-cb-list"></div>
+              </div>
+              <div style="margin-top:16px; text-align:right">
+                <button id="step3-generate-btn" class="btn btn-primary">グラフ生成</button>
+              </div>
             </div>
-            <div id="step3-secondary-axis-wrapper"></div>
-            <div id="step3-composite-controls" style="display:none"></div>
-            <div id="step3-axis-ncount" style="margin-top:12px; display:none"></div>
+
+            <!-- 特定対象深掘りパネル -->
+            <div id="step3-panel-deep_dive" hidden>
+              <div class="step3-config-row">
+                <label class="step3-config-label">基本軸</label>
+                <select id="step3-dive-basic-axis-select" class="step3-config-select">
+                  <option value="">（未選択）</option>
+                </select>
+              </div>
+              <div class="step3-config-row">
+                <label class="step3-config-label">対象</label>
+                <select id="step3-dive-target-select" class="step3-config-select" disabled>
+                  <option value="">（基本軸を先に選択）</option>
+                </select>
+              </div>
+              <div class="step3-config-row">
+                <label class="step3-config-label">比較軸</label>
+                <select id="step3-dive-comparison-axis-select" class="step3-config-select">
+                  <option value="">（未選択）</option>
+                </select>
+              </div>
+              <details id="step3-filter-details-dive" class="step3-filter-details">
+                <summary class="step3-filter-summary">
+                  絞り込み条件（追加）
+                  <span id="step3-filter-badge-dive" class="step3-filter-badge" hidden>絞り込み中</span>
+                </summary>
+                <div class="step3-filter-inner">
+                  <select id="step3-dive-filter-column" class="step3-config-select" style="margin-bottom:4px">
+                    <option value="">（絞り込みなし）</option>
+                  </select>
+                  <div id="step3-dive-filter-values-section" style="display:none; margin-top:8px">
+                    <div id="step3-dive-filter-values-list" class="step3-target-cb-list"></div>
+                  </div>
+                </div>
+              </details>
+              <div class="step3-config-row" style="margin-top:12px">
+                <label class="step3-config-label">集計対象設問</label>
+                <div id="step3-dive-question-checkboxes" class="step3-question-cb-list"></div>
+              </div>
+              <div style="margin-top:16px; text-align:right">
+                <button id="step3-dive-generate-btn" class="btn btn-primary">生成</button>
+              </div>
+            </div>
+
+            <!-- 設問比較パネル -->
+            <div id="step3-panel-question_comparison" hidden>
+              <div class="step3-config-row">
+                <label class="step3-config-label">集計軸</label>
+                <select id="step3-qcomp-axis-select" class="step3-config-select">
+                  <option value="">（なし — 全体集計）</option>
+                </select>
+              </div>
+              <div class="step3-config-row" style="margin-top:12px">
+                <label class="step3-config-label">集計対象設問</label>
+                <div id="step3-qcomp-question-checkboxes" class="step3-question-cb-list"></div>
+              </div>
+              <div class="step3-config-row" style="margin-top:12px">
+                <label class="step3-config-label">ページ生成方式</label>
+                <div class="step3-radio-group">
+                  <label class="step3-radio-item">
+                    <input type="radio" name="step3-page-mode" value="per_question" checked>
+                    <span>設問ごとに1ページ</span>
+                  </label>
+                  <label class="step3-radio-item">
+                    <input type="radio" name="step3-page-mode" value="integrated">
+                    <span>1ページに統合</span>
+                  </label>
+                </div>
+              </div>
+              <div style="margin-top:16px; text-align:right">
+                <button id="step3-qcomp-generate-btn" class="btn btn-primary">生成</button>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -484,7 +621,7 @@
         <!-- 結果エリア -->
         <div id="step3-results">
           <div id="step3-placeholder" style="text-align:center; padding:80px 0; color:var(--color-text-muted); font-size:1rem">
-            左のサイドバーから集計セットを選択してください
+            設定を選択して「グラフ生成」を押してください
           </div>
         </div>
 
@@ -504,26 +641,27 @@
       <!-- 右: メインエリア -->
       <div class="report-main-area">
 
-        <!-- 設定モード -->
+        <!-- 設定パネル（集計選択） -->
         <div id="report-settings-panel" class="report-settings-panel">
 
-          <!-- 集計結果選択 -->
+          <!-- 集計一覧 -->
           <div class="report-section">
-            <div class="report-section-label">
-              集計結果を選択
-              <span class="text-sm text-muted">（STEP3で集計済みの設問）</span>
+            <div class="report-section-label">集計一覧（STEP3から追加）</div>
+            <div style="display:flex; gap:6px; margin-bottom:8px">
+              <button id="report-cr-select-all-btn" class="btn btn-secondary btn-xs">全選択</button>
+              <button id="report-cr-select-none-btn" class="btn btn-secondary btn-xs">全解除</button>
             </div>
             <div id="report-chart-result-list" class="report-checkbox-list"></div>
             <div id="report-chart-result-empty"
-                 style="font-size:.8rem;color:var(--color-text-muted);display:none">
-              STEP3で集計を実行すると、ここに一覧が表示されます
+                 style="font-size:.8rem;color:var(--color-text-muted);line-height:1.6">
+              STEP3 で集計を実行した後、グラフカードの「レポートへ追加」ボタンを押すと、ここに一覧が表示されます。
             </div>
           </div>
 
-          <!-- 生成ボタン -->
+          <!-- 追加ボタン -->
           <div class="report-section">
             <button id="report-generate-btn" class="btn btn-primary" style="width:100%">
-              ▶ ページを追加生成
+              ▶ 選択した集計をページに追加
             </button>
             <div id="report-generate-error" class="report-error" style="display:none"></div>
           </div>
@@ -537,6 +675,7 @@
             <button id="report-duplicate-page-btn" class="btn btn-secondary btn-sm">複製</button>
             <button id="report-delete-page-btn" class="btn btn-danger btn-sm">削除</button>
             <button id="report-export-png-btn" class="btn btn-secondary btn-sm">📥 PNG</button>
+            <button id="report-export-pptx-btn" class="btn btn-secondary btn-sm">📊 PPTX</button>
             <button id="report-add-page-btn" class="btn report-add-page-btn-primary">＋ ページを追加</button>
           </div>
           <div class="report-preview-body">
@@ -572,7 +711,7 @@
                   <button id="edit-subtitle-reset-btn" class="btn btn-secondary btn-xs">自動に戻す</button>
                   <div class="report-edit-inline" style="margin-top:4px">
                     <label class="report-edit-label-sm">フォントサイズ</label>
-                    <input type="number" id="edit-subtitle-font-size" min="7" max="18" step="1" value="8" class="report-edit-number-sm">px
+                    <input type="number" id="edit-subtitle-font-size" min="4" max="18" step="1" value="8" class="report-edit-number-sm">px
                   </div>
                 </div>
               </div>
@@ -580,8 +719,8 @@
               <!-- グラフタブ -->
               <div class="report-edit-tabcontent" data-tabcontent="chart" style="display:none">
                 <div class="report-edit-field">
-                  <label class="report-edit-label">グラフモード</label>
-                  <div id="edit-chart-mode-grid" class="report-chart-mode-grid"></div>
+                  <label class="report-edit-label">グラフ種別（STEP3から継承）</label>
+                  <div id="edit-chart-mode-grid"></div>
                 </div>
                 <!-- グラフ高さ -->
                 <div class="report-edit-field">
@@ -651,31 +790,76 @@
                   <label class="report-edit-label">フォントサイズ</label>
                   <div class="report-edit-inline">
                     <label class="report-edit-label-sm">軸ラベル</label>
-                    <input type="number" id="edit-axis-font-size" min="7" max="18" step="1" value="10" class="report-edit-number-sm">px
+                    <input type="number" id="edit-axis-font-size" min="4" max="18" step="1" value="10" class="report-edit-number-sm">px
                   </div>
                   <div class="report-edit-inline">
                     <label class="report-edit-label-sm">データラベル</label>
-                    <input type="number" id="edit-label-font-size" min="7" max="18" step="1" value="10" class="report-edit-number-sm">px
+                    <input type="number" id="edit-label-font-size" min="4" max="18" step="1" value="10" class="report-edit-number-sm">px
                   </div>
                   <div class="report-edit-inline">
                     <label class="report-edit-label-sm">凡例</label>
-                    <input type="number" id="edit-legend-font-size" min="7" max="18" step="1" value="11" class="report-edit-number-sm">px
+                    <input type="number" id="edit-legend-font-size" min="4" max="18" step="1" value="11" class="report-edit-number-sm">px
                   </div>
+                </div>
+                <!-- 分割グラフ設定 (splitMode != "normal" のとき表示) -->
+                <!-- 旧: 分割グラフ設定（列数のみ）— JS 側で非表示に固定、後方互換のためコードを残す -->
+                <div id="edit-split-section" class="report-edit-field report-edit-section-divider" style="display:none">
+                  <label class="report-edit-label">分割グラフ設定</label>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">列数</label>
+                    <select id="edit-split-cols" class="report-edit-select-sm">
+                      <option value="">自動</option>
+                      <option value="1">1列</option>
+                      <option value="2">2列</option>
+                      <option value="3">3列</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- 新: 分割グラフ管理（グラフ一覧）— splitMode != "normal" のとき表示 -->
+                <div id="edit-split-graph-list-section" class="report-edit-field report-edit-section-divider" style="display:none">
+                  <div class="split-graph-list-header">
+                    <label class="report-edit-label" style="margin:0">グラフ一覧</label>
+                    <button id="edit-split-reflow-btn" class="btn btn-secondary btn-xs">自動再配置</button>
+                  </div>
+                  <div class="report-edit-inline" style="gap:6px; margin:6px 0 8px">
+                    <label class="report-edit-label-sm">グラフ数/ページ</label>
+                    <select id="edit-split-ipp" class="report-edit-select-sm">
+                      <option value="">自動</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                      <option value="6">6</option>
+                    </select>
+                    <label class="report-edit-label-sm">配置</label>
+                    <select id="edit-split-layout" class="report-edit-select-sm">
+                      <option value="auto">自動</option>
+                      <option value="cols1">1列</option>
+                      <option value="cols2">2列</option>
+                      <option value="cols3">3列</option>
+                      <option value="grid2x2">2×2</option>
+                      <option value="grid3x2">3×2</option>
+                    </select>
+                  </div>
+                  <div id="edit-split-graph-list" class="split-graph-list"></div>
                 </div>
               </div>
 
               <!-- 表示タブ -->
               <div class="report-edit-tabcontent" data-tabcontent="display" style="display:none">
-                <!-- 行列入れ替え -->
+                <!-- 選択肢並び順 -->
                 <div class="report-edit-field">
-                  <label class="report-edit-toggle-row">
-                    <input type="checkbox" id="edit-transpose">
-                    <span>行列入れ替え</span>
-                  </label>
+                  <label class="report-edit-label">選択肢の並び順</label>
+                  <select id="edit-sort-order" class="report-edit-select-sm">
+                    <option value="original">元の順序</option>
+                    <option value="desc">降順（高い順）</option>
+                    <option value="asc">昇順（低い順）</option>
+                  </select>
                 </div>
                 <!-- 選択肢フィルタ -->
                 <div class="report-edit-field report-edit-section-divider">
-                  <label class="report-edit-label">選択肢の表示／非表示</label>
+                  <label class="report-edit-label">選択肢の並び替え・表示／非表示</label>
                   <div id="edit-choice-filter-list" class="report-choice-filter-list"></div>
                 </div>
                 <!-- 集計表 -->
@@ -706,7 +890,7 @@
                   </div>
                   <div class="report-edit-inline" style="margin-top:4px">
                     <label class="report-edit-label-sm">フォントサイズ</label>
-                    <input type="number" id="edit-table-font-size" min="7" max="16" step="1" value="9" class="report-edit-number-sm">px
+                    <input type="number" id="edit-table-font-size" min="4" max="16" step="1" value="9" class="report-edit-number-sm">px
                   </div>
                 </div>
               </div>
@@ -989,5 +1173,23 @@
 
 <script type="module" src="/static/js/app.js?v=12"></script>
 <script type="module" src="/static/js/report.js?v=1"></script>
+
+<!-- STEP3 レポート追加 重複確認モーダル -->
+<div id="step3-duplicate-modal" class="modal-overlay" style="display:none">
+  <div class="modal-dialog" style="max-width:440px">
+    <div class="modal-header">
+      <h3 class="modal-title">同じ集計のページが既に存在します</h3>
+    </div>
+    <div class="modal-body">
+      <p><strong id="step3-dup-page-title"></strong> の集計がSTEP4にすでに追加されています。</p>
+      <p style="margin-top:8px">どうしますか？</p>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px">
+      <button id="step3-dup-cancel-btn"    class="btn btn-ghost">キャンセル</button>
+      <button id="step3-dup-add-btn"       class="btn btn-secondary">新しいページとして追加</button>
+      <button id="step3-dup-overwrite-btn" class="btn btn-primary">上書き更新</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

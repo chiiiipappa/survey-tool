@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, setActivePanel } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3QuestionPageMode, setStep3SelectedQuestionCodes } from "./state.js";
 
 import { generateCrosstab } from "./api.js";
 import { yieldToMain, showToast } from "./app.js";
@@ -490,16 +490,284 @@ export function initStep3Panel() {
 
 function _onStateChange() {
   if (AppState.activePanel !== "step3") return;
-  _renderTargetFilterSection();
-  _renderAxisSelector();
+  _renderModeCard();
+  _renderConfigCard();
   _renderViewPanel();
   _renderSidebar();
-  const nc = document.getElementById("step3-axis-ncount");
-  if (nc) { nc.style.display = "none"; nc.innerHTML = ""; }
 }
 
 // ---------------------------------------------------------------------------
-// セクション0: 分析対象フィルタ
+// セクション0-A: 分析モード管理
+// ---------------------------------------------------------------------------
+
+function _renderModeCard() {
+  const card = document.getElementById("step3-mode-card");
+  if (!card) return;
+
+  card.querySelectorAll(".step3-mode-tab").forEach(btn => {
+    const active = btn.dataset.mode === AppState.step3Mode;
+    btn.classList.toggle("active", active);
+  });
+
+  if (!card._modeInitialized) {
+    card._modeInitialized = true;
+    card.querySelectorAll(".step3-mode-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        setStep3Mode(btn.dataset.mode);
+      });
+    });
+  }
+}
+
+function _renderConfigCard() {
+  const mode = AppState.step3Mode || "brand_comparison";
+  const panels = ["brand_comparison", "deep_dive", "question_comparison"];
+  panels.forEach(m => {
+    const el = document.getElementById(`step3-panel-${m}`);
+    if (el) el.hidden = (m !== mode);
+  });
+
+  if (mode === "brand_comparison") _renderBrandComparisonPanel();
+  else if (mode === "deep_dive") _renderDeepDivePanel();
+  else _renderQuestionComparisonPanel();
+}
+
+// ---------------------------------------------------------------------------
+// セクション0-B: ブランド比較パネル
+// ---------------------------------------------------------------------------
+
+function _buildAxisSelectOptions(candidates, selectedCode, includeNone, noneLabel) {
+  const noneOpt = includeNone
+    ? `<option value="">${_esc(noneLabel ?? "（なし）")}</option>`
+    : "";
+  const opts = candidates.map(code => {
+    const { text, badge } = _getAxisSelectorLabel(code);
+    const label = `${code}　${text}　[${badge}]`;
+    return `<option value="${_esc(code)}"${code === selectedCode ? " selected" : ""}>${_esc(label)}</option>`;
+  }).join("");
+  return noneOpt + opts;
+}
+
+function _buildQuestionCheckboxes(containerId, questionCodes, selectedCodes) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const selectedSet = new Set(selectedCodes);
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  if (!questionCodes.length) {
+    el.innerHTML = `<div style="color:var(--color-text-muted); font-size:.82rem; padding:4px 0">
+      左のサイドバーから集計セットを選択してください</div>`;
+    return;
+  }
+  el.innerHTML = questionCodes.map(code => {
+    const q = qMap[code];
+    const label = q ? `${code}　${q.question_text ?? ""}` : code;
+    return `<label class="step3-question-cb-item">
+      <input type="checkbox" value="${_esc(code)}"${selectedSet.has(code) ? " checked" : ""}>
+      <span>${_esc(label)}</span>
+    </label>`;
+  }).join("");
+
+  el.addEventListener("change", e => {
+    const cb = e.target.closest("input[type=checkbox]");
+    if (!cb) return;
+    const cur = new Set(AppState.step3SelectedQuestionCodes);
+    cb.checked ? cur.add(cb.value) : cur.delete(cb.value);
+    setStep3SelectedQuestionCodes([...cur]);
+  }, { once: false, passive: true });
+}
+
+function _renderBrandComparisonPanel() {
+  const candidates = _getAxisCandidates();
+
+  // 基本軸
+  const basicSel = document.getElementById("step3-basic-axis-select");
+  if (basicSel) {
+    basicSel.innerHTML = _buildAxisSelectOptions(candidates, AppState.step3BasicAxisCode, true, "（未選択）");
+    if (!basicSel._basicInitialized) {
+      basicSel._basicInitialized = true;
+      basicSel.addEventListener("change", () => setStep3BasicAxis(basicSel.value));
+    }
+  }
+
+  // 比較軸（基本軸を除いた候補）
+  const compCandidates = candidates.filter(c => c !== AppState.step3BasicAxisCode);
+  const compSel = document.getElementById("step3-comparison-axis-select");
+  if (compSel) {
+    compSel.innerHTML = _buildAxisSelectOptions(compCandidates, AppState.step3ComparisonAxisCode, true, "（なし）");
+    if (!compSel._compInitialized) {
+      compSel._compInitialized = true;
+      compSel.addEventListener("change", () => setStep3ComparisonAxis(compSel.value));
+    }
+  }
+
+  // 絞り込み条件（既存のフィルタUIを流用）
+  _renderTargetFilterSection();
+
+  // 集計対象設問
+  const activeCodes = _getActiveSetQuestionCodes();
+  const selected = AppState.step3SelectedQuestionCodes;
+  _buildQuestionCheckboxes("step3-question-checkboxes", activeCodes, selected);
+
+  // グラフ生成ボタン
+  const genBtn = document.getElementById("step3-generate-btn");
+  if (genBtn && !genBtn._genInitialized) {
+    genBtn._genInitialized = true;
+    genBtn.addEventListener("click", () => _runStep3());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// セクション0-C: 特定対象深掘りパネル
+// ---------------------------------------------------------------------------
+
+let _diveFilerColumnChoices = [];
+
+function _renderDeepDivePanel() {
+  const candidates = _getAxisCandidates();
+
+  // 基本軸
+  const basicSel = document.getElementById("step3-dive-basic-axis-select");
+  if (basicSel) {
+    basicSel.innerHTML = _buildAxisSelectOptions(candidates, AppState.step3BasicAxisCode, true, "（未選択）");
+    if (!basicSel._diveBasicInitialized) {
+      basicSel._diveBasicInitialized = true;
+      basicSel.addEventListener("change", () => {
+        setStep3BasicAxis(basicSel.value);
+        setStep3DeepDiveTarget("");
+      });
+    }
+  }
+
+  // 対象（基本軸の選択肢）
+  const targetSel = document.getElementById("step3-dive-target-select");
+  if (targetSel) {
+    const basicCode = AppState.step3BasicAxisCode;
+    const choices = basicCode ? getTargetValues(basicCode) : [];
+    targetSel.disabled = !basicCode;
+    targetSel.innerHTML = basicCode
+      ? [`<option value="">（対象を選択）</option>`,
+         ...choices.map(v => `<option value="${_esc(v)}"${v === AppState.step3DeepDiveTarget ? " selected" : ""}>${_esc(v)}</option>`)
+        ].join("")
+      : `<option value="">（基本軸を先に選択）</option>`;
+    if (!targetSel._diveTargetInitialized) {
+      targetSel._diveTargetInitialized = true;
+      targetSel.addEventListener("change", () => setStep3DeepDiveTarget(targetSel.value));
+    }
+  }
+
+  // 比較軸（基本軸を除いた候補）
+  const compCandidates = candidates.filter(c => c !== AppState.step3BasicAxisCode);
+  const compSel = document.getElementById("step3-dive-comparison-axis-select");
+  if (compSel) {
+    compSel.innerHTML = _buildAxisSelectOptions(compCandidates, AppState.step3ComparisonAxisCode, true, "（未選択）");
+    if (!compSel._diveCompInitialized) {
+      compSel._diveCompInitialized = true;
+      compSel.addEventListener("change", () => setStep3ComparisonAxis(compSel.value));
+    }
+  }
+
+  // 絞り込み（追加フィルタ — diveモード専用列）
+  const diveFilterSel = document.getElementById("step3-dive-filter-column");
+  if (diveFilterSel) {
+    const diveFilterCode = diveFilterSel.value;
+    diveFilterSel.innerHTML = `<option value="">（絞り込みなし）</option>` +
+      candidates.filter(c => c !== AppState.step3BasicAxisCode && c !== AppState.step3ComparisonAxisCode)
+        .map(code => {
+          const { text } = _getAxisSelectorLabel(code);
+          return `<option value="${_esc(code)}"${code === diveFilterCode ? " selected" : ""}>${_esc(code)}　${_esc(text)}</option>`;
+        }).join("");
+    const diveFilterValSec = document.getElementById("step3-dive-filter-values-section");
+    const diveFilterValList = document.getElementById("step3-dive-filter-values-list");
+    if (!diveFilterSel._diveFilterInitialized) {
+      diveFilterSel._diveFilterInitialized = true;
+      diveFilterSel.addEventListener("change", () => {
+        _diveFilerColumnChoices = getTargetValues(diveFilterSel.value);
+        if (diveFilterValSec) diveFilterValSec.style.display = diveFilterSel.value ? "" : "none";
+        if (diveFilterValList && diveFilterSel.value) {
+          diveFilterValList.innerHTML = _diveFilerColumnChoices.map(v =>
+            `<label class="step3-target-cb-item"><input type="checkbox" value="${_esc(v)}"><span>${_esc(v)}</span></label>`
+          ).join("");
+        }
+      });
+    }
+  }
+
+  // 集計対象設問
+  const activeCodes = _getActiveSetQuestionCodes();
+  const selected = AppState.step3SelectedQuestionCodes;
+  _buildQuestionCheckboxes("step3-dive-question-checkboxes", activeCodes, selected);
+
+  // 生成ボタン
+  const genBtn = document.getElementById("step3-dive-generate-btn");
+  if (genBtn && !genBtn._diveGenInitialized) {
+    genBtn._diveGenInitialized = true;
+    genBtn.addEventListener("click", () => _runStep3());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// セクション0-D: 設問比較パネル
+// ---------------------------------------------------------------------------
+
+function _renderQuestionComparisonPanel() {
+  const candidates = _getAxisCandidates();
+
+  // 集計軸（オプション）
+  const qcompAxisSel = document.getElementById("step3-qcomp-axis-select");
+  if (qcompAxisSel) {
+    qcompAxisSel.innerHTML = _buildAxisSelectOptions(candidates, AppState.step3BasicAxisCode, true, "（なし — 全体集計）");
+    if (!qcompAxisSel._qcompInitialized) {
+      qcompAxisSel._qcompInitialized = true;
+      qcompAxisSel.addEventListener("change", () => setStep3BasicAxis(qcompAxisSel.value));
+    }
+  }
+
+  // 集計対象設問（全セット or アクティブセット）
+  const activeCodes = _getActiveSetQuestionCodes();
+  const selected = AppState.step3SelectedQuestionCodes;
+  _buildQuestionCheckboxes("step3-qcomp-question-checkboxes", activeCodes, selected);
+
+  // ページ生成方式ラジオ
+  const pageMode = AppState.step3QuestionPageMode || "per_question";
+  document.querySelectorAll("input[name='step3-page-mode']").forEach(radio => {
+    radio.checked = (radio.value === pageMode);
+    if (!radio._pageModeInitialized) {
+      radio._pageModeInitialized = true;
+      radio.addEventListener("change", () => {
+        if (radio.checked) setStep3QuestionPageMode(radio.value);
+      });
+    }
+  });
+
+  // 生成ボタン
+  const genBtn = document.getElementById("step3-qcomp-generate-btn");
+  if (genBtn && !genBtn._qcompGenInitialized) {
+    genBtn._qcompGenInitialized = true;
+    genBtn.addEventListener("click", () => _runStep3());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// セクション0-E: アクティブセット設問コード取得
+// ---------------------------------------------------------------------------
+
+function _getActiveSetQuestionCodes() {
+  const activeSetId = AppState.step3ActiveSetId;
+  const excluded = new Set(AppState.excludedQuestionCodes);
+  if (!activeSetId) return [];
+
+  let set = AppState.questionSets.find(s => s.setId === activeSetId);
+  if (!set) {
+    for (const parent of AppState.questionSets) {
+      const child = (parent.children ?? []).find(c => c.setId === activeSetId);
+      if (child) { set = child; break; }
+    }
+  }
+  return (set?.questionCodes ?? []).filter(c => !excluded.has(c));
+}
+
+// ---------------------------------------------------------------------------
+// セクション0: 絞り込みフィルタ（旧セクション0 — ブランド比較モードで流用）
 // ---------------------------------------------------------------------------
 
 let _filterColumnChoices = [];  // 現在の対象列の選択肢リスト（全件）
@@ -509,26 +777,23 @@ function _renderTargetFilterSection() {
   const valSec   = document.getElementById("step3-target-values-section");
   const valList  = document.getElementById("step3-target-values-list");
   const valCount = document.getElementById("step3-target-values-count");
-  const badge    = document.getElementById("step3-filter-active-badge");
+  const badge    = document.getElementById("step3-filter-badge-brand");
   if (!colSel) return;
 
   const candidates = _getAxisCandidates();
 
-  // 分析対象列の選択肢を構築（軸候補と同じセット）
   const colOptions = candidates.map(code => {
     const { text, badge: typeBadge } = _getAxisSelectorLabel(code);
     return `<option value="${_esc(code)}" ${code === AppState.step3TargetFilterColumn ? "selected" : ""}>${_esc(code)}　${_esc(text)}　[${_esc(typeBadge)}]</option>`;
   }).join("");
   colSel.innerHTML = `<option value="">（絞り込みなし — 全回答者）</option>${colOptions}`;
 
-  // イベントを一度だけ登録（early return の前に配置）
   if (!colSel._filterInitialized) {
     colSel._filterInitialized = true;
 
     colSel.addEventListener("change", () => {
       setStep3TargetFilterColumn(colSel.value);
       _renderTargetFilterSection();
-      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
     });
 
     document.getElementById("step3-target-all-btn")?.addEventListener("click", () => {
@@ -539,13 +804,11 @@ function _renderTargetFilterSection() {
       visible2.forEach(v => prevSel.add(v));
       setStep3TargetFilterValues([...prevSel]);
       _renderTargetFilterSection();
-      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
     });
 
     document.getElementById("step3-target-none-btn")?.addEventListener("click", () => {
       setStep3TargetFilterValues([]);
       _renderTargetFilterSection();
-      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
     });
 
     document.getElementById("step3-target-value-search")?.addEventListener("input", () => {
@@ -559,11 +822,9 @@ function _renderTargetFilterSection() {
       cb.checked ? cur.add(cb.value) : cur.delete(cb.value);
       setStep3TargetFilterValues([...cur]);
       _renderTargetFilterSection();
-      if (AppState.step3ActiveSetId) _runCrosstab(AppState.step3ActiveSetId);
     });
   }
 
-  // 対象列が選択されていれば値リストを表示
   const selectedCol = AppState.step3TargetFilterColumn;
   if (!selectedCol || !candidates.includes(selectedCol)) {
     if (valSec) valSec.style.display = "none";
@@ -573,12 +834,10 @@ function _renderTargetFilterSection() {
 
   if (valSec) valSec.style.display = "";
 
-  // 選択肢を取得（共通ユーティリティを使用）
   _filterColumnChoices = getTargetValues(selectedCol);
 
   const selected = new Set(AppState.step3TargetFilterValues);
 
-  // 検索フィルタ
   const searchInput = document.getElementById("step3-target-value-search");
   const searchTerm  = (searchInput?.value ?? "").toLowerCase().trim();
   const visible     = searchTerm
@@ -812,8 +1071,7 @@ function _renderSidebar() {
   }
 
   const hasStep2 = Boolean(AppState.step2Filename);
-  const hasAxis  = Boolean(AppState.step3ActiveAxisCode) && _getAxisCandidates().length > 0;
-  const canRun   = hasStep2 && hasAxis;
+  const canRun   = hasStep2;
   const activeId = AppState.step3ActiveSetId;
 
   // 分析対象 OFF の設問コードセット
@@ -877,10 +1135,7 @@ function _renderSidebar() {
   let html = filtered.map(itemHtml).join("");
 
   if (!canRun) {
-    const msg = !hasStep2
-      ? "STEP2 でデータを読み込んでください"
-      : "集計軸を選択してください";
-    html += `<div class="step3-nav-note">${_esc(msg)}</div>`;
+    html += `<div class="step3-nav-note">STEP2 でデータを読み込んでください</div>`;
   }
 
   nav.innerHTML = html;
@@ -888,33 +1143,148 @@ function _renderSidebar() {
   nav.querySelectorAll(".step3-nav-item:not(.step3-nav-item-disabled)").forEach(item => {
     item.addEventListener("click", () => {
       const setId = item.dataset.setid;
+      const set = AppState.questionSets.find(s => s.setId === setId)
+        || (() => { for (const p of AppState.questionSets) { const c = (p.children??[]).find(c=>c.setId===setId); if(c) return c; } })();
+      const excluded = new Set(AppState.excludedQuestionCodes);
+      const codes = (set?.questionCodes ?? []).filter(c => !excluded.has(c));
       setStep3ActiveSetId(setId);
-      _runCrosstab(setId);
+      setStep3SelectedQuestionCodes(codes);
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// レポート追加 重複確認モーダル
+// ---------------------------------------------------------------------------
+
+function _showDuplicateModal(cr, s3, existingPage) {
+  const modal = document.getElementById("step3-duplicate-modal");
+  const titleEl = document.getElementById("step3-dup-page-title");
+  if (!modal) return;
+  if (titleEl) {
+    titleEl.textContent = existingPage.aggregationConfig?.questionCode
+      ? existingPage.aggregationConfig.questionCode + " の集計"
+      : cr.title ?? "この集計";
+  }
+  const overwriteBtn = document.getElementById("step3-dup-overwrite-btn");
+  const addBtn       = document.getElementById("step3-dup-add-btn");
+  const cancelBtn    = document.getElementById("step3-dup-cancel-btn");
+  const close = () => { modal.style.display = "none"; };
+  overwriteBtn?.addEventListener("click", () => {
+    close();
+    overwriteReportPageFromStep3(existingPage.id ?? existingPage.pageId, cr, s3);
+    setActivePanel("report");
+    showToast("レポートページを上書き更新しました。");
+  }, { once: true });
+  addBtn?.addEventListener("click", () => {
+    close();
+    addReportPageFromStep3(cr, s3);
+    setActivePanel("report");
+    showToast("新しいページとして追加しました。");
+  }, { once: true });
+  cancelBtn?.addEventListener("click", close, { once: true });
+  modal.style.display = "";
 }
 
 // ---------------------------------------------------------------------------
 // クロス集計実行
 // ---------------------------------------------------------------------------
 
-async function _runCrosstab(setId) {
+// 二次軸あり API レスポンスを STEP4 の comparison_datasets 形式に変換
+function _buildComparisonDatasets(result, data) {
+  const primaryCats = data.primary_axis_categories ?? [];
+  const sep = " × ";
+  return primaryCats.map(primaryCat => {
+    const prefix = primaryCat + sep;
+    const indices = (data.axis_categories ?? [])
+      .map((cat, i) => ({ cat, i }))
+      .filter(({ cat }) => cat.startsWith(prefix))
+      .map(({ i }) => i);
+    const secCats   = indices.map(i => data.axis_categories[i].slice(prefix.length));
+    const secTotals = indices.map(i => (data.axis_totals ?? [])[i] ?? 0);
+    const filteredRows = (result.rows ?? []).map(row => ({
+      ...row,
+      percents: indices.map(i => (row.percents ?? [])[i] ?? 0),
+      counts:   indices.map(i => (row.counts   ?? [])[i] ?? 0),
+    }));
+    return { target_value: primaryCat, rows: filteredRows, axis_categories: secCats, axis_totals: secTotals };
+  });
+}
+
+// モードに応じてパラメータを解決してクロス集計を実行する
+async function _runStep3() {
+  const mode = AppState.step3Mode || "brand_comparison";
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+
+  const selectedCodes = AppState.step3SelectedQuestionCodes;
+  if (!selectedCodes.length) { showToast("集計対象設問を1つ以上選択してください"); return; }
+
+  let axisCode, secAxisCode, filterColumn, filterValues;
+
+  if (mode === "brand_comparison") {
+    axisCode = AppState.step3BasicAxisCode;
+    secAxisCode = AppState.step3ComparisonAxisCode || "";
+    filterColumn = AppState.step3TargetFilterColumn;
+    filterValues = AppState.step3TargetFilterValues;
+    if (!axisCode) { showToast("基本軸を選択してください"); return; }
+
+  } else if (mode === "deep_dive") {
+    axisCode = AppState.step3ComparisonAxisCode;
+    secAxisCode = "";
+    filterColumn = AppState.step3BasicAxisCode;
+    filterValues = AppState.step3DeepDiveTarget ? [AppState.step3DeepDiveTarget] : [];
+    if (!axisCode) { showToast("比較軸を選択してください"); return; }
+    if (!filterColumn || !filterValues.length) { showToast("基本軸と対象を選択してください"); return; }
+
+    // dive専用の追加フィルタは現在未実装（拡張余地あり）
+
+  } else { // question_comparison
+    axisCode = AppState.step3BasicAxisCode || "";
+    secAxisCode = "";
+    filterColumn = "";
+    filterValues = [];
+    if (!axisCode) { showToast("集計軸を選択してください（または「なし」のままで全体集計）"); }
+  }
+
+  // 旧stateを同期（キャッシュキーと ChartResult 生成のため）
+  AppState.step3ActiveAxisCode = axisCode;
+  AppState.step3SecondaryAxisCode = secAxisCode;
+  AppState.step3TargetFilterColumn = filterColumn;
+  AppState.step3TargetFilterValues = Array.isArray(filterValues) ? filterValues : [];
+
+  await _runCrosstab(null, selectedCodes);
+  // deep_dive: step3ActiveViewId は "basicAxis||compAxis" のままなので
+  // スワップした axisCode を元に戻して一貫性を保つ
+  if (mode === "deep_dive") {
+    AppState.step3ActiveAxisCode = AppState.step3BasicAxisCode;
+    AppState.step3SecondaryAxisCode = AppState.step3ComparisonAxisCode;
+  }
+}
+
+async function _runCrosstab(setId, overrideCodes) {
   const activeSetId = setId || AppState.step3ActiveSetId;
   const axisCode = AppState.step3ActiveAxisCode;
-  if (!axisCode || !activeSetId || !AppState.sessionToken) return;
+  if (!axisCode || !AppState.sessionToken) return;
 
   const secAxisCode = AppState.step3SecondaryAxisCode;
-  // フラット一覧で検索、なければ children を探索（カスタム親セットの子）
-  let set = AppState.questionSets.find(s => s.setId === activeSetId);
-  if (!set) {
-    for (const parent of AppState.questionSets) {
-      const child = (parent.children ?? []).find(c => c.setId === activeSetId);
-      if (child) { set = child; break; }
+  let targetCodes;
+  if (overrideCodes) {
+    targetCodes = overrideCodes;
+  } else {
+    // フラット一覧で検索、なければ children を探索（カスタム親セットの子）
+    let set = AppState.questionSets.find(s => s.setId === activeSetId);
+    if (!set) {
+      for (const parent of AppState.questionSets) {
+        const child = (parent.children ?? []).find(c => c.setId === activeSetId);
+        if (child) { set = child; break; }
+      }
     }
+    const _excl = new Set(AppState.excludedQuestionCodes);
+    targetCodes = (set?.questionCodes ?? []).filter(c => !_excl.has(c));
   }
-  const _excl = new Set(AppState.excludedQuestionCodes);
-  const targetCodes = (set?.questionCodes ?? []).filter(c => !_excl.has(c));
-  const key = _getCacheKey(axisCode, secAxisCode, activeSetId);
+  if (!targetCodes.length) { showToast("集計対象設問がありません"); return; }
+  const key = _getCacheKey(axisCode, secAxisCode, activeSetId || targetCodes.join(","));
 
   const progressEl  = document.getElementById("step3-progress");
   const progressMsg = document.getElementById("step3-progress-msg");
@@ -948,8 +1318,8 @@ async function _runCrosstab(setId) {
     _currentCacheKey = key;
     AppState.step3LastGeneratedAxisCode = axisCode;
     _lastCrosstabData = data;
-    // ChartResult として自動保存（STEP4 が参照する）
-    if (!data.secondary_axis_question_code) {
+    // ChartResult として自動保存（STEP4 が参照する）— 比較軸あり時も生成
+    {
       const col = AppState.step3TargetFilterColumn;
       const vals = AppState.step3TargetFilterValues;
       const filterKey = col ? `${col}:${[...vals].sort().join(",")}` : "";
@@ -965,6 +1335,11 @@ async function _runCrosstab(setId) {
         axis_categories: data.axis_categories,
         axis_totals: data.axis_totals,
         rows: result.rows,
+        secondary_axis_code:  data.secondary_axis_question_code  || undefined,
+        secondary_axis_label: data.secondary_axis_question_text || undefined,
+        comparison_datasets: data.secondary_axis_question_code
+          ? _buildComparisonDatasets(result, data)
+          : undefined,
         target_filter_column: col,
         target_filter_values: [...vals],
         created_at: new Date().toISOString(),
@@ -1115,10 +1490,10 @@ async function _renderSimpleResults(container, data) {
           <button class="btn btn-secondary btn-sm step3-export-excel-btn" data-idx="${idx}" title="Excelとして保存">📊 Excel</button>
           <button class="btn btn-secondary btn-sm step3-export-csv-btn"   data-idx="${idx}" title="CSVとして保存">📄 CSV</button>
           <button class="btn btn-secondary btn-sm step3-export-png-btn"   data-idx="${idx}" title="PNGとして保存">🖼 PNG</button>
-          <button class="btn btn-sm step3-add-report-btn"
+          <button class="btn step3-add-report-btn"
                   data-cr-id="${_esc(`${result.question_code}||${axisCode}||${filterKey}`)}"
-                  style="background:var(--color-primary,#3B82F6);color:#fff"
-                  title="この設問をレポートに追加">＋ レポート</button>
+                  style="background:var(--color-primary,#3B82F6);color:#fff;font-weight:700;padding:5px 22px;font-size:.9rem;letter-spacing:.03em;box-shadow:0 2px 6px rgba(59,130,246,.35)"
+                  title="この設問をレポートに追加">＋ レポートに追加</button>
         </div>
       </div>
 
@@ -1167,6 +1542,42 @@ async function _renderSimpleResults(container, data) {
                    style="width:70px; accent-color:var(--color-primary,#3B82F6)">
             <span class="step3-bar-width-val" style="min-width:30px">${Math.round((settings.barWidth ?? 0.9) * 100)}%</span>
           </span>
+          <span class="step3-split-ctrl" style="display:flex; align-items:center; gap:3px; font-size:.78rem; border-left:1px solid var(--color-border,#e5e7eb); margin-left:4px; padding-left:8px">
+            <span style="color:var(--color-text-muted)">分割：</span>
+            <button class="step3-split-btn btn btn-secondary btn-sm${settings.splitMode === "normal" ? " active" : ""}" data-q="${_esc(result.question_code)}" data-idx="${idx}" data-split="normal" style="padding:1px 6px; font-size:.78rem">通常</button>
+            <button class="step3-split-btn btn btn-secondary btn-sm${settings.splitMode === "by_axis" ? " active" : ""}" data-q="${_esc(result.question_code)}" data-idx="${idx}" data-split="by_axis" style="padding:1px 6px; font-size:.78rem">基本軸</button>
+            <button class="step3-split-btn btn btn-secondary btn-sm${settings.splitMode === "by_comparison" ? " active" : ""}" data-q="${_esc(result.question_code)}" data-idx="${idx}" data-split="by_comparison" style="padding:1px 6px; font-size:.78rem">比較軸</button>
+          </span>
+          <span class="step3-split-cols-ctrl" style="display:${settings.splitMode !== "normal" ? "flex" : "none"}; align-items:center; gap:4px; font-size:.78rem">
+            <span style="color:var(--color-text-muted)">列：</span>
+            <select class="step3-split-cols-select" data-q="${_esc(result.question_code)}" data-idx="${idx}" style="font-size:.78rem; padding:1px 4px">
+              <option value="">自動</option>
+              <option value="1"${settings.splitColumns === 1 ? " selected" : ""}>1列</option>
+              <option value="2"${settings.splitColumns === 2 ? " selected" : ""}>2列</option>
+              <option value="3"${settings.splitColumns === 3 ? " selected" : ""}>3列</option>
+            </select>
+          </span>
+          <span class="step3-split-ipp-ctrl" style="display:${settings.splitMode !== "normal" ? "flex" : "none"}; align-items:center; gap:4px; font-size:.78rem; border-left:1px solid var(--color-border,#e5e7eb); margin-left:4px; padding-left:8px">
+            <span style="color:var(--color-text-muted)">件/P：</span>
+            <select class="step3-split-ipp-select" data-q="${_esc(result.question_code)}" data-idx="${idx}" style="font-size:.78rem; padding:1px 4px">
+              <option value="">自動</option>
+              <option value="1"${settings.itemsPerPage === 1 ? " selected" : ""}>1</option>
+              <option value="2"${settings.itemsPerPage === 2 ? " selected" : ""}>2</option>
+              <option value="3"${settings.itemsPerPage === 3 ? " selected" : ""}>3</option>
+              <option value="4"${settings.itemsPerPage === 4 ? " selected" : ""}>4</option>
+              <option value="6"${settings.itemsPerPage === 6 ? " selected" : ""}>6</option>
+            </select>
+          </span>
+          <span class="step3-split-layout-ctrl" style="display:${settings.splitMode !== "normal" ? "flex" : "none"}; align-items:center; gap:4px; font-size:.78rem">
+            <span style="color:var(--color-text-muted)">配置：</span>
+            <select class="step3-split-layout-select" data-q="${_esc(result.question_code)}" data-idx="${idx}" style="font-size:.78rem; padding:1px 4px">
+              <option value="auto"${!settings.pageLayout || settings.pageLayout === "auto" ? " selected" : ""}>自動</option>
+              <option value="vertical"${settings.pageLayout === "vertical" ? " selected" : ""}>縦並び</option>
+              <option value="horizontal"${settings.pageLayout === "horizontal" ? " selected" : ""}>横並び</option>
+              <option value="cols2"${settings.pageLayout === "cols2" ? " selected" : ""}>2列</option>
+              <option value="cols3"${settings.pageLayout === "cols3" ? " selected" : ""}>3列</option>
+            </select>
+          </span>
         </div>
 
         <!-- 表示選択肢パネル -->
@@ -1208,7 +1619,11 @@ async function _renderSimpleResults(container, data) {
     if (!areaEl) return;
     _scheduleChartRender(areaEl, () => {
       if (isCompositeSimple) _applyCompositeColorLookup(axis_categories);
-      _renderChartInArea(areaEl, result, settings, axis_categories, axis_totals);
+      if (settings.splitMode === "by_axis" || settings.splitMode === "by_comparison") {
+        _renderSplitInArea(areaEl, result, settings, axis_categories, axis_totals, settings.splitMode);
+      } else {
+        _renderChartInArea(areaEl, result, settings, axis_categories, axis_totals);
+      }
       _compositeColorPaletteLookup = null;
     });
   });
@@ -1556,9 +1971,57 @@ function _onResultsChange(e) {
     _rerenderQuestionFull(parseInt(barWidthSlider.dataset.idx, 10));
     return;
   }
+
+  // 分割列セレクト
+  const splitColsSel = e.target.closest(".step3-split-cols-select");
+  if (splitColsSel) {
+    const v = splitColsSel.value;
+    setStep3Setting(splitColsSel.dataset.q, "splitColumns", v ? parseInt(v, 10) : null);
+    _rerenderQuestion(parseInt(splitColsSel.dataset.idx, 10));
+    return;
+  }
+
+  // 分割: 件/ページ セレクト
+  const ippSel = e.target.closest(".step3-split-ipp-select");
+  if (ippSel) {
+    const v = ippSel.value;
+    setStep3Setting(ippSel.dataset.q, "itemsPerPage", v ? parseInt(v, 10) : null);
+    return;
+  }
+
+  // 分割: 配置形式 セレクト
+  const layoutSel = e.target.closest(".step3-split-layout-select");
+  if (layoutSel) {
+    setStep3Setting(layoutSel.dataset.q, "pageLayout", layoutSel.value || "auto");
+    return;
+  }
 }
 
 function _onResultsClick(e) {
+  // 分割モードボタン
+  const splitBtn = e.target.closest(".step3-split-btn");
+  if (splitBtn) {
+    const q   = splitBtn.dataset.q;
+    const idx = parseInt(splitBtn.dataset.idx, 10);
+    const mode = splitBtn.dataset.split;
+    setStep3Setting(q, "splitMode", mode);
+    // ボタンのアクティブ状態を更新
+    splitBtn.closest(".step3-split-ctrl")
+      .querySelectorAll(".step3-split-btn")
+      .forEach(b => b.classList.toggle("active", b.dataset.split === mode));
+    // 列選択・件/P・配置 の表示切替
+    const bar = splitBtn.closest(".step3-controls-bar");
+    if (bar) {
+      const visible = mode !== "normal" ? "flex" : "none";
+      [".step3-split-cols-ctrl", ".step3-split-ipp-ctrl", ".step3-split-layout-ctrl"].forEach(sel => {
+        const el = bar.querySelector(sel);
+        if (el) el.style.display = visible;
+      });
+    }
+    _rerenderQuestion(idx);
+    return;
+  }
+
   // グラフタイプ ボタングループ
   const chartBtn = e.target.closest(".step3-chart-btn");
   if (chartBtn) {
@@ -1693,10 +2156,17 @@ function _onResultsClick(e) {
   if (addReportBtn) {
     const crId = addReportBtn.dataset.crId;
     const cr = (AppState.chartResults ?? []).find(r => r.id === crId);
-    if (!cr) { showToast("集計結果が見つかりません。STEP3で集計を実行してください。", true); return; }
-    addChartResultsAsReportPages([cr]);
-    setActivePanel("report");
-    showToast("レポートに追加しました。");
+    if (!cr) { showToast("集計結果が見つかりません。先にグラフ生成を実行してください。", true); return; }
+    // type_code 依存のデフォルト込みで設定を取得
+    const s3 = _getSettings(cr.question_code, cr.type_code);
+    const existing = findDuplicateReportPage(cr.id);
+    if (existing) {
+      _showDuplicateModal(cr, s3, existing);
+    } else {
+      addReportPageFromStep3(cr, s3);
+      setActivePanel("report");
+      showToast("レポートに追加しました。");
+    }
     return;
   }
 
@@ -1734,7 +2204,7 @@ function _onResultsClick(e) {
 function _rerenderQuestion(idx) {
   const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
   if (!d) return;
-  // split モードの場合は全体再描画
+  // composite split モードの場合は全体再描画
   if (d.secondary_axis_question_code && AppState.step3CompositeDisplayMode === "split") {
     _rerenderCompositeAll();
     return;
@@ -1745,7 +2215,11 @@ function _rerenderQuestion(idx) {
   if (!areaEl) return;
   const settings = _getSettings(result.question_code, result.type_code);
   if (d.secondary_axis_question_code) _applyCompositeColorLookup(d.axis_categories);
-  _renderChartInArea(areaEl, result, settings, d.axis_categories, d.axis_totals);
+  if (settings.splitMode === "by_axis" || settings.splitMode === "by_comparison") {
+    _renderSplitInArea(areaEl, result, settings, d.axis_categories, d.axis_totals, settings.splitMode);
+  } else {
+    _renderChartInArea(areaEl, result, settings, d.axis_categories, d.axis_totals);
+  }
   _compositeColorPaletteLookup = null;
 }
 
@@ -1765,7 +2239,11 @@ function _rerenderQuestionFull(idx) {
   const areaEl = document.getElementById(`step3-chart-area-${idx}`);
   if (areaEl) {
     if (d.secondary_axis_question_code) _applyCompositeColorLookup(d.axis_categories);
-    _renderChartInArea(areaEl, result, settings, d.axis_categories, d.axis_totals);
+    if (settings.splitMode === "by_axis" || settings.splitMode === "by_comparison") {
+      _renderSplitInArea(areaEl, result, settings, d.axis_categories, d.axis_totals, settings.splitMode);
+    } else {
+      _renderChartInArea(areaEl, result, settings, d.axis_categories, d.axis_totals);
+    }
     _compositeColorPaletteLookup = null;
   }
 
@@ -1894,8 +2372,10 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
     areaEl.style.height  = "0";
     return;
   }
-  areaEl.style.display = "";
-  areaEl.style.height  = settings.chartHeight ? settings.chartHeight + "px" : "";
+  areaEl.style.display     = "";
+  areaEl.style.height      = settings.chartHeight ? settings.chartHeight + "px" : "";
+  areaEl.style.aspectRatio = "";  // split mode から戻ったとき CSS class に戻す
+  areaEl.style.overflow    = "";
 
   const hidden = settings.hiddenChoices ?? [];
   const rows   = _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), sortOrder);
@@ -1940,6 +2420,151 @@ function _renderChartInArea(areaEl, result, settings, axisCategories, axisTotals
   else                                 config = _buildBarConfig(sorted, axisCategories, isH, showPctLabel, tp, barWidth, aggMode);
 
   _charts.set(areaKey, new Chart(canvas, config));
+}
+
+// ---------------------------------------------------------------------------
+// 分割グラフ描画
+// ---------------------------------------------------------------------------
+
+/** 仮想サブデータセット生成 (by_axis: axis_categories ごと) */
+function _buildSplitByAxisDatasets(rows, axisCategories, axisTotals) {
+  const choiceLabels = rows.map(r => r.label);
+  return axisCategories.map((cat, ci) => ({
+    target_value:    cat,
+    rows: [{ label: cat, percents: rows.map(r => r.percents[ci] ?? 0), counts: rows.map(r => (r.counts ?? [])[ci] ?? 0) }],
+    axis_categories: choiceLabels,
+    axis_totals:     [axisTotals[ci] ?? 0],
+  }));
+}
+
+/** 仮想サブデータセット生成 (by_comparison: rows ごと) */
+function _buildSplitByComparisonDatasets(rows, axisCategories, axisTotals) {
+  return rows.map(row => ({
+    target_value:    row.label,
+    rows: [{ label: row.label, percents: axisCategories.map((_, ci) => row.percents[ci] ?? 0), counts: axisCategories.map((_, ci) => (row.counts ?? [])[ci] ?? 0) }],
+    axis_categories: [...axisCategories],
+    axis_totals:     [...axisTotals],
+  }));
+}
+
+/** 全サブチャートの共有 Y スケール上限を計算 */
+function _calcSharedMax(datasets) {
+  let max = 0;
+  datasets.forEach(ds => ds.rows.forEach(r => r.percents.forEach(v => { if (v > max) max = v; })));
+  return Math.min(100, Math.ceil(max / 10) * 10) || 100;
+}
+
+/**
+ * 分割グラフをエリアに描画する。
+ * mode: "by_axis" | "by_comparison"
+ */
+function _renderSplitInArea(areaEl, result, settings, axisCategories, axisTotals, mode) {
+  const areaKey = areaEl.id;
+  // 既存チャート破棄
+  const existing = _charts.get(areaKey);
+  if (existing) {
+    (Array.isArray(existing) ? existing : [existing]).forEach(c => c.destroy());
+    _charts.delete(areaKey);
+  }
+
+  const hidden      = settings.hiddenChoices ?? [];
+  const filteredRows = _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), settings.sortOrder);
+  if (!filteredRows.length || !axisCategories.length) { areaEl.innerHTML = ""; return; }
+
+  const datasets = mode === "by_axis"
+    ? _buildSplitByAxisDatasets(filteredRows, axisCategories, axisTotals)
+    : _buildSplitByComparisonDatasets(filteredRows, axisCategories, axisTotals);
+
+  if (!datasets.length) { areaEl.innerHTML = ""; return; }
+
+  // 共有 Y スケール
+  const sharedMax = _calcSharedMax(datasets);
+
+  // 列数 (auto: ≤2→1列, 3-4→2列, ≥5→3列)
+  const n    = datasets.length;
+  const cols = settings.splitColumns || (n <= 2 ? 1 : n <= 4 ? 2 : 3);
+
+  // 各サブチャートの単一系列カラー（元データのパレットから取得）
+  const paletteLabels = mode === "by_axis" ? axisCategories : filteredRows.map(r => r.label);
+  const palette       = _getColorsForGraph(result.question_code, paletteLabels);
+
+  // グリッド HTML (aspect-ratio/overflow を上書きして全グラフを表示)
+  areaEl.style.display     = "";
+  areaEl.style.height      = "";
+  areaEl.style.position    = "";
+  areaEl.style.aspectRatio = "unset";
+  areaEl.style.overflow    = "visible";
+  areaEl.innerHTML = `<div class="step3-split-grid" data-cols="${cols}">${
+    datasets.map((ds, di) => `
+      <div class="step3-split-item">
+        <div class="step3-split-item-title">${_esc(ds.target_value)}<span class="step3-split-n">n=${ds.axis_totals?.[0] ?? 0}</span></div>
+        <div class="step3-split-chart-wrap"><canvas id="${areaKey}-split-${di}"></canvas></div>
+      </div>`).join("")
+  }</div>`;
+
+  const chartInstances = [];
+  const isH      = settings.orientation === "h";
+  const showLabel = settings.showPctLabel ?? true;
+  const barWidth  = settings.barWidth ?? 0.9;
+  const aggMode   = settings.aggMode ?? "col_pct";
+
+  datasets.forEach((ds, di) => {
+    const canvas = document.getElementById(`${areaKey}-split-${di}`);
+    if (!canvas) return;
+    const color  = palette[di] ?? COLORS[di % COLORS.length];
+    const chart  = _buildSplitSubChart(canvas, ds, isH, showLabel, barWidth, aggMode, sharedMax, color);
+    if (chart) chartInstances.push(chart);
+  });
+  _charts.set(areaKey, chartInstances);
+}
+
+/** 分割サブチャート 1枚分の Chart.js インスタンスを生成して返す */
+function _buildSplitSubChart(canvas, ds, isH, showLabel, barWidth, aggMode, sharedMax, color) {
+  const labels   = ds.axis_categories;
+  const row      = ds.rows[0];
+  if (!labels?.length || !row) return null;
+
+  const data = aggMode === "count"
+    ? labels.map((_, ci) => row.counts[ci] ?? 0)
+    : labels.map((_, ci) => row.percents[ci] ?? 0);
+
+  const dataset = {
+    label:           row.label,
+    data,
+    backgroundColor: color,
+    barPercentage:   barWidth,
+  };
+
+  const maxVal = aggMode === "count"
+    ? Math.ceil(Math.max(...data) / 10) * 10 || 10
+    : sharedMax;
+
+  const scaleAxis = isH ? "x" : "y";
+  const tickCb    = aggMode === "count" ? v => v : v => `${v}%`;
+  const scales    = isH
+    ? { x: { beginAtZero: true, max: maxVal, ticks: { callback: tickCb } }, y: { ticks: { font: { size: 10 } } } }
+    : { x: { ticks: { font: { size: 10 }, maxRotation: 45 } }, y: { beginAtZero: true, max: maxVal, ticks: { callback: tickCb } } };
+
+  return new Chart(canvas, {
+    type: "bar",
+    data: { labels, datasets: [dataset] },
+    options: {
+      indexAxis:           isH ? "y" : "x",
+      responsive:          true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend:     { display: false },
+        tooltip:    { callbacks: { label: ctx => {
+          const v = ctx.parsed ? (isH ? ctx.parsed.x : ctx.parsed.y) : null;
+          return aggMode === "count"
+            ? `${v !== null ? Math.round(v) : "N/A"}`
+            : `${v !== null ? v.toFixed(1) : "N/A"}%`;
+        }}},
+        datalabels: _datalabels(showLabel, isH),
+      },
+      scales,
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2683,6 +3308,10 @@ function _getSettings(questionCode, typeCode) {
     chartHeight:            s.chartHeight            ?? null,
     barWidth:               s.barWidth               ?? null,
     aggMode:                s.aggMode                ?? "col_pct",
+    splitMode:              s.splitMode              ?? "normal",
+    splitColumns:           s.splitColumns           ?? null,
+    itemsPerPage:           s.itemsPerPage           ?? null,
+    pageLayout:             s.pageLayout             ?? "auto",
   };
 }
 

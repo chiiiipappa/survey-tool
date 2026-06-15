@@ -46,12 +46,21 @@ class UploadResponse(BaseModel):
     filename: str
     file_size: int
     encoding_detected: str
-    row_count: int
-    column_names: List[str]
-    choice_column_mode: Literal["multi_col", "single_col_delimited", "none"]
-    questions: List[QuestionItem]
+    row_count: int = 0
+    column_names: List[str] = Field(default_factory=list)
+    choice_column_mode: Literal["multi_col", "single_col_delimited", "none"] = "none"
+    questions: List[QuestionItem] = Field(default_factory=list)
     parse_warnings: List[str] = Field(default_factory=list)
     unknown_types: List[str] = Field(default_factory=list)
+    detected_format: str = ""
+    format_info: dict = Field(default_factory=dict)
+    needs_manual_mapping: bool = False
+    available_columns: List[str] = Field(default_factory=list)
+
+
+class RemapRequest(BaseModel):
+    session_token: str
+    col_mapping: dict
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +306,10 @@ class LayoutSaveData(BaseModel):
     step3_question_settings: dict = Field(default_factory=dict)  # 新
     step1_axis_colors: dict = Field(default_factory=dict)
     user_palettes: dict = Field(default_factory=dict)
+    step3_mode: str = "brand_comparison"
+    step3_basic_axis_code: str = ""
+    step3_comparison_axis_code: str = ""
+    step3_deep_dive_target: str = ""
     step3_secondary_axis_code: str = ""
     step3_composite_display_mode: str = "split"
     step3_color_priority: str = "axis1"

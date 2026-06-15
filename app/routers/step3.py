@@ -40,6 +40,7 @@ def _crosstab_sa(
     q_col: str,
     axis_col: str,
     axis_cats: list[str],
+    q=None,
 ) -> list[CrosstabRow]:
     """SA/数値設問のクロス集計行を生成する。"""
     sub = df[[q_col, axis_col]].copy()
@@ -51,6 +52,15 @@ def _crosstab_sa(
     ct = pd.crosstab(sub[q_col], sub[axis_col])
     # 軸カテゴリー順に列を並べ、足りない列は 0 補完
     ct = ct.reindex(columns=axis_cats, fill_value=0)
+
+    # STEP1の選択肢順に行を並べ替える（_build_axis_cats と同一ロジック）
+    index_labels = list(ct.index.astype(str))
+    if q and q.choices:
+        choice_labels = [c.choice_text for c in q.choices]
+        ordered = [lbl for lbl in choice_labels if lbl in set(index_labels)]
+        remaining = [lbl for lbl in index_labels if lbl not in set(choice_labels)]
+        index_labels = ordered + remaining
+        ct = ct.reindex(index_labels, fill_value=0)
 
     # N数（軸カテゴリーごと）
     col_totals = ct.sum(axis=0)
@@ -432,7 +442,7 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
             if code not in df.columns:
                 warnings.append(f"列 '{code}' がデータに存在しないためスキップしました。")
                 continue
-            rows = _crosstab_sa(df, code, axis_col, axis_cats)
+            rows = _crosstab_sa(df, code, axis_col, axis_cats, q=q)
             if not rows:
                 continue
             results.append(CrosstabResult(

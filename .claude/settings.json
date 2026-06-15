@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import app.schemas; import app.parser.layout_csv; import app.routers.step3; print\\('imports OK'\\)\")",
+      "Bash(node --check static/js/questions.js)",
+      "Bash(node --check static/js/state.js)",
+      "Bash(chmod +x /Users/chigusakatayama/survey-tool/run.command)",
+      "Bash(curl -s http://localhost:8002/api/step2/state?session_token=99d9608c-7b0b-4691-b044-e45fa852a9a2)",
+      "Bash(.venv/bin/python3 -m uvicorn app.main:app --port 8000)",
+      "Bash(curl -s -X POST http://localhost:8000/api/upload -F file=@sample_data/layout_sample.csv)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s http://127.0.0.1:8000/api/upload -F file=@/Users/chigusakatayama/survey-tool/sample_data/layout_sample.csv)",
+      "Bash(awk 'NR==800,NR==1050 {if \\(/^function |^async function/\\) print NR\": \"$0}' /Users/chigusakatayama/survey-tool/static/js/step3.js)",
+      "Bash(python -c \"import ast; import py_compile; py_compile.compile\\('app/main.py'\\); py_compile.compile\\('app/routers/questions.py'\\); py_compile.compile\\('app/schemas.py'\\); print\\('Python OK'\\)\")",
+      "Bash(node --check static/js/step3.js)",
+      "Bash(node --check static/js/step2.js)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('app/schemas.py'\\); py_compile.compile\\('app/routers/step3.py'\\); py_compile.compile\\('app/routers/questions.py'\\); print\\('All OK'\\)\")",
+      "Bash(node --check /Users/chigusakatayama/survey-tool/static/js/upload.js)",
+      "Bash(cat)",
+      "Bash(.venv/bin/python /tmp/test_upload_debug.py)",
+      "Bash(.venv/bin/python /tmp/test_upload_fix.py)",
+      "Bash(.venv/bin/python /tmp/test_label_fix.py)",
+      "Bash(git -C /Users/chigusakatayama/survey-tool log --oneline -5)",
+      "Bash(python -c \"from app.schemas import ProjectSaveRequest, LayoutSaveData; r = ProjectSaveRequest\\(session_token='test'\\); l = LayoutSaveData\\(layout_file={'name':'test','encoding':'utf-8','size':0}\\); print\\('chart_results:', r.chart_results, l.chart_results\\)\")",
+      "Bash(curl -s http://localhost:8000/static/js/state.js)",
+      "Bash(curl -s http://localhost:8000/static/js/upload.js)",
+      "Bash(git commit -m ' *)",
+      "Bash(python -m py_compile app/main.py)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node --check /Users/chigusakatayama/survey-tool/static/js/step2.js)",
+      "Bash(curl -s -X POST http://localhost:8000/api/upload -F file=@/Users/chigusakatayama/survey-tool/sample_data/layout_sample.csv)",
+      "Bash(python -c \"from app.pptx_builder import build_pptx; print\\('import OK'\\)\")",
+      "Bash(python -m uvicorn app.main:app --port 8002 --timeout-graceful-shutdown 1)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8002/health)",
+      "Bash(kill %1)",
+      "Bash(python -m uvicorn app.main:app --port 8003)",
+      "Bash(curl -s -X POST http://localhost:8003/api/report/export/pptx -H 'Content-Type: application/json' -d '{\"pages\":[{\"id\":\"p1\",\"aggregationConfig\":{\"chartResultId\":\"cr1\"},\"chartConfig\":{\"chartMode\":\"vbar\",\"showLabels\":true,\"labelDecimalPlaces\":1,\"showLegend\":true,\"legendPosition\":\"bottom\",\"transpose\":false,\"hiddenChoices\":[],\"sortOrder\":\"original\",\"colorSettings\":{}},\"layoutConfig\":{\"titleOverride\":null,\"showQuestionText\":true,\"showTable\":false}}],\"chart_results\":[{\"id\":\"cr1\",\"title\":\"テスト\",\"question_text\":\"Q1\",\"rows\":[{\"label\":\"A\",\"percents\":[50.0],\"counts\":[50]}],\"axis_categories\":[\"全体\"],\"axis_totals\":[100],\"comparison_datasets\":null}]}' -o /tmp/api_test.pptx -w '%{http_code}\\\\n')",
+      "Bash(python -c \"from app.pptx_builder import build_pptx; print\\('OK'\\)\")",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

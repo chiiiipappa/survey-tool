@@ -112,6 +112,9 @@ function _renderSetSummary() {
   const names = sets.slice(0, 3).map(s => `「${escHtml(s.setName)}」`).join("");
   const more = sets.length > 3 ? `ほか${sets.length - 3}セット` : "";
   summary.innerHTML = `<span style="font-size:.85rem; color:var(--color-text-muted)">${names}${more} / 計${totalQ}問</span>`;
+
+  const hint = document.getElementById("step1-set-summary-hint");
+  if (hint) hint.textContent = `（${sets.length}セット / 計${totalQ}問）`;
 }
 
 // ---------------------------------------------------------------------------
@@ -643,20 +646,44 @@ function onStateChange() {
 
 function updateCsvInfoCard() {
   const card = document.getElementById("csv-loaded-card");
-  if (!card) return;
-  if (!AppState.sessionToken || !AppState.sourceFilename) {
-    card.style.display = "none";
-    return;
-  }
-  card.style.display = "";
+  const infoCard = document.getElementById("step1-layout-info-card");
+  const hasData = !!(AppState.sessionToken && AppState.sourceFilename);
+
+  if (card) card.style.display = hasData ? "" : "none";
+  if (infoCard) infoCard.style.display = hasData ? "" : "none";
+
+  if (!hasData) return;
+
   const dt = AppState.loadedAt
-    ? AppState.loadedAt.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    ? AppState.loadedAt.toLocaleString("ja-JP", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : "–";
-  document.getElementById("csv-loaded-info").innerHTML = `
-    <div class="info-item"><span class="info-label">ファイル:</span><span class="info-value">${escHtml(AppState.sourceFilename)}</span></div>
-    <div class="info-item"><span class="info-label">設問数:</span><span class="info-value">${AppState.rowCount} 件</span></div>
-    <div class="info-item"><span class="info-label">読込日時:</span><span class="info-value">${dt}</span></div>
-  `;
+
+  const infoItems = document.getElementById("step1-layout-info-items");
+  if (infoItems) {
+    infoItems.innerHTML = `
+      <div class="step1-info-item">
+        <span class="step1-info-label">ファイル名</span>
+        <span class="step1-info-value">${escHtml(AppState.sourceFilename)}</span>
+      </div>
+      <div class="step1-info-item">
+        <span class="step1-info-label">設問数</span>
+        <span class="step1-info-value">${AppState.rowCount} 問</span>
+      </div>
+      <div class="step1-info-item">
+        <span class="step1-info-label">読込日時</span>
+        <span class="step1-info-value">${dt}</span>
+      </div>
+    `;
+  }
+
+  const csvInfo = document.getElementById("csv-loaded-info");
+  if (csvInfo) {
+    csvInfo.innerHTML = `
+      <div class="info-item"><span class="info-label">ファイル:</span><span class="info-value">${escHtml(AppState.sourceFilename)}</span></div>
+      <div class="info-item"><span class="info-label">設問数:</span><span class="info-value">${AppState.rowCount} 件</span></div>
+      <div class="info-item"><span class="info-label">読込日時:</span><span class="info-value">${dt}</span></div>
+    `;
+  }
 }
 
 
@@ -1130,6 +1157,10 @@ export function initProjectHeader() {
         AppState.step1AxisColors,
         AppState.userPalettes,
         {
+          mode: AppState.step3Mode,
+          basicAxisCode: AppState.step3BasicAxisCode,
+          compAxisCode: AppState.step3ComparisonAxisCode,
+          deepDiveTarget: AppState.step3DeepDiveTarget,
           secondaryAxisCode: AppState.step3SecondaryAxisCode,
           displayMode: AppState.step3CompositeDisplayMode,
           colorPriority: AppState.step3ColorPriority,

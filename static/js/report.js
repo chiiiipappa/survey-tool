@@ -6,8 +6,13 @@ import {
   setReportProject, addReportProjectPages, addChartResultsAsReportPages,
   updateReportProjectPage, duplicateReportProjectPage, removeReportProjectPage,
   setActiveReportPageId, setReportMainMode,
+  reorderReportPage,
+  getSplitGroupPages, reflowSplitPages,
+  moveSplitGraphUp, moveSplitGraphDown, moveSplitGraphToAdjacentPage,
+  toggleSplitGraphVisibility,
 } from "./state.js";
 import { showToast } from "./app.js";
+import { exportReportPptx } from "./api.js";
 
 // Chart.js インスタンス管理
 const _charts = new Map();
@@ -65,8 +70,10 @@ function _defaultChartSettings() {
     labelMinPercent: 2,
     labelAnchor: "center",
     labelAlign: "center",
-    // 行列入れ替え
+    // 行列入れ替え（STEP3から継承、STEP4では変更不可）
     transpose: false,
+    // 選択肢並び順
+    sortOrder: "original",  // "original" | "asc" | "desc"
     // 選択肢フィルタ
     hiddenChoices: [],
     // 集計表設定
@@ -84,6 +91,18 @@ function _defaultChartSettings() {
   };
 }
 
+// 新フォーマット (chartConfig + layoutConfig) と旧フォーマット (chartSettings) 両対応
+function _getEffectiveCS(page) {
+  if (page?.chartConfig && page?.layoutConfig) {
+    const merged = { ...page.chartConfig };
+    for (const [k, v] of Object.entries(page.layoutConfig)) {
+      if (v !== null) merged[k] = v;
+    }
+    return merged;
+  }
+  return { ..._defaultChartSettings(), ...(page?.chartSettings ?? {}) };
+}
+
 // ---------------------------------------------------------------------------
 // 初期化
 // ---------------------------------------------------------------------------
@@ -96,6 +115,15 @@ export function initReport() {
 
 function _bindEvents() {
   document.getElementById("report-generate-btn")?.addEventListener("click", _onGenerate);
+
+  document.getElementById("report-cr-select-all-btn")?.addEventListener("click", () => {
+    document.querySelectorAll("#report-chart-result-list input[type='checkbox']")
+      .forEach(cb => { cb.checked = true; });
+  });
+  document.getElementById("report-cr-select-none-btn")?.addEventListener("click", () => {
+    document.querySelectorAll("#report-chart-result-list input[type='checkbox']")
+      .forEach(cb => { cb.checked = false; });
+  });
 
   document.getElementById("report-add-page-btn")?.addEventListener("click", () => {
     setReportMainMode("settings");
@@ -120,6 +148,16 @@ function _bindEvents() {
     setReportMainMode(pages.length > 0 ? "preview" : "settings");
   });
   document.getElementById("report-export-png-btn")?.addEventListener("click", _exportActivePng);
+  document.getElementById("report-export-pptx-btn")?.addEventListener("click", async () => {
+    const pages = AppState.reportProject?.pages ?? [];
+    if (!pages.length) { showToast("レポートページがありません。", true); return; }
+    try {
+      const warning = await exportReportPptx(pages, AppState.chartResults ?? []);
+      if (warning) showToast(`⚠️ PPTX: ${warning}`, true);
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  });
 
   // 編集タブ切替
   document.querySelectorAll(".report-edit-tab").forEach(btn => {
@@ -249,9 +287,36 @@ function _bindEditPanelEvents() {
     _patchChartSettings({ tableFontSize: parseInt(e.target.value, 10) || 9 });
   });
 
-  // 行列入れ替え
-  document.getElementById("edit-transpose")?.addEventListener("change", (e) => {
-    _patchChartSettings({ transpose: e.target.checked });
+  // 選択肢並び順
+  document.getElementById("edit-sort-order")?.addEventListener("change", (e) => {
+    _patchChartSettings({ sortOrder: e.target.value });
+  });
+
+  // 分割グラフ: 列数（旧 UI、現在は非表示だが後方互換のため残す）
+  document.getElementById("edit-split-cols")?.addEventListener("change", (e) => {
+    const v = e.target.value;
+    _patchChartSettings({ splitColumns: v ? parseInt(v, 10) : null });
+  });
+
+  // 分割グラフ: 自動再配置ボタン
+  document.getElementById("edit-split-reflow-btn")?.addEventListener("click", () => {
+    const activePageId = AppState.reportProject.activePageId;
+    const page = AppState.reportProject.pages.find(p => (p.id ?? p.pageId) === activePageId);
+    if (!page) return;
+    const chartResultId = page.aggregationConfig?.chartResultId ?? page.chartResultId;
+    if (!chartResultId) return;
+    const ipp    = parseInt(document.getElementById("edit-split-ipp")?.value, 10) || null;
+    const layout = document.getElementById("edit-split-layout")?.value ?? "auto";
+    // 現在非表示の index を収集（どのページにも含まれない index）
+    const cr = AppState.chartResults.find(r => r.id === chartResultId);
+    const splitMode = page.chartConfig?.splitMode ?? "normal";
+    let totalCount = 0;
+    if (splitMode === "by_axis")       totalCount = (cr?.axis_categories ?? []).length;
+    else if (splitMode === "by_comparison") totalCount = (cr?.rows ?? []).length;
+    const groupPages  = getSplitGroupPages(chartResultId);
+    const visibleSet  = new Set(groupPages.flatMap(p => p.chartConfig?.splitDatasetIndices ?? []));
+    const hiddenIndices = Array.from({ length: totalCount }, (_, i) => i).filter(i => !visibleSet.has(i));
+    reflowSplitPages(chartResultId, ipp, layout, hiddenIndices);
   });
 }
 
@@ -269,8 +334,8 @@ function _onStateChange() {
   if (isPreview && (activePageId !== _lastPreviewPageId || AppState.reportMainMode !== _lastPreviewMode)) {
     _lastPreviewPageId = activePageId;
     _lastPreviewMode = AppState.reportMainMode;
-    const activePage = AppState.reportProject.pages.find(p => p.pageId === activePageId);
-    if (activePage && _getPageDisplayData(activePage)) {
+    const activePage = AppState.reportProject.pages.find(p => (p.id ?? p.pageId) === activePageId);
+    if (activePage && (activePage.funnelData || _getPageDisplayData(activePage))) {
       _renderPreview(activePage);
     }
   }
@@ -280,32 +345,37 @@ function _onStateChange() {
   }
 
   if (isPreview) {
-    const activePage = AppState.reportProject.pages.find(p => p.pageId === activePageId);
+    const activePage = AppState.reportProject.pages.find(p => (p.id ?? p.pageId) === activePageId);
     if (activePage) _renderEditPanel(activePage);
   }
 }
 
 // ---------------------------------------------------------------------------
-// 設定フォーム描画
+// 集計リスト描画（STEP3 から追加された ChartResult を表示）
 // ---------------------------------------------------------------------------
 
 function _renderChartResultList() {
-  const list  = document.getElementById("report-chart-result-list");
-  const empty = document.getElementById("report-chart-result-empty");
-  if (!list) return;
+  const listEl = document.getElementById("report-chart-result-list");
+  const emptyEl = document.getElementById("report-chart-result-empty");
+  if (!listEl) return;
+
   const results = AppState.chartResults ?? [];
   if (results.length === 0) {
-    list.innerHTML = "";
-    if (empty) empty.style.display = "";
+    listEl.innerHTML = "";
+    if (emptyEl) emptyEl.style.display = "";
     return;
   }
-  if (empty) empty.style.display = "none";
-  list.innerHTML = results.map(cr =>
-    `<label>
-      <input type="checkbox" name="report-chart-result" value="${_esc(cr.id)}">
-      <span title="${_esc(cr.title)}">${_esc(cr.title)}</span>
-    </label>`
-  ).join("");
+
+  if (emptyEl) emptyEl.style.display = "none";
+  listEl.innerHTML = results.map(cr => {
+    const label = cr.target_filter_values?.length
+      ? `${_esc(cr.title)}（${_esc(cr.target_filter_values.join(", "))}）`
+      : _esc(cr.title);
+    return `<label>
+      <input type="checkbox" name="report-cr" value="${_esc(cr.id)}" checked>
+      <span title="${_esc(cr.id)}">${label}</span>
+    </label>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -318,26 +388,42 @@ function _renderPageList() {
   const { pages, activePageId } = AppState.reportProject;
   if (pages.length === 0) {
     ol.innerHTML = `<li class="report-page-item-empty" style="padding:12px;font-size:.8rem;color:var(--color-text-muted);text-align:center;">
-      ページがありません。<br>設定して「ページを追加生成」してください。
+      ページがありません。<br>STEP3 で集計を追加してください。
     </li>`;
     return;
   }
-  ol.innerHTML = pages.map((p, i) =>
-    `<li class="report-page-item${p.pageId === activePageId ? " active" : ""}" data-page-id="${_esc(p.pageId)}">
+  ol.innerHTML = pages.map((p, i) => {
+    const pid = p.id ?? p.pageId;
+    return `<li class="report-page-item${pid === activePageId ? " active" : ""}" data-page-id="${_esc(pid)}">
       <span class="report-page-item-num">${i + 1}</span>
       <span class="report-page-item-title">${_esc(_displayTitle(p))}</span>
-    </li>`
-  ).join("");
+      <span class="report-page-item-actions">
+        <button class="report-page-order-btn" data-dir="up" title="上へ">↑</button>
+        <button class="report-page-order-btn" data-dir="down" title="下へ">↓</button>
+      </span>
+    </li>`;
+  }).join("");
   ol.querySelectorAll(".report-page-item[data-page-id]").forEach(li => {
-    li.addEventListener("click", () => {
+    li.addEventListener("click", (e) => {
+      if (e.target.closest(".report-page-order-btn")) return;
       setActiveReportPageId(li.dataset.pageId);
       setReportMainMode("preview");
+    });
+    li.querySelectorAll(".report-page-order-btn").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        reorderReportPage(li.dataset.pageId, btn.dataset.dir);
+      });
     });
   });
 }
 
 function _displayTitle(page) {
-  return page.chartSettings?.titleOverride || page.title;
+  return page.layoutConfig?.titleOverride
+    ?? page.chartConfig?.titleOverride
+    ?? page.chartSettings?.titleOverride
+    ?? page.title
+    ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -345,8 +431,9 @@ function _displayTitle(page) {
 // ---------------------------------------------------------------------------
 
 function _getPageDisplayData(page) {
-  if (page.chartResultId) {
-    return (AppState.chartResults ?? []).find(r => r.id === page.chartResultId) ?? null;
+  const crId = page.aggregationConfig?.chartResultId ?? page.chartResultId;
+  if (crId) {
+    return (AppState.chartResults ?? []).find(r => r.id === crId) ?? null;
   }
   return page.generatedData ?? null;
 }
@@ -362,14 +449,22 @@ function _renderPreview(page) {
   _charts.forEach(c => c.destroy());
   _charts.clear();
 
+  canvas.innerHTML = "";
+  const cs = _getEffectiveCS(page);
+
+  if (page.funnelData) {
+    const el = _buildFunnelPage(page, "preview", cs);
+    canvas.appendChild(el);
+    _renderFunnelChart(page, "preview", cs);
+    return;
+  }
+
   const displayData = _getPageDisplayData(page);
   if (!displayData) {
     canvas.innerHTML = `<div style="padding:20px;color:var(--color-text-muted)">集計データが見つかりません</div>`;
     return;
   }
 
-  canvas.innerHTML = "";
-  const cs = { ..._defaultChartSettings(), ...(page.chartSettings ?? {}) };
   const el = _buildPageElement(displayData, "preview", cs);
   canvas.appendChild(el);
   _renderPageChart(displayData, "preview", cs);
@@ -380,7 +475,7 @@ function _renderPreview(page) {
 // ---------------------------------------------------------------------------
 
 function _renderEditPanel(page) {
-  const cs = { ..._defaultChartSettings(), ...(page.chartSettings ?? {}) };
+  const cs = _getEffectiveCS(page);
 
   const displayData = _getPageDisplayData(page);
 
@@ -400,21 +495,11 @@ function _renderEditPanel(page) {
   const showQtEl = document.getElementById("edit-show-question-text");
   if (showQtEl) showQtEl.checked = cs.showQuestionText;
 
-  // グラフモード グリッド
+  // グラフ種別（読み取り専用 — STEP3から継承）
   const grid = document.getElementById("edit-chart-mode-grid");
   if (grid) {
-    grid.innerHTML = CHART_MODES.map(m =>
-      `<button class="report-chart-mode-btn${cs.chartMode === m.id ? " active" : ""}"
-               data-mode="${_esc(m.id)}" title="${_esc(m.label)}">
-        <span class="report-chart-mode-icon">${m.icon}</span>
-        <span>${_esc(m.label)}</span>
-      </button>`
-    ).join("");
-    grid.querySelectorAll(".report-chart-mode-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        _patchChartSettings({ chartMode: btn.dataset.mode });
-      });
-    });
+    const modeMeta = CHART_MODES.find(m => m.id === cs.chartMode) ?? CHART_MODES[0];
+    grid.innerHTML = `<span class="report-chart-mode-readonly">${modeMeta.icon} ${_esc(modeMeta.label)}</span>`;
   }
 
   // グラフ高さ
@@ -489,15 +574,119 @@ function _renderEditPanel(page) {
   const tableFsEl = document.getElementById("edit-table-font-size");
   if (tableFsEl && tableFsEl !== document.activeElement) tableFsEl.value = String(cs.tableFontSize ?? 9);
 
-  // 行列入れ替え
-  const transposeEl = document.getElementById("edit-transpose");
-  if (transposeEl) transposeEl.checked = cs.transpose ?? false;
+  // 選択肢並び順
+  const sortEl = document.getElementById("edit-sort-order");
+  if (sortEl) sortEl.value = cs.sortOrder ?? "original";
 
   // 選択肢フィルタ
   _renderChoiceFilterList(page, cs);
 
+  // 分割グラフ設定セクション (旧: edit-split-section は非表示、新: edit-split-graph-list-section を使用)
+  const splitSection = document.getElementById("edit-split-section");
+  if (splitSection) splitSection.style.display = "none";
+
+  const isSplit = (cs.splitMode ?? "normal") !== "normal";
+  const splitListSection = document.getElementById("edit-split-graph-list-section");
+  if (splitListSection) {
+    splitListSection.style.display = isSplit ? "" : "none";
+    if (isSplit) {
+      const ippEl = document.getElementById("edit-split-ipp");
+      if (ippEl) ippEl.value = String(cs.itemsPerPage ?? "");
+      const layoutEl = document.getElementById("edit-split-layout");
+      if (layoutEl) layoutEl.value = cs.pageLayout ?? "auto";
+      _renderSplitGraphList(page);
+    }
+  }
+
   // カラーリスト
   _renderColorList(page, cs);
+}
+
+function _renderSplitGraphList(page) {
+  const container = document.getElementById("edit-split-graph-list");
+  if (!container) return;
+
+  const chartResultId = page.aggregationConfig?.chartResultId ?? page.chartResultId;
+  const cr = AppState.chartResults.find(r => r.id === chartResultId);
+  if (!cr) { container.innerHTML = ""; return; }
+
+  const splitMode  = page.chartConfig?.splitMode ?? "normal";
+  const groupPages = getSplitGroupPages(chartResultId);
+
+  // 全仮想データセットのラベルを取得
+  const allLabels = splitMode === "by_axis"
+    ? (cr.axis_categories ?? [])
+    : (cr.rows ?? []).map(r => r.row_label ?? r.label ?? "");
+
+  // dsIndex → {pageId, pageNo, posInPage, totalInPage} のマップを構築
+  const dsInfoMap = new Map();
+  groupPages.forEach((p, pgIdx) => {
+    const indices = p.chartConfig?.splitDatasetIndices ?? [];
+    indices.forEach((dsIdx, pos) => {
+      dsInfoMap.set(dsIdx, {
+        pageId:      p.id ?? p.pageId,
+        pageNo:      pgIdx + 1,
+        posInPage:   pos,
+        totalInPage: indices.length,
+        pgIdx,
+      });
+    });
+  });
+
+  const totalPages = groupPages.length;
+
+  const html = allLabels.map((label, dsIdx) => {
+    const info    = dsInfoMap.get(dsIdx);
+    const visible = !!info;
+    const pageNo  = info?.pageNo ?? "-";
+    const isFirst = info?.posInPage === 0;
+    const isLast  = info != null && info.posInPage === info.totalInPage - 1;
+    const isFirstPage = info?.pgIdx === 0;
+    const isLastPage  = info != null && info.pgIdx === totalPages - 1;
+    const safeLbl = label.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    return `<div class="split-graph-item${visible ? "" : " split-graph-item--hidden"}" data-ds-index="${dsIdx}">
+      <span class="split-graph-page-badge">${visible ? `P${pageNo}` : "非"}</span>
+      <span class="split-graph-title" title="${safeLbl}">${safeLbl}</span>
+      <div class="split-graph-actions">
+        <button class="split-graph-btn" data-action="up"   data-ds="${dsIdx}" ${(!visible || isFirst)     ? "disabled" : ""} title="上へ">↑</button>
+        <button class="split-graph-btn" data-action="down" data-ds="${dsIdx}" ${(!visible || isLast)      ? "disabled" : ""} title="下へ">↓</button>
+        <button class="split-graph-btn" data-action="prev" data-ds="${dsIdx}" ${(!visible || isFirstPage) ? "disabled" : ""} title="前ページへ">«</button>
+        <button class="split-graph-btn" data-action="next" data-ds="${dsIdx}" ${(!visible || isLastPage)  ? "disabled" : ""} title="次ページへ">»</button>
+        <label class="split-graph-vis-label">
+          <input type="checkbox" class="split-graph-vis" data-ds="${dsIdx}" ${visible ? "checked" : ""}> 表示
+        </label>
+      </div>
+    </div>`;
+  }).join("");
+
+  container.innerHTML = html;
+
+  // 移動ボタンのイベントハンドラ
+  container.querySelectorAll(".split-graph-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const ds  = parseInt(btn.dataset.ds, 10);
+      const act = btn.dataset.action;
+      // このグラフが現在どのページにいるかを再確認
+      const currentGroupPages = getSplitGroupPages(chartResultId);
+      const ownerPage = currentGroupPages.find(p =>
+        (p.chartConfig?.splitDatasetIndices ?? []).includes(ds)
+      );
+      if (!ownerPage && act !== "vis") return;
+      const ownerPageId = ownerPage ? (ownerPage.id ?? ownerPage.pageId) : null;
+      if      (act === "up")   moveSplitGraphUp(ds, ownerPageId);
+      else if (act === "down") moveSplitGraphDown(ds, ownerPageId);
+      else if (act === "prev") moveSplitGraphToAdjacentPage(ds, ownerPageId, -1);
+      else if (act === "next") moveSplitGraphToAdjacentPage(ds, ownerPageId, +1);
+    });
+  });
+
+  // 表示/非表示 checkbox のイベントハンドラ
+  container.querySelectorAll(".split-graph-vis").forEach(cb => {
+    cb.addEventListener("change", () => {
+      toggleSplitGraphVisibility(parseInt(cb.dataset.ds, 10), chartResultId);
+    });
+  });
 }
 
 function _renderColorList(page, cs) {
@@ -526,8 +715,8 @@ function _renderColorList(page, cs) {
       const label = e.target.dataset.label;
       const pageId = AppState.reportProject.activePageId;
       if (!pageId || !label) return;
-      const page2 = AppState.reportProject.pages.find(p => p.pageId === pageId);
-      const cs2 = { ..._defaultChartSettings(), ...(page2?.chartSettings ?? {}) };
+      const page2 = AppState.reportProject.pages.find(p => (p.id ?? p.pageId) === pageId);
+      const cs2 = _getEffectiveCS(page2);
       const newOverrides = { ...(cs2.colorSettings?.overriddenSeriesColors ?? {}), [label]: e.target.value };
       _patchChartSettings({
         colorSettings: {
@@ -559,20 +748,72 @@ function _renderChoiceFilterList(page, cs) {
     return;
   }
 
-  const hidden = new Set(cs.hiddenChoices ?? []);
-  listEl.innerHTML = allLabels.map(label =>
-    `<label class="report-choice-filter-row">
-      <input type="checkbox" class="edit-choice-cb" data-label="${_esc(label)}" ${hidden.has(label) ? "" : "checked"}>
-      <span style="font-size:.78rem">${_esc(label)}</span>
-    </label>`
-  ).join("");
+  // 手動並び替え順が設定済みなら優先。APIに存在しないラベルは除去、未収録は末尾追加。
+  const savedOrder = cs.rowChoiceOrder;
+  const displayLabels = savedOrder?.length
+    ? [
+        ...savedOrder.filter(l => allLabels.includes(l)),
+        ...allLabels.filter(l => !savedOrder.includes(l)),
+      ]
+    : [...allLabels];
+  const hasManualOrder = !!(savedOrder?.length);
 
+  const hidden = new Set(cs.hiddenChoices ?? []);
+  listEl.innerHTML =
+    `<div class="report-choice-order-header">
+      <button id="edit-choice-order-reset" class="report-choice-order-reset-btn"
+        ${hasManualOrder ? "" : "disabled"} title="STEP1の選択肢順に戻す">調査票の順番に戻す</button>
+    </div>` +
+    displayLabels.map((label, idx) =>
+      `<div class="report-choice-filter-row" data-label="${_esc(label)}">
+        <span class="report-choice-order-btns">
+          <button class="edit-choice-up report-choice-order-btn" data-idx="${idx}"
+            ${idx === 0 ? "disabled" : ""} title="上へ">↑</button>
+          <button class="edit-choice-down report-choice-order-btn" data-idx="${idx}"
+            ${idx === displayLabels.length - 1 ? "disabled" : ""} title="下へ">↓</button>
+        </span>
+        <label class="report-choice-filter-label">
+          <input type="checkbox" class="edit-choice-cb" data-label="${_esc(label)}"
+            ${hidden.has(label) ? "" : "checked"}>
+          <span style="font-size:.78rem">${_esc(label)}</span>
+        </label>
+      </div>`
+    ).join("");
+
+  // チェックボックス変更
   listEl.querySelectorAll(".edit-choice-cb").forEach(cb => {
     cb.addEventListener("change", () => {
       const allCbs = [...listEl.querySelectorAll(".edit-choice-cb")];
       const newHidden = allCbs.filter(c => !c.checked).map(c => c.dataset.label);
       _patchChartSettings({ hiddenChoices: newHidden });
     });
+  });
+
+  // 上ボタン
+  listEl.querySelectorAll(".edit-choice-up").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      if (idx <= 0) return;
+      const newOrder = [...displayLabels];
+      [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
+      _patchChartSettings({ rowChoiceOrder: newOrder });
+    });
+  });
+
+  // 下ボタン
+  listEl.querySelectorAll(".edit-choice-down").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      if (idx >= displayLabels.length - 1) return;
+      const newOrder = [...displayLabels];
+      [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
+      _patchChartSettings({ rowChoiceOrder: newOrder });
+    });
+  });
+
+  // リセットボタン（調査票の順番に戻す）
+  listEl.querySelector("#edit-choice-order-reset")?.addEventListener("click", () => {
+    _patchChartSettings({ rowChoiceOrder: null });
   });
 }
 
@@ -589,20 +830,25 @@ function _getPageColorLabels(page) {
 function _patchChartSettings(patch) {
   const pageId = AppState.reportProject.activePageId;
   if (!pageId) return;
-  const page = AppState.reportProject.pages.find(p => p.pageId === pageId);
+  const page = AppState.reportProject.pages.find(p => (p.id ?? p.pageId) === pageId);
   if (!page) return;
-  const next = { ..._defaultChartSettings(), ...(page.chartSettings ?? {}), ...patch };
-  updateReportProjectPage(pageId, { chartSettings: next });
+  if (page.layoutConfig) {
+    updateReportProjectPage(pageId, { layoutConfig: { ...page.layoutConfig, ...patch } });
+  } else {
+    const next = { ..._defaultChartSettings(), ...(page.chartSettings ?? {}), ...patch };
+    updateReportProjectPage(pageId, { chartSettings: next });
+  }
   _lastPreviewPageId = null;  // 強制再描画
 }
 
 function _syncColorsFromStep3(pageId) {
-  const page = AppState.reportProject.pages.find(p => p.pageId === pageId);
+  const page = AppState.reportProject.pages.find(p => (p.id ?? p.pageId) === pageId);
   if (!page) return;
+  const qCode = page.aggregationConfig?.questionCode ?? page.questionCode;
   const viewId = AppState.step3ActiveViewId;
   const view = AppState.step3Views[viewId];
-  const step3QS = view?.questionSettings?.[page.questionCode]
-                ?? AppState.step3QuestionSettings?.[page.questionCode]
+  const step3QS = view?.questionSettings?.[qCode]
+                ?? AppState.step3QuestionSettings?.[qCode]
                 ?? {};
   _patchChartSettings({
     colorSettings: {
@@ -615,33 +861,38 @@ function _syncColorsFromStep3(pageId) {
 }
 
 // ---------------------------------------------------------------------------
-// レポート生成
+// レポートページ追加（選択した ChartResult から）
 // ---------------------------------------------------------------------------
-
-function _onGenerate() {
-  const errEl = document.getElementById("report-generate-error");
-  if (errEl) errEl.style.display = "none";
-
-  const selectedIds = [...document.querySelectorAll("#report-chart-result-list input:checked")]
-    .map(cb => cb.value);
-  if (selectedIds.length === 0) {
-    _showError("集計結果を1つ以上選択してください。");
-    return;
-  }
-  const selectedResults = selectedIds
-    .map(id => (AppState.chartResults ?? []).find(r => r.id === id))
-    .filter(Boolean);
-  if (selectedResults.length === 0) {
-    _showError("選択した集計結果が見つかりません。STEP3で集計を再実行してください。");
-    return;
-  }
-  addChartResultsAsReportPages(selectedResults);
-  setReportMainMode("preview");
-}
 
 function _showError(msg) {
   const el = document.getElementById("report-generate-error");
   if (el) { el.textContent = msg; el.style.display = ""; }
+}
+
+function _hideError() {
+  const el = document.getElementById("report-generate-error");
+  if (el) el.style.display = "none";
+}
+
+function _onGenerate() {
+  _hideError();
+
+  const selectedIds = [...document.querySelectorAll("#report-chart-result-list input[name='report-cr']:checked")]
+    .map(cb => cb.value);
+
+  if (selectedIds.length === 0) {
+    _showError("集計を1つ以上選択してください。");
+    return;
+  }
+
+  const selected = (AppState.chartResults ?? []).filter(cr => selectedIds.includes(cr.id));
+  if (selected.length === 0) {
+    _showError("選択した集計が見つかりません。");
+    return;
+  }
+
+  addChartResultsAsReportPages(selected);
+  setReportMainMode("preview");
 }
 
 // ---------------------------------------------------------------------------
@@ -721,6 +972,15 @@ function _filterChoices(rows, cs) {
   return rows.filter(r => !cs.hiddenChoices.includes(r.label));
 }
 
+// rowChoiceOrder（手動並び替え）を適用する。order外のラベルは末尾に追加。
+function _applyRowChoiceOrder(rows, order) {
+  if (!order?.length) return rows;
+  const mapped = new Map(rows.map(r => [r.label, r]));
+  const ordered = order.filter(lbl => mapped.has(lbl)).map(lbl => mapped.get(lbl));
+  const remaining = rows.filter(r => !order.includes(r.label));
+  return [...ordered, ...remaining];
+}
+
 // ---------------------------------------------------------------------------
 // ページ HTML 構築
 // ---------------------------------------------------------------------------
@@ -732,7 +992,9 @@ function _buildPageElement(page, idSuffix, cs) {
   const opts = _resolveChartMode(cs, hasComparison, page.axis_categories);
 
   const isBrandChart = opts.brandHbar || opts.brandVbar;
-  const isSmallMultiple = !isBrandChart && (opts.forceSmall || hasComparison);
+  const splitMode = cs.splitMode ?? "normal";
+  const isSplitMode = splitMode !== "normal" && !isBrandChart;
+  const isSmallMultiple = !isBrandChart && (opts.forceSmall || hasComparison || isSplitMode);
 
   const title = cs.titleOverride ?? page.title;
   const subtitle = cs.showQuestionText
@@ -767,7 +1029,7 @@ function _buildPageElement(page, idSuffix, cs) {
       ${isBrandChart
         ? `<div class="report-chart-wrap" ${chartStyle}><canvas id="report-chart-${idSuffix}"></canvas></div>`
         : isSmallMultiple
-          ? _buildSmallMultiplesHtml(page, idSuffix, chartStyle)
+          ? _buildSmallMultiplesHtml(page, idSuffix, chartStyle, cs)
           : `<div class="report-chart-wrap" ${chartStyle}><canvas id="report-chart-${idSuffix}"></canvas></div>`}
       ${cs.showTable ? _buildTableHtml(page, cs) : ""}
       <div class="report-page-footer">
@@ -780,9 +1042,153 @@ function _buildPageElement(page, idSuffix, cs) {
   return wrap;
 }
 
-function _buildSmallMultiplesHtml(page, idSuffix, chartStyle) {
-  return `<div class="report-small-multiples">` +
-    page.comparison_datasets.map((ds, dsIdx) =>
+// ---------------------------------------------------------------------------
+// 分割グラフ (splitMode) ヘルパー
+// ---------------------------------------------------------------------------
+
+/** by_axis: axis_categories ごとに仮想サブデータセットを生成 */
+function _buildSplitByAxisDatasetsR4(page) {
+  const axisCategories = page.axis_categories ?? [];
+  const axisTotals     = page.axis_totals ?? [];
+  const rows           = page.rows ?? [];
+  const choiceLabels   = rows.map(r => r.label);
+  return axisCategories.map((cat, ci) => ({
+    target_value:    cat,
+    rows: [{ label: cat, percents: rows.map(r => r.percents[ci] ?? 0), counts: rows.map(r => (r.counts ?? [])[ci] ?? 0) }],
+    axis_categories: choiceLabels,
+    axis_totals:     [axisTotals[ci] ?? 0],
+  }));
+}
+
+/** by_comparison: rows ごとに仮想サブデータセットを生成 */
+function _buildSplitByComparisonDatasetsR4(page) {
+  const axisCategories = page.axis_categories ?? [];
+  const axisTotals     = page.axis_totals ?? [];
+  const rows           = page.rows ?? [];
+  return rows.map(row => ({
+    target_value:    row.label,
+    rows: [{ label: row.label, percents: axisCategories.map((_, ci) => row.percents[ci] ?? 0), counts: axisCategories.map((_, ci) => (row.counts ?? [])[ci] ?? 0) }],
+    axis_categories: [...axisCategories],
+    axis_totals:     [...axisTotals],
+  }));
+}
+
+/** 全サブデータセットの percents 最大値を 10 刻みで切り上げて返す */
+function _calcSharedMaxR4(datasets) {
+  let max = 0;
+  datasets.forEach(ds => ds.rows.forEach(r => r.percents.forEach(v => { if (v > max) max = v; })));
+  return Math.min(100, Math.ceil(max / 10) * 10) || 100;
+}
+
+/** 分割サブチャートの Chart.js インスタンスを生成して返す */
+function _buildSplitSubChartR4(canvas, chartId, ds, cs, color, sharedMax) {
+  if (!canvas) return;
+  const row    = ds.rows?.[0];
+  const labels = ds.axis_categories ?? [];
+  if (!labels.length || !row) return;
+
+  const isH      = (cs.chartMode === "hbar") || false;
+  const showLabel = cs.showLabels ?? true;
+  const dec       = cs.labelDecimalPlaces ?? 1;
+  const minPct    = cs.labelMinPercent ?? 2;
+  const axisFs    = cs.axisFontSize ?? 10;
+
+  const dataset = {
+    label:           row.label,
+    data:            row.percents,
+    backgroundColor: color,
+  };
+  if (cs.barThickness != null) dataset.barThickness = cs.barThickness;
+
+  const maxVal = sharedMax ?? 100;
+  const tickCb = v => `${v}%`;
+
+  const chart = new Chart(canvas, {
+    type: "bar",
+    data: { labels, datasets: [dataset] },
+    options: {
+      indexAxis:           isH ? "y" : "x",
+      responsive:          true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          display: showLabel ? ctx => ctx.dataset.data[ctx.dataIndex] >= minPct : false,
+          color: "#fff",
+          font: { size: cs.labelFontSize ?? 10, weight: "bold" },
+          formatter: v => `${v.toFixed(dec)}%`,
+          anchor: cs.labelAnchor ?? "center",
+          align: cs.labelAlign ?? "center",
+        },
+      },
+      scales: isH
+        ? { x: { beginAtZero: true, max: maxVal, ticks: { font: { size: axisFs }, callback: tickCb } }, y: { ticks: { font: { size: axisFs } } } }
+        : { x: { ticks: { font: { size: axisFs }, maxRotation: 45 } }, y: { beginAtZero: true, max: maxVal, ticks: { font: { size: axisFs }, callback: tickCb } } },
+    },
+  });
+  _charts.set(chartId, chart);
+}
+
+// 仮想データセット配列を chartConfig のページ割り当てに従ってスライスする
+// 新形式 splitDatasetIndices が優先、なければ旧形式 splitChunkStart/End で fallback
+function _sliceVirtual(allVirtual, cs) {
+  const indices = cs?.splitDatasetIndices;
+  if (indices != null) {
+    return indices.map(i => allVirtual[i]).filter(Boolean);
+  }
+  const s = cs?.splitChunkStart ?? 0;
+  const e = cs?.splitChunkEnd   ?? allVirtual.length;
+  return allVirtual.slice(s, e);
+}
+
+// ラベル配列を同じルールでスライスする
+function _sliceLabels(allLabels, cs) {
+  const indices = cs?.splitDatasetIndices;
+  if (indices != null) {
+    return indices.map(i => allLabels[i]).filter(l => l != null);
+  }
+  const s = cs?.splitChunkStart ?? 0;
+  const e = cs?.splitChunkEnd   ?? allLabels.length;
+  return allLabels.slice(s, e);
+}
+
+function _resolveSplitCols(pageLayout, splitColumns, n) {
+  if (pageLayout === "cols1" || pageLayout === "vertical")  return 1;
+  if (pageLayout === "horizontal")                          return n || 1;
+  if (pageLayout === "cols2" || pageLayout === "grid2x2")   return 2;
+  if (pageLayout === "cols3" || pageLayout === "grid3x2")   return 3;
+  return splitColumns || (n <= 2 ? 1 : n <= 4 ? 2 : 3);
+}
+
+function _buildSmallMultiplesHtml(page, idSuffix, chartStyle, cs) {
+  const splitMode = cs?.splitMode ?? "normal";
+  let datasets;
+  if (splitMode === "by_axis") {
+    datasets = _buildSplitByAxisDatasetsR4(page);
+  } else if (splitMode === "by_comparison") {
+    datasets = _buildSplitByComparisonDatasetsR4(page);
+  } else {
+    datasets = page.comparison_datasets ?? [];
+  }
+
+  // ページ分割スライシング: 新形式(splitDatasetIndices)→旧形式(splitChunkStart/End)の順で fallback
+  if (splitMode !== "normal") {
+    const indices = cs?.splitDatasetIndices;
+    if (indices != null) {
+      datasets = indices.map(i => datasets[i]).filter(Boolean);
+    } else {
+      const chunkStart = cs?.splitChunkStart ?? 0;
+      const chunkEnd   = cs?.splitChunkEnd   ?? datasets.length;
+      datasets = datasets.slice(chunkStart, chunkEnd);
+    }
+  }
+
+  const n         = datasets.length;
+  const splitCols = _resolveSplitCols(cs?.pageLayout, cs?.splitColumns, n);
+  const rowsCount = Math.ceil(n / splitCols);
+
+  return `<div class="report-small-multiples" data-cols="${splitCols}" style="grid-template-rows:repeat(${rowsCount},1fr)">` +
+    datasets.map((ds, dsIdx) =>
       `<div class="report-small-multiple-item">
         <div class="report-small-multiple-title">${_esc(ds.target_value)}</div>
         <div class="report-small-multiple-chart" ${chartStyle}>
@@ -814,7 +1220,10 @@ function _buildTableHtml(page, cs) {
     if (!ds0.rows?.length) return "";
 
     // 全データセットで共通の選択肢リストを取得（cs.hiddenChoices でフィルタ）
-    const allRows = _filterChoices(ds0.rows, cs);
+    const _filteredRows = _filterChoices(ds0.rows, cs);
+    const allRows = (!cs.sortOrder || cs.sortOrder === "original")
+      ? _applyRowChoiceOrder(_filteredRows, cs.rowChoiceOrder)
+      : _filteredRows;
     if (!allRows.length) return "";
 
     const datasets = page.comparison_datasets;
@@ -878,8 +1287,11 @@ function _buildTableHtml(page, cs) {
     ({ rows, axisCats, axisTotals } = _transposeData(rows, axisCats, axisTotals));
   }
 
-  // 選択肢フィルタ
+  // 選択肢フィルタ・手動並び替え
   rows = _filterChoices(rows, cs);
+  if (!cs.sortOrder || cs.sortOrder === "original") {
+    rows = _applyRowChoiceOrder(rows, cs.rowChoiceOrder);
+  }
 
   if (!axisCats.length || !rows.length) return "";
 
@@ -959,11 +1371,46 @@ function _renderPageChart(page, idSuffix, cs) {
     return;
   }
 
-  if (opts.forceSmall || (hasComparison && !opts.brandHbar && !opts.brandVbar)) {
-    page.comparison_datasets.forEach((ds, dsIdx) => {
+  const splitMode = cs.splitMode ?? "normal";
+  const isSplitMode = splitMode !== "normal" && !opts.brandHbar && !opts.brandVbar;
+
+  if (isSplitMode && !hasComparison) {
+    // by_axis / by_comparison 分割（splitDatasetIndices → splitChunkStart/End 順で fallback）
+    const allVirtual = splitMode === "by_axis"
+      ? _buildSplitByAxisDatasetsR4(page)
+      : _buildSplitByComparisonDatasetsR4(page);
+    const virtualDatasets = _sliceVirtual(allVirtual, cs);
+    const sharedMax = _calcSharedMaxR4(virtualDatasets);
+    const allLabels = splitMode === "by_axis"
+      ? (page.axis_categories ?? [])
+      : (page.rows ?? []).map(r => r.label);
+    const paletteLabels = _sliceLabels(allLabels, cs);
+    const palette = _resolveColorsForPage(cs, paletteLabels);
+    virtualDatasets.forEach((ds, dsIdx) => {
       const canvas = document.getElementById(`report-chart-${idSuffix}-${dsIdx}`);
       if (!canvas) return;
-      _buildBarChart(canvas, `${idSuffix}-${dsIdx}`, ds.rows, ds.axis_categories, ds.axis_totals, cs, opts);
+      _buildSplitSubChartR4(canvas, `${idSuffix}-${dsIdx}`, ds, cs, palette[dsIdx] ?? "#3B82F6", sharedMax);
+    });
+  } else if (opts.forceSmall || (hasComparison && !opts.brandHbar && !opts.brandVbar)) {
+    const datasetsToRender = isSplitMode
+      ? _sliceVirtual(
+          splitMode === "by_axis" ? _buildSplitByAxisDatasetsR4(page) : _buildSplitByComparisonDatasetsR4(page),
+          cs
+        )
+      : (page.comparison_datasets ?? []);
+    const sharedMax = isSplitMode ? _calcSharedMaxR4(datasetsToRender) : null;
+    const paletteLabels = isSplitMode
+      ? (splitMode === "by_axis" ? (page.axis_categories ?? []) : (page.rows ?? []).map(r => r.label))
+      : null;
+    const palette = paletteLabels ? _resolveColorsForPage(cs, paletteLabels) : null;
+    datasetsToRender.forEach((ds, dsIdx) => {
+      const canvas = document.getElementById(`report-chart-${idSuffix}-${dsIdx}`);
+      if (!canvas) return;
+      if (isSplitMode) {
+        _buildSplitSubChartR4(canvas, `${idSuffix}-${dsIdx}`, ds, cs, palette[dsIdx] ?? "#3B82F6", sharedMax);
+      } else {
+        _buildBarChart(canvas, `${idSuffix}-${dsIdx}`, ds.rows, ds.axis_categories, ds.axis_totals, cs, opts);
+      }
     });
   } else {
     const canvas = document.getElementById(`report-chart-${idSuffix}`);
@@ -972,15 +1419,27 @@ function _renderPageChart(page, idSuffix, cs) {
   }
 }
 
+function _sortedRows(rows, sortOrder) {
+  if (!sortOrder || sortOrder === "original") return rows;
+  return [...rows].sort((a, b) => {
+    const avg = r => r.percents.reduce((s, v) => s + (v ?? 0), 0) / Math.max(r.percents.length, 1);
+    return sortOrder === "asc" ? avg(a) - avg(b) : avg(b) - avg(a);
+  });
+}
+
 function _buildBarChart(canvas, chartId, rows, axisCats, axisTotals, cs, opts) {
   if (!rows?.length || !axisCats?.length) return;
   cs = cs ?? _defaultChartSettings();
 
-  // 選択肢フィルタ
+  // 選択肢フィルタ・並び順
   rows = _filterChoices(rows, cs);
+  if (!cs.sortOrder || cs.sortOrder === "original") {
+    rows = _applyRowChoiceOrder(rows, cs.rowChoiceOrder);
+  }
+  rows = _sortedRows(rows, cs.sortOrder);
   if (!rows.length) return;
 
-  // 行列入れ替え
+  // 行列入れ替え（STEP3から継承、STEP4では変更不可）
   if (cs.transpose) {
     ({ rows, axisCats, axisTotals } = _transposeData(rows, axisCats, axisTotals));
   }
@@ -1052,10 +1511,17 @@ function _buildBrandHbarChart(canvas, chartId, comparisonDatasets, cs) {
   if (!comparisonDatasets?.length) return;
   cs = cs ?? _defaultChartSettings();
 
-  // 選択肢フィルタ（comparison_datasetsの最初のrowセット基準）
+  // 選択肢フィルタ・並び順（comparison_datasetsの最初のrowセット基準）
+  const _brandApplyOrder = (rows) => {
+    const filtered = _filterChoices(rows, cs);
+    const ordered = (!cs.sortOrder || cs.sortOrder === "original")
+      ? _applyRowChoiceOrder(filtered, cs.rowChoiceOrder)
+      : filtered;
+    return _sortedRows(ordered, cs.sortOrder);
+  };
   const filteredDs = comparisonDatasets.map(ds => ({
     ...ds,
-    rows: _filterChoices(ds.rows, cs),
+    rows: _brandApplyOrder(ds.rows),
   }));
   if (!filteredDs[0]?.rows?.length) return;
 
@@ -1108,9 +1574,16 @@ function _buildBrandVbarChart(canvas, chartId, comparisonDatasets, cs, stacked, 
   stacked = stacked ?? false;
   percentage = percentage ?? false;
 
+  const _brandVApplyOrder = (rows) => {
+    const filtered = _filterChoices(rows, cs);
+    const ordered = (!cs.sortOrder || cs.sortOrder === "original")
+      ? _applyRowChoiceOrder(filtered, cs.rowChoiceOrder)
+      : filtered;
+    return _sortedRows(ordered, cs.sortOrder);
+  };
   const filteredDs = comparisonDatasets.map(ds => ({
     ...ds,
-    rows: _filterChoices(ds.rows, cs),
+    rows: _brandVApplyOrder(ds.rows),
   }));
   if (!filteredDs[0]?.rows?.length) return;
 
@@ -1166,6 +1639,108 @@ function _buildBrandVbarChart(canvas, chartId, comparisonDatasets, cs, stacked, 
 }
 
 // ---------------------------------------------------------------------------
+// ファネルページ（1ページ統合モード）
+// ---------------------------------------------------------------------------
+
+function _buildFunnelPage(page, idSuffix, cs) {
+  const fd = page.funnelData;
+  if (!fd?.questions?.length) return document.createElement("div");
+  cs = cs ?? _defaultChartSettings();
+
+  const title = cs.titleOverride ?? page.title ?? "ファネル比較";
+  const subtitle = cs.showQuestionText ? (cs.questionTextOverride ?? "") : "";
+
+  const wStyle = [];
+  if (cs.chartHeightPx) wStyle.push(`height:${cs.chartHeightPx}px;flex:none;`);
+  if (cs.chartWidthPx)  wStyle.push(`width:${cs.chartWidthPx}px;`);
+  const chartStyle = wStyle.length ? `style="${wStyle.join("")}"` : "";
+
+  const nParts = (fd.axisCategories ?? []).map((cat, i) =>
+    `${_esc(cat)}: n=${fd.axisTotals?.[i] ?? "?"}`
+  ).join("  /  ");
+
+  const wrap = document.createElement("div");
+  wrap.className = "report-page";
+  wrap.innerHTML = `
+    <div class="report-band-comparison">
+      <div class="report-page-title">${_esc(title)}</div>
+      ${subtitle ? `<div class="report-page-subtitle" style="font-size:${cs.subtitleFontSize ?? 8}px">${_esc(subtitle)}</div>` : ""}
+    </div>
+    <div class="report-page-body">
+      <div class="report-page-export-row"></div>
+      <div class="report-chart-wrap" ${chartStyle}>
+        <canvas id="report-chart-${idSuffix}"></canvas>
+      </div>
+      <div class="report-page-footer">
+        ${nParts ? `<span class="report-n-count">${nParts}</span>` : ""}
+        <span class="report-axis-label">分析軸: ${_esc(fd.axisLabel ?? "")}</span>
+      </div>
+    </div>
+  `;
+  return wrap;
+}
+
+function _renderFunnelChart(page, idSuffix, cs) {
+  const fd = page.funnelData;
+  if (!fd?.questions?.length || !fd.axisCategories?.length) return;
+  cs = cs ?? _defaultChartSettings();
+
+  const canvas = document.getElementById(`report-chart-${idSuffix}`);
+  if (!canvas) return;
+
+  // labels = 設問ラベル（X軸）
+  const labels = fd.questions.map(q => q.questionLabel);
+
+  // datasets = ブランド（系列）ごとに設問ごとのtop box %
+  const colors = _resolveColorsForPage(cs, fd.axisCategories);
+  const datasets = fd.axisCategories.map((brand, bi) => ({
+    label: brand,
+    data: fd.questions.map(q => q.rows?.[0]?.percents?.[bi] ?? 0),
+    backgroundColor: colors[bi],
+    ...(cs.barThickness != null ? { barThickness: cs.barThickness } : {}),
+  }));
+
+  const chart = new Chart(canvas, {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      indexAxis: "x",
+      responsive: true,
+      maintainAspectRatio: false,
+      categoryPercentage: cs.categoryPercentage ?? 0.8,
+      barPercentage: cs.barPercentage ?? 0.9,
+      plugins: {
+        legend: {
+          display: cs.showLegend ?? true,
+          position: cs.legendPosition ?? "bottom",
+          labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 11 } },
+        },
+        datalabels: {
+          display: (cs.showLabels ?? true)
+            ? (ctx) => ctx.dataset.data[ctx.dataIndex] >= (cs.labelMinPercent ?? 2)
+            : false,
+          color: "#fff",
+          font: { size: cs.labelFontSize ?? 10, weight: "bold" },
+          formatter: (v) => `${v.toFixed(cs.labelDecimalPlaces ?? 1)}%`,
+          anchor: cs.labelAnchor ?? "center",
+          align: cs.labelAlign ?? "center",
+        },
+      },
+      scales: {
+        x: { ticks: { font: { size: cs.axisFontSize ?? 10 } } },
+        y: {
+          beginAtZero: true,
+          max: 100,
+          ticks: { font: { size: cs.axisFontSize ?? 10 }, callback: (v) => `${v}%` },
+        },
+      },
+    },
+  });
+
+  _charts.set(String(idSuffix), chart);
+}
+
+// ---------------------------------------------------------------------------
 // PNG 出力
 // ---------------------------------------------------------------------------
 
@@ -1174,7 +1749,7 @@ async function _exportActivePng() {
   if (!canvas) return;
   const cvs = canvas.querySelectorAll("canvas");
   if (!cvs.length) { showToast("グラフがありません。", true); return; }
-  const activePage = AppState.reportProject.pages.find(p => p.pageId === AppState.reportProject.activePageId);
+  const activePage = AppState.reportProject.pages.find(p => (p.id ?? p.pageId) === AppState.reportProject.activePageId);
   const baseName = activePage
     ? _displayTitle(activePage).replace(/[｜：\/\\]/g, "_")
     : "report_page";

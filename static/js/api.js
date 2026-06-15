@@ -16,6 +16,20 @@ export async function uploadFile(file) {
   return res.json();
 }
 
+/** 手動マッピングでレイアウト CSV を再パースする。 */
+export async function remapUpload(sessionToken, colMapping) {
+  const res = await fetch(`${BASE}/upload/remap`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, col_mapping: colMapping }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "マッピングの適用に失敗しました。");
+  }
+  return res.json();
+}
+
 /** 設問一覧を取得する（検索・フィルタ付き）。 */
 export async function getQuestions(token, { search = "", typeFilter = "", includeChildren = true } = {}) {
   const params = new URLSearchParams({ session_token: token });
@@ -52,6 +66,10 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       step3_question_settings: step3QuestionSettings,
       step1_axis_colors: step1AxisColors,
       user_palettes: userPalettes,
+      step3_mode: compositeSettings.mode ?? "brand_comparison",
+      step3_basic_axis_code: compositeSettings.basicAxisCode ?? "",
+      step3_comparison_axis_code: compositeSettings.compAxisCode ?? "",
+      step3_deep_dive_target: compositeSettings.deepDiveTarget ?? "",
       step3_secondary_axis_code: compositeSettings.secondaryAxisCode ?? "",
       step3_composite_display_mode: compositeSettings.displayMode ?? "split",
       step3_color_priority: compositeSettings.colorPriority ?? "axis1",
@@ -325,6 +343,30 @@ export async function exportCrosstabCsv(payload, { single = false, questionCode 
     throw new Error(err.detail ?? "CSV エクスポートに失敗しました。");
   }
   _triggerBlobDownload(await res.blob(), res.headers.get("Content-Disposition") ?? "", single ? "crosstab.csv" : "crosstab.zip");
+}
+
+/** レポートを PowerPoint (.pptx) としてダウンロードする。 */
+export async function exportReportPptx(pages, chartResults) {
+  const res = await fetch(`${BASE}/report/export/pptx`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pages, chart_results: chartResults }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "PowerPoint 出力に失敗しました。");
+  }
+  // 件数検証ヘッダーを確認してフロントエンドに返す
+  const warning = res.headers.get("X-Split-Charts-Warning");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "report.pptx";
+  a.click();
+  URL.revokeObjectURL(url);
+  // 件数不一致があれば呼び出し元が受け取れるよう例外ではなくメッセージとして返す
+  return warning ?? null;
 }
 
 /** レポートページを生成する。 */
