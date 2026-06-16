@@ -20,7 +20,7 @@ INCLUDE = [
     "requirements.txt",
     "run.bat",
     "run.command",
-    "README.md",
+    "README.txt",
 ]
 
 # 除外するディレクトリ名
