@@ -1,0 +1,28 @@
+{
+	"folders": [
+		{
+			"path": "../../app"
+		},
+		{
+			"path": "../../sample_data"
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../tests"
+		},
+		{
+			"path": "../../.claude"
+		},
+		{
+			"path": "../../.git"
+		},
+		{
+			"path": "../../.pytest_cache"
+		},
+		{
+			"path": "../../.venv"
+		}
+	]
+}
