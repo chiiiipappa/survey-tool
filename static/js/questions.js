@@ -3,9 +3,11 @@
  */
 import { getQuestions, saveProject, loadProject } from "./api.js";
 import { AppState, setFilterState, resetState, setLoadedProject, setProjectName, markClean, markDirty, setStep1FixedPalette, clearStep1FixedPalette, addUserPalette, deleteUserPalette, setQuestionSets, setStep3ActiveSetId, setExcludedQuestionCodes, setReportProjectFromLoad } from "./state.js";
-import { getCrosstabCache, setCrosstabCache } from "./step3.js";
+import { getCrosstabCache, setCrosstabCache, resetStep3UI } from "./step3.js";
 import { showToast, showError, showSpinner, hideSpinner, activatePanel } from "./app.js";
-import { handleCsvFile, reloadLastCsvFile } from "./upload.js";
+import { handleCsvFile, reloadLastCsvFile, resetUploadPanel } from "./upload.js";
+import { resetStep2UI, setResponseFormatRadio } from "./step2.js";
+import { resetReportUI } from "./report.js";
 
 // STEP1 一覧で初期非表示にする question_type（「補助列も表示」チェックなし時）
 const AUX_QUESTION_TYPES = new Set(["OA_AUX", "FLAG", "DERIVED"]);
@@ -1127,11 +1129,23 @@ export function initProjectHeader() {
 
   // 新規プロジェクトボタン
   document.getElementById("btn-new-project")?.addEventListener("click", () => {
-    if (AppState.isDirty) {
-      if (!confirm("未保存の変更があります。新規プロジェクトを作成しますか？")) return;
-    }
-    resetState();
-    activatePanel("upload");
+    const modal = document.getElementById("new-project-modal");
+    if (modal) modal.style.display = "";
+  });
+
+  document.getElementById("new-project-cancel-btn")?.addEventListener("click", () => {
+    const modal = document.getElementById("new-project-modal");
+    if (modal) modal.style.display = "none";
+  });
+
+  document.getElementById("new-project-confirm-btn")?.addEventListener("click", () => {
+    const modal = document.getElementById("new-project-modal");
+    if (modal) modal.style.display = "none";
+    _doNewProject();
+  });
+
+  document.getElementById("new-project-modal")?.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.style.display = "none";
   });
 
   // ヘッダーの読込ファイル入力
@@ -1144,11 +1158,20 @@ export function initProjectHeader() {
   });
 
   // 保存ボタン
-  document.getElementById("btn-save-project")?.addEventListener("click", async () => {
+  let _isSaving = false;
+  const _btnSave = document.getElementById("btn-save-project");
+  _btnSave?.addEventListener("click", async () => {
+    console.log("[PROJECT SAVE START]");
+    if (_isSaving) {
+      console.warn("[PROJECT SAVE] blocked double execution");
+      return;
+    }
     if (!AppState.sessionToken) {
       showToast("先にレイアウトファイルを読み込んでください。");
       return;
     }
+    _isSaving = true;
+    if (_btnSave) _btnSave.disabled = true;
     try {
       await saveProject(
         AppState.sessionToken,
@@ -1183,17 +1206,44 @@ export function initProjectHeader() {
           reportAxisSpecs: AppState.reportAxisSpecs,
         },
         AppState.chartResults,
+        AppState.layoutFormat ?? "auto",
+        AppState.responseFormat ?? "auto",
+        AppState.surveyFormat ?? "unknown",
       );
       markClean(new Date());
       showToast("プロジェクトを保存しました。");
+      console.log("[SAVE COMPLETE]");
     } catch (err) {
       showError(err.message);
+    } finally {
+      _isSaving = false;
+      if (_btnSave) _btnSave.disabled = false;
     }
   });
 
   // 状態変化でヘッダーを更新
   document.addEventListener("survey:statechange", _updateHeader);
   _updateHeader();
+}
+
+function _doNewProject() {
+  resetStep3UI();
+  resetReportUI();
+  resetStep2UI();
+  resetUploadPanel();
+
+  // STEP1 questions パネルのリセット
+  const layoutInfoCard = document.getElementById("step1-layout-info-card");
+  if (layoutInfoCard) layoutInfoCard.style.display = "none";
+  const btnToStep2 = document.getElementById("btn-to-step2");
+  if (btnToStep2) btnToStep2.disabled = true;
+
+  localStorage.clear();
+  sessionStorage.clear();
+
+  resetState();
+  setResponseFormatRadio("unknown");
+  activatePanel("upload");
 }
 
 async function _doLoadProject(file) {

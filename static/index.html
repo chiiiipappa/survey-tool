@@ -27,7 +27,7 @@
     <button id="btn-new-project" class="btn btn-secondary btn-sm">新規</button>
     <label id="lbl-load-project" class="btn btn-secondary btn-sm" style="cursor:pointer">
       読込
-      <input type="file" id="project-load-input" accept=".surv,.json"
+      <input type="file" id="project-load-input" accept=".surveyproject,.surv,.json"
              style="position:absolute;width:0;height:0;opacity:0;overflow:hidden;">
     </label>
     <button id="btn-save-project" class="btn btn-primary btn-sm">💾 保存</button>
@@ -53,6 +53,25 @@
         <span class="card-title">レイアウトファイルを読み込む</span>
       </div>
       <div class="card-body">
+        <!-- レイアウト形式セレクタ -->
+        <div class="format-selector-section">
+          <div class="format-selector-label">レイアウト形式</div>
+          <div class="format-radio-group" id="layout-format-group">
+            <label class="format-radio-item">
+              <input type="radio" name="layout-format" value="auto" checked>
+              <span>自動判定（推奨）</span>
+            </label>
+            <label class="format-radio-item">
+              <input type="radio" name="layout-format" value="intage">
+              <span>インテージ形式</span>
+            </label>
+            <label class="format-radio-item">
+              <input type="radio" name="layout-format" value="questant">
+              <span>クエスタント形式</span>
+            </label>
+          </div>
+        </div>
+
         <label id="drop-zone" class="drop-zone" for="file-input">
           <div class="drop-icon">📂</div>
           <p>
@@ -65,7 +84,10 @@
         <!-- ファイル情報バー -->
         <div id="file-info-bar" class="file-info-bar hidden"></div>
 
-        <!-- 形式判定結果 -->
+        <!-- 自動判定結果 / 形式変更 -->
+        <div id="layout-format-result" class="format-result-box" style="display:none"></div>
+
+        <!-- 形式判定結果（旧: survey_company 詳細表示） -->
         <div id="format-detect-box" class="format-detect-box" style="display:none"></div>
 
         <!-- 手動マッピングパネル -->
@@ -106,7 +128,7 @@
           </button>
           <label class="btn btn-secondary btn-sm" style="cursor:pointer">
             プロジェクトを復元
-            <input type="file" id="project-input" accept=".surv,.json" class="hidden">
+            <input type="file" id="project-input" accept=".surveyproject,.surv,.json" class="hidden">
           </label>
         </div>
       </div>
@@ -261,6 +283,12 @@
         <span class="card-title">回答データ CSV / Excel を読み込む</span>
       </div>
       <div class="card-body">
+        <!-- 回答データ形式（STEP1で確定した調査形式を表示。STEP2では変更不可） -->
+        <div class="format-selector-section">
+          <div class="format-selector-label">回答データ形式</div>
+          <div id="response-format-fixed" class="format-fixed-display is-unset">未確定（先にSTEP1で調査票レイアウトを読み込んでください）</div>
+        </div>
+
         <label id="step2-drop-zone" class="drop-zone" for="step2-file-input">
           <div class="drop-icon">📊</div>
           <p>
@@ -315,8 +343,11 @@
                 <div class="tab-bar" id="step2-preview-tabs" style="margin-left:auto;">
                   <button class="tab-btn active" data-tab="raw">元データ</button>
                   <button class="tab-btn" data-tab="labeled">変換後</button>
-                  <button class="tab-btn" data-tab="unmatched">変換不可値</button>
+                  <button class="tab-btn" data-tab="unmatched" id="tab-btn-unmatched">変換不可値</button>
                 </div>
+              </div>
+              <div id="step2-unmatched-warning" style="display:none; padding:9px 16px; background:#fff7ed; border-bottom:1px solid #fed7aa; font-size:.84rem; color:#92400e; font-weight:500">
+                ⚠ 変換不可値が<strong id="step2-unmatched-warning-count">0</strong>件あります。STEP3へ進む前に確認してください。
               </div>
               <div style="padding:0">
                 <div id="step2-preview-raw" class="step2-tab-pane table-wrap"></div>
@@ -371,7 +402,7 @@
           <div class="step2-ctrl-row">
             <div class="step2-ctrl-label">
               集計軸
-              <span class="text-sm text-muted" style="font-weight:400">STEP1で選択した集計軸から選択</span>
+              <span class="text-sm text-muted" style="font-weight:400">FA表に付属する属性データを選択（ブランド・年代・ファン度・CWSなど）</span>
             </div>
             <div class="step2-ctrl-widget">
               <div id="fa-attr-cb-ctrl" style="display:none; margin-bottom:6px">
@@ -1171,10 +1202,41 @@
   </div>
 </div>
 
-<script type="module" src="/static/js/app.js?v=12"></script>
-<script type="module" src="/static/js/report.js?v=1"></script>
+<script type="module" src="/static/js/app.js"></script>
+<script type="module" src="/static/js/report.js"></script>
 
 <!-- STEP3 レポート追加 重複確認モーダル -->
+<div id="new-project-modal" class="modal-overlay" style="display:none">
+  <div class="modal-dialog" style="max-width:480px">
+    <div class="modal-header">
+      <h3 class="modal-title">新規プロジェクト</h3>
+    </div>
+    <div class="modal-body">
+      <p>現在の作業内容を破棄して、新しいプロジェクトを開始します。未保存の内容は失われます。よろしいですか？</p>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px">
+      <button id="new-project-cancel-btn" class="btn btn-secondary">キャンセル</button>
+      <button id="new-project-confirm-btn" class="btn btn-danger">新規作成する</button>
+    </div>
+  </div>
+</div>
+
+<div id="step2-unmatched-confirm-modal" class="modal-overlay" style="display:none">
+  <div class="modal-dialog" style="max-width:440px">
+    <div class="modal-header">
+      <h3 class="modal-title">変換不可値が残っています</h3>
+    </div>
+    <div class="modal-body">
+      <p>変換不可値が <strong id="step2-unmatched-confirm-count">0</strong> 件残っています。</p>
+      <p style="margin-top:8px; color:var(--color-text-muted)">このまま進むと集計結果が正しくならない可能性があります。</p>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px">
+      <button id="step2-unmatched-confirm-cancel" class="btn btn-secondary">戻る</button>
+      <button id="step2-unmatched-confirm-proceed" class="btn btn-primary">そのまま進む</button>
+    </div>
+  </div>
+</div>
+
 <div id="step3-duplicate-modal" class="modal-overlay" style="display:none">
   <div class="modal-dialog" style="max-width:440px">
     <div class="modal-header">
@@ -1185,7 +1247,7 @@
       <p style="margin-top:8px">どうしますか？</p>
     </div>
     <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;padding-top:12px">
-      <button id="step3-dup-cancel-btn"    class="btn btn-ghost">キャンセル</button>
+      <button id="step3-dup-cancel-btn"    class="btn btn-secondary">キャンセル</button>
       <button id="step3-dup-add-btn"       class="btn btn-secondary">新しいページとして追加</button>
       <button id="step3-dup-overwrite-btn" class="btn btn-primary">上書き更新</button>
     </div>

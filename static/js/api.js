@@ -5,13 +5,28 @@
 const BASE = "/api";
 
 /** レイアウト CSV をアップロードする。 */
-export async function uploadFile(file) {
+export async function uploadFile(file, formatHint = "auto") {
   const form = new FormData();
   form.append("file", file);
+  form.append("format_hint", formatHint);
   const res = await fetch(`${BASE}/upload`, { method: "POST", body: form });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "アップロードに失敗しました。");
+  }
+  return res.json();
+}
+
+/** 形式ヒントを変えてレイアウトを再解析する。 */
+export async function reparseLayout(sessionToken, formatHint) {
+  const res = await fetch(`${BASE}/upload/reparse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, format_hint: formatHint }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "再解析に失敗しました。");
   }
   return res.json();
 }
@@ -55,8 +70,8 @@ export async function getQuestionsJson(token) {
   return res.json();
 }
 
-/** プロジェクト (.surv) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}, reportProject = {}, chartResults = []) {
+/** プロジェクト (.surveyproject) をダウンロードする。 */
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}, reportProject = {}, chartResults = [], layoutFormat = "auto", responseFormat = "auto", surveyFormat = "unknown") {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,6 +98,9 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       step3_views: step3Views,
       report_project: reportProject,
       chart_results: chartResults,
+      layout_format: layoutFormat,
+      response_format: responseFormat,
+      survey_format: surveyFormat,
     }),
   });
   if (!res.ok) {
@@ -91,14 +109,20 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
   }
   const blob = await res.blob();
   const cd = res.headers.get("Content-Disposition") ?? "";
-  const match = cd.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : "survey_project.surv";
+  const match = cd.match(/filename\*=UTF-8''([^;\r\n]+)/i)
+             ?? cd.match(/filename="?([^";\r\n]+)"?/i);
+  const filename = match ? decodeURIComponent(match[1]) : `${projectName || "project"}.surveyproject`;
+  console.log("[SHOW SAVE DIALOG]", filename);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  console.log("[WRITE FILE]", filename);
 }
 
 /** プロジェクトファイル (.surv または .json) を復元する。 */
@@ -137,10 +161,11 @@ export async function saveFaSettings(token, faCodes, attrCols) {
 // ---------------------------------------------------------------------------
 
 /** 回答データ CSV / xlsx をアップロードしてラベル変換結果を取得する。 */
-export async function uploadResponseFile(file, sessionToken, { signal } = {}) {
+export async function uploadResponseFile(file, sessionToken, { signal, responseFormat = "auto" } = {}) {
   const form = new FormData();
   form.append("file", file);
   form.append("session_token", sessionToken);
+  form.append("response_format", responseFormat);
   const res = await fetch(`${BASE}/step2/upload`, { method: "POST", body: form, signal });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -153,6 +178,34 @@ export async function uploadResponseFile(file, sessionToken, { signal } = {}) {
 export async function getStep2Progress(sessionToken) {
   const res = await fetch(`${BASE}/step2/progress/${encodeURIComponent(sessionToken)}`);
   if (!res.ok) return null;
+  return res.json();
+}
+
+/** 手動照合ルールを適用し、ラベル変換済みデータを更新する。 */
+export async function applyManualMatch(token, rules) {
+  const res = await fetch(`${BASE}/step2/manual-match`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: token, rules }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "手動照合の適用に失敗しました。");
+  }
+  return res.json();
+}
+
+/** 変換不可値に手動ラベルを割り当てる。fixes: [{question_code, raw_value, label}] */
+export async function applyLabelFix(token, fixes) {
+  const res = await fetch(`${BASE}/step2/label-fix`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: token, fixes }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "ラベル修正の適用に失敗しました。");
+  }
   return res.json();
 }
 

@@ -53,13 +53,13 @@ def _crosstab_sa(
     # 軸カテゴリー順に列を並べ、足りない列は 0 補完
     ct = ct.reindex(columns=axis_cats, fill_value=0)
 
-    # STEP1の選択肢順に行を並べ替える（_build_axis_cats と同一ロジック）
+    # STEP1の全選択肢を行として使用（_build_axis_cats と同一ロジック）
     index_labels = list(ct.index.astype(str))
     if q and q.choices:
         choice_labels = [c.choice_text for c in q.choices]
-        ordered = [lbl for lbl in choice_labels if lbl in set(index_labels)]
-        remaining = [lbl for lbl in index_labels if lbl not in set(choice_labels)]
-        index_labels = ordered + remaining
+        s1_set = set(choice_labels)
+        remaining = [lbl for lbl in index_labels if lbl not in s1_set]
+        index_labels = choice_labels + remaining
         ct = ct.reindex(index_labels, fill_value=0)
 
     # N数（軸カテゴリーごと）
@@ -116,15 +116,35 @@ _COMPOSITE_SEP = " × "
 
 
 def _build_axis_cats(df: pd.DataFrame, col: str, q) -> list[str]:
-    """設問列から軸カテゴリーリストを choices 順で生成する。"""
+    """軸カテゴリーリストを生成する。
+
+    STEP1設問マスタの選択肢を必ず使用する（データに存在しない選択肢も含む）。
+    STEP1定義がない場合のみデータから生成する。
+    """
     series = df[col].dropna().astype(str)
     series = series[series.str.strip() != ""]
-    cats = list(series.value_counts().index)
+    data_cats = set(series.unique())
+
     if q and q.choices:
         choice_labels = [c.choice_text for c in q.choices]
-        ordered = [lbl for lbl in choice_labels if lbl in set(cats)]
-        remaining = [lbl for lbl in cats if lbl not in set(choice_labels)]
-        cats = ordered + remaining
+        logger.info(
+            "axis_cats[%s]: STEP1 choices=%d, data unique=%d",
+            col, len(choice_labels), len(data_cats),
+        )
+        if len(data_cats) < len(choice_labels):
+            logger.warning(
+                "axis_cats[%s]: STEP1 choices=%d に対しデータ一意値=%d — "
+                "ラベル変換が一部失敗している可能性があります。データ値サンプル: %s",
+                col, len(choice_labels), len(data_cats),
+                sorted(data_cats)[:10],
+            )
+        # STEP1の全選択肢を軸として使用し、データにしか存在しない値は末尾に追加
+        s1_set = set(choice_labels)
+        remaining = sorted(v for v in data_cats if v not in s1_set)
+        return choice_labels + remaining
+
+    cats = list(series.value_counts().index)
+    logger.info("axis_cats[%s]: STEP1選択肢定義なし、データから %d カテゴリ生成", col, len(cats))
     return cats
 
 

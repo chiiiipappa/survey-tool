@@ -358,6 +358,34 @@ let   _currentCacheKey = "";            // 現在表示中のキャッシュキ�
 export function getCrosstabCache() { return { ..._crosstabCache }; }
 export function setCrosstabCache(cache) { Object.assign(_crosstabCache, cache ?? {}); }
 
+export function resetStep3UI() {
+  _destroyAllCharts();
+  _clearPendingChartRenders();
+  _lastCrosstabData = null;
+  _compositeColorPaletteLookup = null;
+  _colorModalIdx = null;
+  _colorModalLabels = [];
+  _colorModalPaletteKey = null;
+  _colorModalOverrides = {};
+  _colorModalValueMapping = null;
+  _dragType = null;
+  _dragValue = null;
+  _currentCacheKey = "";
+  Object.keys(_crosstabCache).forEach(k => delete _crosstabCache[k]);
+
+  const nav = document.getElementById("step3-sidebar-nav");
+  if (nav) nav.innerHTML = "";
+  const viewPanel = document.getElementById("step3-view-panel");
+  if (viewPanel) viewPanel.innerHTML = "";
+  const progress = document.getElementById("step3-progress");
+  if (progress) progress.style.display = "none";
+  const resultsEl = document.getElementById("step3-results");
+  if (resultsEl) {
+    resultsEl.innerHTML =
+      '<div id="step3-placeholder" style="text-align:center; padding:80px 0; color:var(--color-text-muted); font-size:1rem">設定を選択して「グラフ生成」を押してください</div>';
+  }
+}
+
 function _getCacheKey(axisCode, secAxisCode, setId) {
   const col  = AppState.step3TargetFilterColumn;
   const vals = AppState.step3TargetFilterValues;
@@ -1521,6 +1549,11 @@ async function _renderSimpleResults(container, data) {
             <option value="asc"     ${settings.sortOrder === "asc"      ? " selected" : ""}>昇順</option>
           </select>
           ${transposeHtml}
+          <label class="step3-pct-label-wrap">
+            <input type="checkbox" class="step3-total-col-cb"
+                   data-q="${_esc(result.question_code)}" data-idx="${idx}"
+                   ${settings.showTotalCol ? "checked" : ""}> 合計列
+          </label>
           ${_buildAggModeHtml(idx, result.question_code, settings.chartType, settings.aggMode)}
           <span class="step3-height-ctrl" style="display:flex; align-items:center; gap:4px; font-size:.82rem">
             <span style="color:var(--color-text-muted)">高さ：</span>
@@ -1801,6 +1834,11 @@ async function _renderSplitResults(container, data) {
             <option value="asc"${settings.sortOrder === "asc" ? " selected" : ""}>昇順</option>
           </select>
           ${transposeHtml}
+          <label class="step3-pct-label-wrap">
+            <input type="checkbox" class="step3-total-col-cb"
+                   data-q="${_esc(result.question_code)}" data-idx="${idx}"
+                   ${settings.showTotalCol ? "checked" : ""}> 合計列
+          </label>
           ${_buildAggModeHtml(idx, result.question_code, settings.chartType, settings.aggMode)}
         </div>
         <div class="card-body" style="padding:16px">
@@ -2098,6 +2136,14 @@ function _onResultsClick(e) {
     return;
   }
 
+  // 合計列 checkbox
+  const totalColCb = e.target.closest(".step3-total-col-cb");
+  if (totalColCb) {
+    setStep3Setting(totalColCb.dataset.q, "showTotalCol", totalColCb.checked);
+    _rerenderQuestionFull(parseInt(totalColCb.dataset.idx, 10));
+    return;
+  }
+
   // カラー設定
   const colorBtn = e.target.closest(".step3-color-btn");
   if (colorBtn) {
@@ -2257,8 +2303,9 @@ function _rerenderQuestionFull(idx) {
   const effectiveAggMode = settings.chartType === "stacked100" ? "composition" : (settings.aggMode ?? "col_pct");
   const pctPanel = document.getElementById(`step3-tab-pct-${idx}`);
   const nPanel   = document.getElementById(`step3-tab-n-${idx}`);
-  if (pctPanel) pctPanel.innerHTML = _buildPctTable(sortedResult, d.axis_categories, d.axis_totals, tp, effectiveAggMode);
-  if (nPanel) nPanel.innerHTML = _buildNTable(sortedResult, d.axis_categories, d.axis_totals, tp);
+  const stc = settings.showTotalCol ?? true;
+  if (pctPanel) pctPanel.innerHTML = _buildPctTable(sortedResult, d.axis_categories, d.axis_totals, tp, effectiveAggMode, stc);
+  if (nPanel) nPanel.innerHTML = _buildNTable(sortedResult, d.axis_categories, d.axis_totals, tp, stc);
 }
 
 // flat/nested 用: composite ラベルから色解決ラベルを設定
@@ -3154,7 +3201,9 @@ function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
     ...result,
     rows: _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), settings.sortOrder),
   };
-  const tp = settings.transpose ?? false;
+  const tp  = settings.transpose ?? false;
+  const stc = settings.showTotalCol ?? true;
+  const aggMode = settings.chartType === "stacked100" ? "composition" : (settings.aggMode ?? "col_pct");
 
   return `<div class="step3-tab-area">
     <div class="step3-tab-bar">
@@ -3162,44 +3211,71 @@ function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
       <button class="step3-tab-btn"        data-tab-target="${nId}">N表</button>
     </div>
     <div id="${pctId}" class="step3-tab-panel">
-      ${_buildPctTable(sorted, axisCategories, axisTotals, tp)}
+      ${_buildPctTable(sorted, axisCategories, axisTotals, tp, aggMode, stc)}
     </div>
     <div id="${nId}" class="step3-tab-panel" hidden>
-      ${_buildNTable(sorted, axisCategories, axisTotals, tp)}
+      ${_buildNTable(sorted, axisCategories, axisTotals, tp, stc)}
     </div>
   </div>`;
 }
 
-function _buildPctTable(result, axisCategories, axisTotals, transpose = false, aggMode = "col_pct") {
-  // 集計方法ラベル
+function _buildPctTable(result, axisCategories, axisTotals, transpose = false, aggMode = "col_pct", showTotalCol = true) {
   const aggLabel = { col_pct: "列%", row_pct: "行%", composition: "構成比", count: "実数N" }[aggMode] ?? "列%";
-
-  // aggMode に応じたセル値
+  const isCountMode = aggMode === "count";
   const comp = aggMode === "composition" ? _compositionPct(result, axisCategories, transpose) : null;
+
   function cellVal(row, ci, ri) {
-    if (aggMode === "count")       return `${row.counts[ci] ?? 0}`;
+    if (isCountMode)               return `${row.counts[ci] ?? 0}`;
     if (aggMode === "row_pct")     return `${_rowPct(row, ci, axisCategories).toFixed(1)}%`;
     if (aggMode === "composition") return `${comp[ri][ci].toFixed(1)}%`;
-    return `${row.percents[ci]?.toFixed(1) ?? "0.0"}%`;  // col_pct
+    return `${row.percents[ci]?.toFixed(1) ?? "0.0"}%`;
   }
 
-  const tdStyle = `text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap`;
-  const thStyle = `text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem`;
-  const rowLabelStyle = `padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis`;
+  const tdStyle        = `text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap`;
+  const thStyle        = `text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem`;
+  const rowLabelStyle  = `padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis`;
+  const totalThStyle   = `${thStyle}; font-weight:700; background:var(--color-surface-2,#F8F8F8)`;
+  const totalTdBase    = `${tdStyle}; font-weight:600; background:var(--color-surface-2,#F8F8F8)`;
+  const totalN         = axisTotals.reduce((s, v) => s + (v ?? 0), 0);
+
+  function _calcRowTotal(row, ri) {
+    if (isCountMode) {
+      return { str: String((row.counts ?? []).slice(0, axisCategories.length).reduce((s, v) => s + (v ?? 0), 0)), isAnomaly: false };
+    }
+    const sum = axisCategories.reduce((s, _, ci) => {
+      const v = parseFloat(cellVal(row, ci, ri));
+      return s + (isNaN(v) ? 0 : v);
+    }, 0);
+    return { str: `${sum.toFixed(1)}%`, isAnomaly: sum < 99.5 || sum > 100.5 };
+  }
+
+  function _calcAxisTotal(ci) {
+    if (isCountMode) {
+      return { str: String(result.rows.reduce((s, row) => s + (row.counts[ci] ?? 0), 0)), isAnomaly: false };
+    }
+    const sum = result.rows.reduce((s, row, ri) => {
+      const v = parseFloat(cellVal(row, ci, ri));
+      return s + (isNaN(v) ? 0 : v);
+    }, 0);
+    return { str: `${sum.toFixed(1)}%`, isAnomaly: sum < 99.5 || sum > 100.5 };
+  }
+
+  const totalThHtml = showTotalCol
+    ? `<th style="${totalThStyle}">合計<br><span style="font-weight:400; color:var(--color-text-muted)">${isCountMode ? totalN : "n=" + totalN}</span></th>`
+    : "";
 
   if (transpose) {
-    // 行=集計軸カテゴリー, 列=選択肢
-    const headerCols = result.rows
+    const headerCols = totalThHtml + result.rows
       .map(row => `<th style="${thStyle}" title="${_esc(row.label)}">${_esc(row.label)}</th>`)
       .join("");
-    const rows = axisCategories
-      .map((cat, ci) => {
-        const cells = result.rows
-          .map((row, ri) => `<td style="${tdStyle}">${cellVal(row, ci, ri)}</td>`)
-          .join("");
-        return `<tr><td style="${rowLabelStyle}" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${cells}</tr>`;
-      })
-      .join("");
+    const rows = axisCategories.map((cat, ci) => {
+      const { str, isAnomaly } = _calcAxisTotal(ci);
+      const totalTdHtml = showTotalCol
+        ? `<td style="${totalTdBase}${isAnomaly ? "; color:var(--color-danger,#EF4444)" : ""}">${str}</td>`
+        : "";
+      const cells = result.rows.map((row, ri) => `<td style="${tdStyle}">${cellVal(row, ci, ri)}</td>`).join("");
+      return `<tr><td style="${rowLabelStyle}" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${totalTdHtml}${cells}</tr>`;
+    }).join("");
     return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
       <thead style="background:var(--color-surface-2,#F8F8F8)">
         <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">集計軸 <span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">${aggLabel}</span></th>${headerCols}</tr>
@@ -3207,18 +3283,19 @@ function _buildPctTable(result, axisCategories, axisTotals, transpose = false, a
       <tbody>${rows}</tbody>
     </table>`;
   }
+
   // 通常: 行=選択肢, 列=集計軸カテゴリー
-  const headerCols = axisCategories
+  const headerCols = totalThHtml + axisCategories
     .map((cat, i) => `<th style="${thStyle}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted)">n=${axisTotals[i] ?? 0}</span></th>`)
     .join("");
-  const rows = result.rows
-    .map((row, ri) => {
-      const cells = axisCategories
-        .map((_, ci) => `<td style="${tdStyle}">${cellVal(row, ci, ri)}</td>`)
-        .join("");
-      return `<tr><td style="${rowLabelStyle}" title="${_esc(row.label)}">${_esc(row.label)}</td>${cells}</tr>`;
-    })
-    .join("");
+  const rows = result.rows.map((row, ri) => {
+    const { str, isAnomaly } = _calcRowTotal(row, ri);
+    const totalTdHtml = showTotalCol
+      ? `<td style="${totalTdBase}${isAnomaly ? "; color:var(--color-danger,#EF4444)" : ""}">${str}</td>`
+      : "";
+    const cells = axisCategories.map((_, ci) => `<td style="${tdStyle}">${cellVal(row, ci, ri)}</td>`).join("");
+    return `<tr><td style="${rowLabelStyle}" title="${_esc(row.label)}">${_esc(row.label)}</td>${totalTdHtml}${cells}</tr>`;
+  }).join("");
   return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
     <thead style="background:var(--color-surface-2,#F8F8F8)">
       <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">選択肢 <span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">${aggLabel}</span></th>${headerCols}</tr>
@@ -3227,20 +3304,27 @@ function _buildPctTable(result, axisCategories, axisTotals, transpose = false, a
   </table>`;
 }
 
-function _buildNTable(result, axisCategories, axisTotals, transpose = false) {
+function _buildNTable(result, axisCategories, axisTotals, transpose = false, showTotalCol = true) {
+  const thStyle       = `text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem`;
+  const tdStyle       = `text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap`;
+  const rowLabelStyle = `padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis`;
+  const totalThStyle  = `${thStyle}; font-weight:700; background:var(--color-surface-2,#F8F8F8)`;
+  const totalTdStyle  = `${tdStyle}; font-weight:600; background:var(--color-surface-2,#F8F8F8)`;
+  const totalN        = axisTotals.reduce((s, v) => s + (v ?? 0), 0);
+  const totalThHtml   = showTotalCol
+    ? `<th style="${totalThStyle}">合計<br><span style="font-weight:400; color:var(--color-text-muted)">n=${totalN}</span></th>`
+    : "";
+
   if (transpose) {
-    // 行=集計軸カテゴリー, 列=選択肢
-    const headerCols = result.rows
-      .map(row => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem" title="${_esc(row.label)}">${_esc(row.label)}</th>`)
+    const headerCols = totalThHtml + result.rows
+      .map(row => `<th style="${thStyle}" title="${_esc(row.label)}">${_esc(row.label)}</th>`)
       .join("");
-    const rows = axisCategories
-      .map((cat, ci) => {
-        const cells = result.rows
-          .map(row => `<td style="text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap">${row.counts[ci] ?? 0}</td>`)
-          .join("");
-        return `<tr><td style="padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${cells}</tr>`;
-      })
-      .join("");
+    const rows = axisCategories.map((cat, ci) => {
+      const rowTotal = result.rows.reduce((s, row) => s + (row.counts[ci] ?? 0), 0);
+      const totalTdHtml = showTotalCol ? `<td style="${totalTdStyle}">${rowTotal}</td>` : "";
+      const cells = result.rows.map(row => `<td style="${tdStyle}">${row.counts[ci] ?? 0}</td>`).join("");
+      return `<tr><td style="${rowLabelStyle}" title="${_esc(cat)}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted); font-size:.75rem">n=${axisTotals[ci] ?? 0}</span></td>${totalTdHtml}${cells}</tr>`;
+    }).join("");
     return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
       <thead style="background:var(--color-surface-2,#F8F8F8)">
         <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">集計軸</th>${headerCols}</tr>
@@ -3248,18 +3332,17 @@ function _buildNTable(result, axisCategories, axisTotals, transpose = false) {
       <tbody>${rows}</tbody>
     </table>`;
   }
+
   // 通常: 行=選択肢, 列=集計軸カテゴリー
-  const headerCols = axisCategories
-    .map((cat, i) => `<th style="text-align:right; white-space:nowrap; padding:4px 8px; font-size:.8rem">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted)">n=${axisTotals[i] ?? 0}</span></th>`)
+  const headerCols = totalThHtml + axisCategories
+    .map((cat, i) => `<th style="${thStyle}">${_esc(cat)}<br><span style="font-weight:400; color:var(--color-text-muted)">n=${axisTotals[i] ?? 0}</span></th>`)
     .join("");
-  const rows = result.rows
-    .map(row => {
-      const cells = axisCategories
-        .map((_, i) => `<td style="text-align:right; padding:3px 8px; font-size:.82rem; white-space:nowrap">${row.counts[i] ?? 0}</td>`)
-        .join("");
-      return `<tr><td style="padding:3px 8px; font-size:.82rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis" title="${_esc(row.label)}">${_esc(row.label)}</td>${cells}</tr>`;
-    })
-    .join("");
+  const rows = result.rows.map(row => {
+    const rowTotal = (row.counts ?? []).slice(0, axisCategories.length).reduce((s, v) => s + (v ?? 0), 0);
+    const totalTdHtml = showTotalCol ? `<td style="${totalTdStyle}">${rowTotal}</td>` : "";
+    const cells = axisCategories.map((_, i) => `<td style="${tdStyle}">${row.counts[i] ?? 0}</td>`).join("");
+    return `<tr><td style="${rowLabelStyle}" title="${_esc(row.label)}">${_esc(row.label)}</td>${totalTdHtml}${cells}</tr>`;
+  }).join("");
   return `<table style="border-collapse:collapse; width:100%; font-size:.82rem">
     <thead style="background:var(--color-surface-2,#F8F8F8)">
       <tr><th style="text-align:left; padding:4px 8px; font-size:.8rem">選択肢</th>${headerCols}</tr>
@@ -3312,6 +3395,7 @@ function _getSettings(questionCode, typeCode) {
     splitColumns:           s.splitColumns           ?? null,
     itemsPerPage:           s.itemsPerPage           ?? null,
     pageLayout:             s.pageLayout             ?? "auto",
+    showTotalCol:           s.showTotalCol           ?? true,
   };
 }
 

@@ -21,6 +21,7 @@ _FA_TYPES = {"FA", "F"}
 _SPECIAL_TYPES = {"X", "XL"}  # SL は SA 相当のため特殊扱い不要
 
 BRACKET_RE = re.compile(r"^(.+)\[(\d+)\]$")
+QUESTANT_CHILD_RE = re.compile(r"^(.+)_(\d+)$")
 
 
 def _parse_bracket(col: str) -> Optional[tuple[str, int]]:
@@ -83,10 +84,29 @@ def build_codebook(questions: List[QuestionItem]) -> dict:
     return codebook
 
 
+def build_questant_codebook(questions: List[QuestionItem]) -> dict:
+    """
+    Questant 形式の回答データ用コードブック。
+
+    標準形式・調査会社形式レイアウトでは choice_index が 0-based (0, 1, 2…) で格納されるが、
+    Questant の SA 回答値は 1-based (1=第1選択肢, 2=第2選択肢…) のため、
+    インデックスを +1 シフトして辞書を構築する。
+    """
+    codebook: dict = {}
+    for q in questions:
+        if not q.choices:
+            continue
+        codebook[q.question_code] = {
+            str(c.choice_index + 1): c.choice_text for c in q.choices
+        }
+    return codebook
+
+
 def match_columns(
     df_cols: List[str],
     layout_codes: List[str],
     questions: Optional[List[QuestionItem]] = None,
+    format_hint: str = "",
 ) -> tuple[List[str], List[str], List[str], List[dict]]:
     """
     回答データ列名とレイアウト設問コードを照合する。
@@ -94,11 +114,14 @@ def match_columns(
     ブラケット記法列（Q3_1[1]）は親コード（Q3_1）配下の選択肢列として認識し、
     extra / missing の対象から除外する。
 
+    format_hint == "questant" の場合、Q4_1 のようなアンダースコア数字記法も
+    MA 親設問（Q4）の二値選択肢列として認識する。
+
     Returns:
-        matched:        一致列（完全一致 + ブラケットで補完された親コード）
+        matched:        一致列（完全一致 + ブラケット / Questant 展開で補完された親コード）
         missing:        レイアウトにあるが回答データにない列
-        extra:          回答データにだけある列（ブラケット列を除く）
-        bracket_cols:   ブラケット列の詳細リスト
+        extra:          回答データにだけある列（ブラケット / Questant 列を除く）
+        bracket_cols:   ブラケット列 + Questant 展開列の詳細リスト
     """
     response_set = set(df_cols)
     layout_set = set(layout_codes)
@@ -134,6 +157,41 @@ def match_columns(
         })
         bracket_base_codes.add(base_code)
         bracket_col_names.add(col)
+
+    # Questant 形式: Q4_N（アンダースコア+数字）を MA 親設問の二値選択肢列として認識
+    if format_hint == "questant":
+        direct_match_set = response_set & layout_set
+        for col in df_cols:
+            if col in direct_match_set or col in bracket_col_names:
+                continue
+            m = QUESTANT_CHILD_RE.match(col)
+            if not m:
+                continue
+            base_code = m.group(1)
+            choice_no = int(m.group(2))
+            if base_code not in layout_set:
+                continue
+
+            q = question_map.get(base_code)
+            choice_label = ""
+            if q:
+                # Questant は 1-based: Q4_1 → 1番目の選択肢 (0-based index = choice_no-1)
+                target_idx = choice_no - 1
+                for c in q.choices:
+                    if c.choice_index == target_idx:
+                        choice_label = c.choice_text
+                        break
+            display_header = f"{base_code}：{choice_label}" if choice_label else col
+
+            bracket_cols.append({
+                "column_name": col,
+                "base_code": base_code,
+                "choice_no": choice_no,
+                "choice_label": choice_label,
+                "display_header": display_header,
+            })
+            bracket_base_codes.add(base_code)
+            bracket_col_names.add(col)
 
     matched = sorted((response_set & layout_set) | bracket_base_codes)
     missing = sorted(layout_set - response_set - bracket_base_codes)
@@ -411,7 +469,8 @@ def _classify_one(
         }
 
 
-_FA_BROWSE_TYPES = {"FA", "F", "OA"}
+_FA_BROWSE_TYPES = {"FA", "F", "OA", "OE", "FT", "FN", "XL"}
+_FA_QUESTION_TYPE = "OA_TEXT"  # question_type による自由回答判定
 
 _KEY_COLUMN_PATTERNS = {"key", "id", "no.", "no", "番号", "サンプルid", "回答id", "回答no", "サンプルno"}
 
@@ -467,10 +526,9 @@ def build_fa_meta(
     selected_axis_columns: List[str],
 ) -> dict:
     """行データを生成せずメタ情報のみ返す（FA選択 UI の初期化用）。"""
-    matched_set = set(matched_columns)
     fa_questions = [
         q for q in questions
-        if q.type_code.upper() in _FA_BROWSE_TYPES and q.question_code in matched_set
+        if (q.question_type == _FA_QUESTION_TYPE or q.type_code.upper() in _FA_BROWSE_TYPES)
     ]
     fa_columns_info = [
         {
@@ -506,10 +564,9 @@ def build_fa_data(
     keyword: str = "",
 ) -> dict:
     """FA閲覧用データを構築する。各FA列 × 全行 を縦持ちに変換し、フィルタ・ソートを適用して返す。"""
-    matched_set = set(matched_columns)
     fa_questions = [
         q for q in questions
-        if q.type_code.upper() in _FA_BROWSE_TYPES and q.question_code in matched_set
+        if (q.question_type == _FA_QUESTION_TYPE or q.type_code.upper() in _FA_BROWSE_TYPES)
     ]
 
     fa_columns_info = [
@@ -600,6 +657,156 @@ def build_fa_data(
         "empty_row_count": empty_row_count,
         "rows": rows,
     }
+
+
+def apply_manual_matches(
+    raw_df: pd.DataFrame,
+    labeled_df: pd.DataFrame,
+    codebook: dict,
+    manual_rules: List[dict],
+    existing_missing_details: List[dict],
+) -> tuple[pd.DataFrame, List[dict], List[dict]]:
+    """
+    手動照合ルールを適用して labeled_df の該当列を更新する。
+
+    各ルール: {"layout_code": str, "response_cols": [str, ...]}
+    - layout_code のコードブックを使って response_cols 各列を変換する
+    - existing_missing_details の verdict を "manual_matched" に更新する
+
+    Returns:
+        updated_labeled_df, updated_missing_details, new_unmatched_values
+    """
+    from datetime import datetime
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    response_col_set = set(raw_df.columns)
+    new_unmatched: List[dict] = []
+    updated_df = labeled_df.copy()
+
+    def _make_col_converter(col_dict: dict) -> tuple:
+        """(converter_fn, counter_dict) を返す。"""
+        counter: dict[str, int] = defaultdict(int)
+
+        def _conv(v: str, _d=col_dict, _c=counter) -> str:
+            if v == "" or v is None:
+                return v
+            key = _normalize_key(str(v))
+            if key in _d:
+                return _d[key]
+            _c[key] += 1
+            return v
+
+        return _conv, counter
+
+    for rule in manual_rules:
+        layout_code = rule.get("layout_code", "")
+        response_cols = rule.get("response_cols", [])
+        col_dict = codebook.get(layout_code, {})
+
+        for col in response_cols:
+            if col not in response_col_set:
+                continue
+            if col_dict:
+                conv_fn, counter = _make_col_converter(col_dict)
+                updated_df[col] = raw_df[col].apply(conv_fn)
+                for val, count in counter.items():
+                    new_unmatched.append({"question_code": col, "value": val, "count": count})
+            else:
+                # コードブックなし: 生値をそのまま
+                updated_df[col] = raw_df[col]
+
+    # missing_column_details の verdict を更新
+    manual_layout_codes = {rule.get("layout_code", "") for rule in manual_rules}
+    rule_map = {rule.get("layout_code", ""): rule for rule in manual_rules}
+
+    updated_details: List[dict] = []
+    for detail in existing_missing_details:
+        code = detail.get("question_code", "")
+        if code in manual_layout_codes:
+            rule = rule_map[code]
+            response_cols = rule.get("response_cols", [])
+            valid_cols = [c for c in response_cols if c in response_col_set]
+            updated_details.append({
+                **detail,
+                "verdict": "manual_matched",
+                "verdict_label": "手動照合済",
+                "reason": f"手動で対応づけられました（{now_str}）",
+                "related_response_cols": valid_cols,
+            })
+        else:
+            updated_details.append(dict(detail))
+
+    return updated_df, updated_details, new_unmatched
+
+
+def apply_label_fixes(
+    raw_df: pd.DataFrame,
+    labeled_df: pd.DataFrame,
+    fixes: List[dict],
+    existing_unmatched: List[dict],
+    existing_manual_fixes: Optional[List[dict]] = None,
+) -> tuple[pd.DataFrame, List[dict], List[dict], int]:
+    """
+    手動ラベル修正を labeled_df に適用する。
+
+    fixes: [{question_code, raw_value, label}]
+
+    Returns:
+        updated_labeled_df, remaining_unmatched, merged_fixes, resolved_count
+    """
+    if existing_manual_fixes is None:
+        existing_manual_fixes = []
+    if not fixes:
+        return labeled_df.copy(), list(existing_unmatched), list(existing_manual_fixes), 0
+
+    updated_df = labeled_df.copy()
+
+    fix_map: dict[str, dict[str, str]] = defaultdict(dict)
+    for f in fixes:
+        qcode = f.get("question_code", "")
+        raw_val = _normalize_key(str(f.get("raw_value", "")))
+        label = f.get("label", "")
+        if qcode and raw_val and label:
+            fix_map[qcode][raw_val] = label
+
+    for qcode, val_map in fix_map.items():
+        if qcode not in raw_df.columns:
+            continue
+        for raw_val, label in val_map.items():
+            mask = raw_df[qcode].apply(
+                lambda v, rv=raw_val: _normalize_key(str(v)) == rv if (v != "" and v is not None) else False
+            )
+            if mask.any():
+                updated_df.loc[mask, qcode] = label
+
+    fixed_pairs = {
+        (qcode, rv)
+        for qcode, val_map in fix_map.items()
+        for rv in val_map
+    }
+    remaining_unmatched = [
+        u for u in existing_unmatched
+        if (u["question_code"], _normalize_key(str(u["value"]))) not in fixed_pairs
+    ]
+    resolved_count = len(existing_unmatched) - len(remaining_unmatched)
+
+    existing_fix_map: dict[tuple, dict] = {
+        (f["question_code"], _normalize_key(str(f.get("raw_value", "")))): dict(f)
+        for f in existing_manual_fixes
+    }
+    for f in fixes:
+        qcode = f.get("question_code", "")
+        raw_val = f.get("raw_value", "")
+        if qcode and raw_val:
+            existing_fix_map[(qcode, _normalize_key(str(raw_val)))] = {
+                "question_code": qcode,
+                "raw_value": raw_val,
+                "label": f.get("label", ""),
+                "manual_flag": True,
+            }
+    merged_fixes = list(existing_fix_map.values())
+
+    return updated_df, remaining_unmatched, merged_fixes, resolved_count
 
 
 def df_to_serializable(df: pd.DataFrame) -> dict:

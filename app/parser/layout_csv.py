@@ -49,6 +49,46 @@ OPTIONAL_COLS = {"表側"}
 _CQT_FORMAT_COLS = {"Question", "Title"}
 
 ChoiceColumnMode = Literal["multi_col", "single_col_delimited", "none"]
+FormatHint = Literal["auto", "intage", "questant"]
+
+# 形式ヒントと内部形式名の対応
+_HINT_PREFERRED_FMTS: dict[str, list[str]] = {
+    "intage":   ["cqt", "survey_company", "standard"],
+    "questant": ["standard", "survey_company"],
+    "auto":     ["cqt", "survey_company", "standard"],
+}
+
+# 表示用形式名
+FORMAT_DISPLAY_NAME: dict[str, str] = {
+    "standard":       "標準形式",
+    "survey_company": "調査会社形式",
+    "cqt":            "CQT 形式",
+    "manual":         "手動マッピング",
+    "intage":         "インテージ形式",
+    "questant":       "クエスタント形式",
+}
+
+# 内部検出形式 → プロジェクト全体の確定形式（intage / questant）
+_DETECTED_TO_SURVEY_FORMAT: dict[str, str] = {
+    "cqt":            "intage",
+    "survey_company": "intage",
+    "standard":       "questant",
+}
+
+
+def resolve_survey_format(detected_fmt: str, format_hint: str) -> str:
+    """
+    レイアウト解析結果から、プロジェクト全体で確定させる調査形式を決定する。
+
+    - format_hint が intage/questant ならユーザー選択を優先する。
+    - format_hint が auto の場合は detected_fmt から判定する
+      （cqt/survey_company → intage, standard → questant, それ以外 → unknown）。
+    """
+    if format_hint == "intage":
+        return "intage"
+    if format_hint == "questant":
+        return "questant"
+    return _DETECTED_TO_SURVEY_FORMAT.get(detected_fmt, "unknown")
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +212,24 @@ def _classify_oa_aux(questions: List["QuestionItem"]) -> List["QuestionItem"]:
 # ---------------------------------------------------------------------------
 # CSV 形式自動判定
 # ---------------------------------------------------------------------------
+
+def compute_format_confidence(fmt: str, cols: set) -> float:
+    """形式自動判定の信頼度スコアを算出する (0.0 〜 1.0)。"""
+    if fmt == "standard":
+        matched = len({"コード", "種別", "質問文"} & cols)
+        return [0.0, 0.65, 0.82, 0.98][min(matched, 3)]
+    if fmt == "survey_company":
+        matched = sum([
+            "回答タイプ" in cols,
+            bool({"質問文A", "質問文B"} & cols),
+            bool({"アイテム名", "カラム"} & cols),
+        ])
+        return [0.0, 0.60, 0.80, 0.95][min(matched, 3)]
+    if fmt == "cqt":
+        matched = sum(c in cols for c in ["Question", "Type", "CtgNo", "Title"])
+        return [0.0, 0.50, 0.75, 0.92, 0.99][min(matched, 4)]
+    return 0.0
+
 
 def detect_csv_format(df: pd.DataFrame) -> Tuple[str, dict]:
     """
@@ -586,6 +644,7 @@ def _make_q(code: str, type_code: str, title: str, row_idx: int) -> QuestionItem
 
 def _parse_layout_df(
     df: pd.DataFrame,
+    format_hint: str = "auto",
 ) -> Tuple[List[QuestionItem], List[str], ChoiceColumnMode, List[str], str, dict]:
     """
     正規化済み DataFrame をパースして設問リストを返す（CSV・Excel 共通処理）。
@@ -596,7 +655,7 @@ def _parse_layout_df(
         choice_col_mode  : ChoiceColumnMode
         unknown_types    : List[str]
         detected_format  : str  ("standard" | "survey_company" | "cqt")
-        format_info      : dict
+        format_info      : dict (confidence キーを含む)
     """
     parse_warnings: List[str] = []
     unknown_type_set: set[str] = set()
@@ -604,19 +663,66 @@ def _parse_layout_df(
     # 列名の正規化（前後スペース除去）
     df.columns = [str(c).strip() for c in df.columns]
     all_columns = list(df.columns)
+    col_set = set(all_columns)
+
+    # ---------- format_hint による優先判定 ----------
+    if format_hint == "questant":
+        # クエスタント形式: standard を強制
+        if not {"コード", "種別", "質問文"}.issubset(col_set):
+            parse_warnings.append(
+                "クエスタント形式を指定しましたが、必須列（コード/種別/質問文）が見つかりません。"
+                "自動判定で続行します。"
+            )
+            format_hint = "auto"
+        else:
+            confidence = compute_format_confidence("standard", col_set)
+            fmt_mapping: dict = {"code": "コード", "type": "種別", "text": "質問文"}
+            # fall through to standard parser below with forced fmt
+            return _parse_as_standard(df, all_columns, col_set, fmt_mapping,
+                                       parse_warnings, confidence, format_hint)
+
+    if format_hint == "intage":
+        # インテージ形式: CQT → survey_company の順で試みる
+        if _is_cqt_format(all_columns):
+            confidence = compute_format_confidence("cqt", col_set)
+            questions, cqt_warnings, unknown_types = _parse_cqt_format(df)
+            parse_warnings.extend(cqt_warnings)
+            questions = resolve_parent_texts(questions)
+            return (questions, parse_warnings, "none", unknown_types, "cqt",
+                    {"confidence": confidence, "format_hint": format_hint})
+        fmt, fmt_mapping = detect_csv_format(df)
+        if fmt == "survey_company":
+            confidence = compute_format_confidence("survey_company", col_set)
+            questions, unknown_types = _parse_survey_company_format(df, fmt_mapping, parse_warnings)
+            fmt_mapping["confidence"] = confidence
+            fmt_mapping["format_hint"] = format_hint
+            return questions, parse_warnings, "multi_col", unknown_types, "survey_company", fmt_mapping
+        # フォールバック: auto判定へ
+        parse_warnings.append(
+            "インテージ形式を指定しましたが、対応する形式（CQT/調査会社形式）が検出できません。"
+            "自動判定で続行します。"
+        )
+        format_hint = "auto"
+
+    # ---------- 自動判定 ----------
 
     # --- 形式判定: Column/Question/Type/CtgNo/Title 形式 ---
     if _is_cqt_format(all_columns):
+        confidence = compute_format_confidence("cqt", col_set)
         questions, cqt_warnings, unknown_types = _parse_cqt_format(df)
         parse_warnings.extend(cqt_warnings)
         questions = resolve_parent_texts(questions)
-        return questions, parse_warnings, "none", unknown_types, "cqt", {}
+        return (questions, parse_warnings, "none", unknown_types, "cqt",
+                {"confidence": confidence, "format_hint": format_hint})
 
     # --- 形式自動判定 ---
     fmt, fmt_mapping = detect_csv_format(df)
 
     if fmt == "survey_company":
+        confidence = compute_format_confidence("survey_company", col_set)
         questions, unknown_types = _parse_survey_company_format(df, fmt_mapping, parse_warnings)
+        fmt_mapping["confidence"] = confidence
+        fmt_mapping["format_hint"] = format_hint
         return questions, parse_warnings, "multi_col", unknown_types, "survey_company", fmt_mapping
 
     if fmt == "unknown":
@@ -704,7 +810,75 @@ def _parse_layout_df(
     questions = _classify_oa_aux(questions)
 
     unknown_types = sorted(unknown_type_set)
-    return questions, parse_warnings, choice_col_mode, unknown_types, "standard", fmt_mapping
+    confidence = compute_format_confidence("standard", col_set)
+    fmt_mapping_out = {**fmt_mapping, "confidence": confidence, "format_hint": format_hint}
+    return questions, parse_warnings, choice_col_mode, unknown_types, "standard", fmt_mapping_out
+
+
+def _parse_as_standard(
+    df: pd.DataFrame,
+    all_columns: List[str],
+    col_set: set,
+    fmt_mapping: dict,
+    parse_warnings: List[str],
+    confidence: float,
+    format_hint: str,
+) -> Tuple[List[QuestionItem], List[str], ChoiceColumnMode, List[str], str, dict]:
+    """強制的に標準形式でパースする（questant ヒント用）。"""
+    unknown_type_set: set[str] = set()
+
+    has_stub = "表側" in col_set
+    choice_col_mode, choice_cols = detect_choice_columns(all_columns)
+
+    if choice_col_mode == "none":
+        ambiguous = [c for c in all_columns if "選択肢" in c or "choice" in c.lower()]
+        if ambiguous:
+            parse_warnings.append(
+                f"選択肢列が自動検出できませんでした（候補: {', '.join(ambiguous)}）。"
+                "列名が「選択肢1」「選択肢2」…の形式であることを確認してください。"
+            )
+
+    questions: List[QuestionItem] = []
+    for row_idx, row in df.iterrows():
+        code = _safe_str(row.get("コード", ""))
+        type_code = _safe_str(row.get("種別", ""))
+        question_text = _safe_str(row.get("質問文", ""))
+        stub = _safe_str(row.get("表側", "")) if has_stub else ""
+
+        if not code:
+            parse_warnings.append(f"行 {row_idx + 2}: コードが空です。スキップします。")
+            continue
+
+        type_label, is_unknown = get_type_label(type_code)
+        if is_unknown and type_code:
+            unknown_type_set.add(type_code)
+            parse_warnings.append(
+                f"行 {row_idx + 2} (コード: {code}): 未知の種別コード「{type_code}」。"
+            )
+
+        choices = extract_choices(row, choice_col_mode, choice_cols)
+        is_child, parent_code = parse_parent_child(code)
+        questions.append(QuestionItem(
+            question_code=code, type_code=type_code, type_label=type_label,
+            question_text=question_text, stub=stub, choices=choices,
+            parent_code=parent_code, parent_text=None, is_child=is_child,
+            row_index=int(row_idx), original_question=code, original_type=type_code,
+            choice_count=len(choices),
+        ))
+
+    questions = resolve_parent_texts(questions)
+    parent_codes = {q.parent_code for q in questions if q.parent_code}
+    for q in questions:
+        q.has_children = q.question_code in parent_codes
+    for q in questions:
+        qt = classify_question_type(q)
+        q.question_type = qt
+        q.auto_detected_type = qt
+    questions = _classify_oa_aux(questions)
+
+    unknown_types = sorted(unknown_type_set)
+    fmt_mapping_out = {**fmt_mapping, "confidence": confidence, "format_hint": format_hint}
+    return questions, parse_warnings, choice_col_mode, unknown_types, "standard", fmt_mapping_out
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +998,7 @@ def parse_with_manual_mapping(
 def parse_layout_csv(
     raw_bytes: bytes,
     encoding: str,
+    format_hint: str = "auto",
 ) -> Tuple[List[QuestionItem], List[str], ChoiceColumnMode, List[str], str, dict]:
     """レイアウト CSV のバイト列を解析して設問リストを返す。"""
     text = decode_text(raw_bytes, encoding)
@@ -834,11 +1009,12 @@ def parse_layout_csv(
     except Exception as e:
         raise ValueError(f"CSV の読み込みに失敗しました: {e}") from e
 
-    return _parse_layout_df(df)
+    return _parse_layout_df(df, format_hint=format_hint)
 
 
 def parse_layout_excel(
     raw_bytes: bytes,
+    format_hint: str = "auto",
 ) -> Tuple[List[QuestionItem], List[str], ChoiceColumnMode, List[str], str, dict]:
     """レイアウト Excel (.xlsx) のバイト列を解析して設問リストを返す。"""
     try:
@@ -846,4 +1022,4 @@ def parse_layout_excel(
     except Exception as e:
         raise ValueError(f"Excel ファイルの読み込みに失敗しました: {e}") from e
 
-    return _parse_layout_df(df)
+    return _parse_layout_df(df, format_hint=format_hint)

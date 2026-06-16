@@ -54,6 +54,9 @@ class UploadResponse(BaseModel):
     unknown_types: List[str] = Field(default_factory=list)
     detected_format: str = ""
     format_info: dict = Field(default_factory=dict)
+    format_hint: str = "auto"
+    format_confidence: float = 0.0
+    survey_format: str = "unknown"
     needs_manual_mapping: bool = False
     available_columns: List[str] = Field(default_factory=list)
 
@@ -61,6 +64,11 @@ class UploadResponse(BaseModel):
 class RemapRequest(BaseModel):
     session_token: str
     col_mapping: dict
+
+
+class ReparseRequest(BaseModel):
+    session_token: str
+    format_hint: str = "auto"
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +159,25 @@ class UnmatchedValueItem(BaseModel):
     count: int
 
 
+class LabelFixRule(BaseModel):
+    question_code: str
+    raw_value: str
+    label: str
+
+
+class LabelFixRequest(BaseModel):
+    session_token: str
+    fixes: List[LabelFixRule]
+
+
+class LabelFixResponse(BaseModel):
+    status: str = "ok"
+    applied_count: int
+    remaining_unmatched: List[UnmatchedValueItem]
+    labeled_preview_rows: List[dict]
+    warnings: List[str] = Field(default_factory=list)
+
+
 class BracketColumnItem(BaseModel):
     column_name: str    # "Q3_1[1]"
     base_code: str      # "Q3_1"
@@ -193,6 +220,32 @@ class Step2UploadResponse(BaseModel):
     multi_select_columns: List[str]
     bracket_columns: List[BracketColumnItem] = Field(default_factory=list)
     missing_column_details: List[MissingColumnDetail] = Field(default_factory=list)
+    all_response_columns: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP2: 手動照合
+# ---------------------------------------------------------------------------
+
+class ManualMatchRule(BaseModel):
+    layout_code: str
+    response_cols: List[str] = Field(default_factory=list)
+
+
+class ManualMatchRequest(BaseModel):
+    session_token: str
+    rules: List[ManualMatchRule]
+
+
+class ManualMatchResponse(BaseModel):
+    status: str = "ok"
+    matched_columns: List[str]
+    extra_columns: List[str]
+    missing_column_details: List[MissingColumnDetail]
+    labeled_preview_rows: List[dict] = Field(default_factory=list)
+    unmatched_values: List[UnmatchedValueItem] = Field(default_factory=list)
+    manual_match_rules: List[dict] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class Step2AxisSaveRequest(BaseModel):
@@ -293,6 +346,8 @@ class ProjectSaveRequest(BaseModel):
     step3_views: dict = Field(default_factory=dict)
     report_project: dict = Field(default_factory=dict)
     chart_results: List[dict] = Field(default_factory=list)
+    layout_format: str = "auto"
+    response_format: str = "auto"
 
 
 class LayoutSaveData(BaseModel):
@@ -301,6 +356,8 @@ class LayoutSaveData(BaseModel):
     parse_warnings: List[str] = Field(default_factory=list)
     choice_column_mode: str = "none"
     all_type_codes: List[str] = Field(default_factory=list)
+    layout_format: str = "auto"
+    response_format: str = "auto"
     step3_active_axis_code: str = ""
     step3_chart_type_map: dict = Field(default_factory=dict)     # 後方互換
     step3_question_settings: dict = Field(default_factory=dict)  # 新
@@ -348,6 +405,9 @@ class Step2SaveData(BaseModel):
     multi_select_columns: List[str] = Field(default_factory=list)
     selected_fa_codes: List[str] = Field(default_factory=list)
     selected_attr_columns: List[str] = Field(default_factory=list)
+    manual_match_rules: List[dict] = Field(default_factory=list)
+    manual_label_fixes: List[dict] = Field(default_factory=list)
+    all_response_columns: List[str] = Field(default_factory=list)
 
 
 class CrosstabConfig(BaseModel):
@@ -377,6 +437,8 @@ class FullProjectLoadResponse(BaseModel):
     step3_active_axis_code: str = ""
     load_warnings: List[str] = Field(default_factory=list)
     report_project: dict = Field(default_factory=dict)
+    layout_format: str = "auto"
+    response_format: str = "auto"
 
 
 # ---------------------------------------------------------------------------

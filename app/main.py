@@ -17,6 +17,7 @@ from app.routers import step3 as step3_router
 from app.routers import step3_export as step3_export_router
 from app.routers import report as report_router
 from app.routers import pptx_export as pptx_export_router
+from app.routers import project as project_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +65,7 @@ app.include_router(step3_router.router, prefix="/api", tags=["step3"])
 app.include_router(step3_export_router.router, prefix="/api", tags=["step3-export"])
 app.include_router(report_router.router, prefix="/api", tags=["report"])
 app.include_router(pptx_export_router.router, prefix="/api", tags=["pptx-export"])
+app.include_router(project_router.router, prefix="/api", tags=["project"])
 
 app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 

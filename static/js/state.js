@@ -101,6 +101,10 @@ export const AppState = {
   },
   reportMainMode: "settings",  // "settings" | "preview"
   chartResults: [],            // ChartResult[] — STEP3集計結果をSTEP4で参照
+  // ファイル形式設定
+  layoutFormat: "auto",      // "auto" | "intage" | "questant" — STEP1 でのユーザー選択（ヒント）
+  responseFormat: "auto",    // "auto" | "intage" | "questant" — 後方互換用（参照は surveyFormat を使う）
+  surveyFormat: "unknown",   // "intage" | "questant" | "unknown" — STEP1 で確定したプロジェクト全体の調査形式
 };
 
 function _makeViewId(axisCode, secAxisCode) {
@@ -357,6 +361,8 @@ export function setUploadResult(resp) {
   AppState.questions       = resp.questions ?? [];
   AppState.allTypeCodes    = resp.all_type_codes ?? [];
   AppState.parseWarnings   = resp.parse_warnings ?? [];
+  AppState.layoutFormat    = resp.format_hint ?? "auto";
+  AppState.surveyFormat    = resp.survey_format ?? "unknown";
   AppState.excludedQuestionCodes = _deriveExcludedDefaults(AppState.questions);
   AppState.isDirty               = true;
   _emit();
@@ -375,6 +381,9 @@ export function setLoadedProject(resp) {
     ? layout.all_type_codes
     : [...new Set((layout.questions ?? []).map(q => q.type_code).filter(Boolean))].sort();
   AppState.choiceColumnMode = layout.choice_column_mode ?? "";
+  AppState.layoutFormat    = resp.layout_format ?? layout.layout_format ?? "auto";
+  AppState.responseFormat  = resp.response_format ?? layout.response_format ?? "auto";
+  AppState.surveyFormat    = resp.survey_format ?? "unknown";
 
   if (resp.has_step2 && resp.step2) {
     const s2 = resp.step2;
@@ -603,6 +612,9 @@ export function resetState() {
   AppState.reportProject           = { projectId: "", pages: [], activePageId: null };
   AppState.reportMainMode          = "settings";
   AppState.chartResults            = [];
+  AppState.layoutFormat            = "auto";
+  AppState.responseFormat          = "auto";
+  AppState.surveyFormat            = "unknown";
   _emit();
 }
 
@@ -738,6 +750,7 @@ function _buildChartConfig(cr, s3) {
     splitColumns:       s3.splitColumns     ?? null,
     itemsPerPage:       s3.itemsPerPage     ?? null,
     pageLayout:         s3.pageLayout       ?? "auto",
+    showTotalCol:       s3.showTotalCol     ?? true,
     colorSettings: {
       selectedPalette:        s3.selectedPalette        ?? null,
       valueColorMapping:      s3.valueColorMapping      ?? null,

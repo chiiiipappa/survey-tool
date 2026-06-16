@@ -1,8 +1,9 @@
 /**
  * アップロードパネルの制御。
  */
-import { uploadFile, remapUpload, loadProject } from "./api.js";
-import { setUploadResult, setLoadedProject } from "./state.js";
+import { uploadFile, remapUpload, loadProject, reparseLayout } from "./api.js";
+import { setUploadResult, setLoadedProject, AppState } from "./state.js";
+import { setResponseFormatRadio } from "./step2.js";
 import { showToast, showError, showSpinner, hideSpinner, activatePanel } from "./app.js";
 
 const CHOICE_MODE_LABEL = {
@@ -16,6 +17,14 @@ const FORMAT_NAME = {
   survey_company: "調査会社形式（回答タイプ/質問文A-B）",
   cqt:            "CQT 形式（Column/Question/Type）",
   manual:         "手動マッピング",
+};
+
+// 表示用形式名
+const FORMAT_DISPLAY = {
+  auto:     "自動判定",
+  intage:   "インテージ形式",
+  questant: "クエスタント形式",
+  manual:   "手動マッピング",
 };
 
 let _lastFile = null;
@@ -54,6 +63,16 @@ export function initUploadPanel() {
   });
 }
 
+function _getLayoutFormat() {
+  const checked = document.querySelector('input[name="layout-format"]:checked');
+  return checked ? checked.value : "auto";
+}
+
+export function setLayoutFormatRadio(value) {
+  const radios = document.querySelectorAll('input[name="layout-format"]');
+  radios.forEach(r => { r.checked = r.value === value; });
+}
+
 export async function handleCsvFile(file) {
   const lname = file.name.toLowerCase();
   if (!lname.endsWith(".csv") && !lname.endsWith(".xlsx")) {
@@ -62,9 +81,10 @@ export async function handleCsvFile(file) {
   }
   _lastFile = file;
   const label = lname.endsWith(".xlsx") ? "Excel" : "CSV";
+  const formatHint = _getLayoutFormat();
   showSpinner(`${label} を解析中…`);
   try {
-    const resp = await uploadFile(file);
+    const resp = await uploadFile(file, formatHint);
     if (resp.needs_manual_mapping) {
       _showManualMappingPanel(resp);
     } else {
@@ -84,12 +104,121 @@ export function reloadLastCsvFile() {
 function _onUploadSuccess(resp) {
   setUploadResult(resp);
   renderFileInfo(resp);
+  _renderFormatResult(resp);
   _renderFormatDetectBox(resp);
-  renderWarnings(resp.parse_warnings ?? []);
+  setResponseFormatRadio(resp.survey_format ?? "unknown");
+  const warnings = [...(resp.parse_warnings ?? [])];
+  if (resp.survey_format === "unknown") {
+    warnings.unshift("調査形式を自動判定できませんでした。「インテージ形式」または「クエスタント形式」を明示的に選択してください。形式が確定するまでSTEP2の回答データ読込はできません。");
+  }
+  renderWarnings(warnings);
   document.getElementById("btn-to-questions").disabled = false;
   _hideManualMappingPanel();
   showToast(`${resp.row_count} 設問を読み込みました。`);
   activatePanel("questions");
+}
+
+// ---------------------------------------------------------------------------
+// 自動判定結果 / 形式変更ボックス
+// ---------------------------------------------------------------------------
+
+function _internalToUserFormat(detectedFmt, formatHint) {
+  // detected_format → ユーザー向け表示名のマッピング
+  if (formatHint === "intage") return "インテージ形式";
+  if (formatHint === "questant") return "クエスタント形式";
+  // auto 判定結果の表示
+  if (detectedFmt === "cqt" || detectedFmt === "survey_company") return "インテージ形式";
+  if (detectedFmt === "standard") return "クエスタント形式";
+  return FORMAT_NAME[detectedFmt] ?? detectedFmt;
+}
+
+function _getOtherFormats(currentHint, detectedFmt) {
+  // 現在の判定以外の選択肢を返す
+  const all = ["intage", "questant"];
+  // 自動判定でどちらに近いか
+  let current;
+  if (currentHint !== "auto") {
+    current = currentHint;
+  } else {
+    current = (detectedFmt === "cqt" || detectedFmt === "survey_company") ? "intage" : "questant";
+  }
+  return all.filter(f => f !== current);
+}
+
+function _renderFormatResult(resp) {
+  const box = document.getElementById("layout-format-result");
+  if (!box) return;
+
+  const hint = resp.format_hint ?? "auto";
+  const confidence = resp.format_confidence ?? 0;
+  const detectedFmt = resp.detected_format ?? "";
+
+  const displayName = _internalToUserFormat(detectedFmt, hint);
+  const others = _getOtherFormats(hint, detectedFmt);
+
+  const confPct = Math.round(confidence * 100);
+  const confClass = confPct >= 90 ? "conf-high" : confPct >= 70 ? "conf-mid" : "conf-low";
+
+  const othersHtml = others.map(f =>
+    `<button class="format-change-btn" data-fmt="${escHtml(f)}">${escHtml(FORMAT_DISPLAY[f])}</button>`
+  ).join("");
+
+  if (hint === "auto") {
+    box.innerHTML = `
+      <div class="format-result-inner">
+        <div class="format-result-detected">
+          <span class="format-result-label">レイアウト形式を判定しました</span>
+          <span class="format-result-name">${escHtml(displayName)}</span>
+          <span class="format-result-conf ${confClass}">信頼度：${confPct}%</span>
+        </div>
+        <div class="format-result-change">
+          <span class="format-result-change-label">変更：</span>
+          ${othersHtml}
+        </div>
+      </div>
+    `;
+  } else {
+    box.innerHTML = `
+      <div class="format-result-inner">
+        <div class="format-result-detected">
+          <span class="format-result-label">レイアウト形式</span>
+          <span class="format-result-name">${escHtml(displayName)}</span>
+        </div>
+        <div class="format-result-change">
+          <span class="format-result-change-label">変更：</span>
+          ${othersHtml}
+          <button class="format-change-btn" data-fmt="auto">自動判定</button>
+        </div>
+      </div>
+    `;
+  }
+
+  box.style.display = "";
+
+  // 変更ボタンのクリック
+  box.querySelectorAll(".format-change-btn").forEach(btn => {
+    btn.addEventListener("click", () => _onFormatChangeClick(btn.dataset.fmt));
+  });
+}
+
+async function _onFormatChangeClick(newFmt) {
+  if (!AppState.sessionToken) {
+    showError("セッションが見つかりません。ファイルを再度アップロードしてください。");
+    return;
+  }
+  // ラジオボタンも同期
+  setLayoutFormatRadio(newFmt);
+
+  showSpinner("形式を変更して再解析中…");
+  try {
+    const resp = await reparseLayout(AppState.sessionToken, newFmt);
+    _onUploadSuccess(resp);
+    showToast(`${FORMAT_DISPLAY[newFmt] ?? newFmt}で再解析しました（${resp.row_count} 設問）。`);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    hideSpinner();
+  }
 }
 
 function _renderFormatDetectBox(resp) {
@@ -108,7 +237,7 @@ function _renderFormatDetectBox(resp) {
 
   box.style.display = "";
   box.innerHTML = `
-    <div class="format-detect-title">レイアウト形式を自動判定しました</div>
+    <div class="format-detect-title">レイアウト列構成の詳細</div>
     <table class="format-detect-table">
       <tr><td>形式</td><td>${escHtml(fmtName)}</td></tr>
       <tr><td>コード列</td><td>${escHtml(fi.code ?? "—")}</td></tr>
@@ -116,7 +245,6 @@ function _renderFormatDetectBox(resp) {
       <tr><td>質問文</td><td>${textDesc}</td></tr>
       ${fi.choices?.length ? `<tr><td>選択肢</td><td>${choiceDesc}</td></tr>` : ""}
     </table>
-    <p class="format-detect-hint">問題がなければ次へ進めます。</p>
   `;
 }
 
@@ -154,6 +282,7 @@ function _showManualMappingPanel(resp) {
 
   panel.style.display = "";
   document.getElementById("format-detect-box")?.style && (document.getElementById("format-detect-box").style.display = "none");
+  document.getElementById("layout-format-result") && (document.getElementById("layout-format-result").style.display = "none");
 
   const applyBtn = panel.querySelector("#mmap-apply-btn");
   // クリーンアップ: 古いリスナーを削除
@@ -196,6 +325,10 @@ async function handleProjectLoad(file) {
     const resp = await loadProject(file);
     setLoadedProject(resp);
 
+    // 保存済み形式をラジオ/固定表示に反映
+    if (resp.layout_format) setLayoutFormatRadio(resp.layout_format);
+    setResponseFormatRadio(resp.survey_format ?? "unknown");
+
     // ファイル情報バーを簡易表示
     const bar = document.getElementById("file-info-bar");
     bar.classList.remove("hidden");
@@ -209,6 +342,18 @@ async function handleProjectLoad(file) {
         <span class="info-value">${resp.questions.length}</span>
       </div>
     `;
+
+    // 保存済み形式の表示
+    const resultBox = document.getElementById("layout-format-result");
+    if (resultBox && resp.survey_format && resp.survey_format !== "unknown") {
+      resultBox.innerHTML = `
+        <div class="format-result-inner format-result-restored">
+          <span class="format-result-label">調査形式（確定済み）：</span>
+          <span class="format-result-name">${escHtml(FORMAT_DISPLAY[resp.survey_format] ?? resp.survey_format)}</span>
+        </div>
+      `;
+      resultBox.style.display = "";
+    }
 
     renderWarnings([...(resp.parse_warnings ?? []), ...(resp.load_warnings ?? [])]);
     document.getElementById("btn-to-questions").disabled = false;
@@ -265,4 +410,20 @@ function escHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+export function resetUploadPanel() {
+  _lastFile = null;
+  document.getElementById("file-info-bar")?.classList.add("hidden");
+  const fdb = document.getElementById("format-detect-box");
+  if (fdb) fdb.style.display = "none";
+  const lfr = document.getElementById("layout-format-result");
+  if (lfr) lfr.style.display = "none";
+  const mmp = document.getElementById("manual-mapping-panel");
+  if (mmp) mmp.style.display = "none";
+  document.getElementById("parse-warnings-box")?.classList.add("hidden");
+  const btn = document.getElementById("btn-to-questions");
+  if (btn) btn.disabled = true;
+  // ラジオを「自動判定」に戻す
+  setLayoutFormatRadio("auto");
 }

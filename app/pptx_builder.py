@@ -391,14 +391,16 @@ def _add_table_shape(slide, cr: dict, lc: dict, cc: dict, x, y, w, h) -> None:
     content_mode: str = lc.get("tableContentMode", "percent")
     dec_places: int = int(lc.get("tableDecimalPlaces", 1))
     font_size: int = int(lc.get("tableFontSize", 9))
-    show_col_total: bool = lc.get("showTableColTotal", False)
+    # cc.showTotalCol (フロントエンド設定) を優先、未設定時はデフォルト ON
+    has_total_col: bool = cc.get("showTotalCol", True)
 
-    # 列定義: ヘッダ + axis_cats (+ 合計列)
-    has_total_col = show_col_total or len(axis_cats) > 1
-    col_headers = [""] + axis_cats + (["合計"] if has_total_col else [])
+    # 列定義: ラベル列 → 合計列（2番目）→ axis_cats
+    col_headers = [""] + (["合計"] if has_total_col else []) + axis_cats
     n_cols = len(col_headers)
+    total_col_idx = 1 if has_total_col else None  # 合計列の列インデックス
+    axis_col_start = 2 if has_total_col else 1    # axis_cats の開始列インデックス
 
-    # 行定義: N行 + データ行 (+ 合計行)
+    # 行定義: N行 + データ行
     n_header_rows = 1
     n_n_rows = 1
     data_rows_start = n_header_rows + n_n_rows
@@ -408,26 +410,30 @@ def _add_table_shape(slide, cr: dict, lc: dict, cc: dict, x, y, w, h) -> None:
     table_shape = slide.shapes.add_table(n_rows_total, n_cols, x, y, w, h)
     tbl = table_shape.table
 
-    # 列幅: 先頭列を少し広く
+    # 列幅: 先頭列を少し広く、合計列は少し細め
     label_col_w = int(w * 0.22)
-    rest_w = int((w - label_col_w) / max(n_cols - 1, 1))
+    total_col_w = int(w * 0.08) if has_total_col else 0
+    remain_cols  = n_cols - 1 - (1 if has_total_col else 0)
+    axis_col_w   = int((w - label_col_w - total_col_w) / max(remain_cols, 1))
     tbl.columns[0].width = label_col_w
-    for ci in range(1, n_cols):
-        tbl.columns[ci].width = rest_w
+    if has_total_col:
+        tbl.columns[1].width = total_col_w
+    for ci in range(axis_col_start, n_cols):
+        tbl.columns[ci].width = axis_col_w
 
     # ヘッダ行
     _set_cell(tbl, 0, 0, "", font_size, bold=True)
-    for ci, cat in enumerate(axis_cats):
-        _set_cell(tbl, 0, ci + 1, cat, font_size, bold=True)
     if has_total_col:
-        _set_cell(tbl, 0, n_cols - 1, "合計", font_size, bold=True)
+        _set_cell(tbl, 0, total_col_idx, "合計", font_size, bold=True)
+    for ci, cat in enumerate(axis_cats):
+        _set_cell(tbl, 0, axis_col_start + ci, cat, font_size, bold=True)
 
     # N 行
     _set_cell(tbl, 1, 0, "n", font_size, bold=True)
-    for ci, total in enumerate(axis_totals):
-        _set_cell(tbl, 1, ci + 1, str(total), font_size, align="center")
     if has_total_col:
-        _set_cell(tbl, 1, n_cols - 1, str(sum(axis_totals)), font_size, align="center")
+        _set_cell(tbl, 1, total_col_idx, str(sum(axis_totals)), font_size, align="center")
+    for ci, total in enumerate(axis_totals):
+        _set_cell(tbl, 1, axis_col_start + ci, str(total), font_size, align="center")
 
     # データ行
     for ri, row in enumerate(rows_data):
@@ -435,17 +441,17 @@ def _add_table_shape(slide, cr: dict, lc: dict, cc: dict, x, y, w, h) -> None:
         _set_cell(tbl, r_idx, 0, row.get("label", ""), font_size)
         percents: list[float] = row.get("percents") or []
         counts: list[int] = row.get("counts") or []
+        if has_total_col:
+            total_pct = sum(percents[:len(axis_cats)])
+            total_cnt = sum(counts[:len(axis_cats)])
+            _set_cell(tbl, r_idx, total_col_idx,
+                      _format_cell(total_pct, total_cnt, content_mode, dec_places),
+                      font_size, align="center")
         for ci in range(len(axis_cats)):
             pct = percents[ci] if ci < len(percents) else 0.0
             cnt = counts[ci] if ci < len(counts) else 0
             cell_text = _format_cell(pct, cnt, content_mode, dec_places)
-            _set_cell(tbl, r_idx, ci + 1, cell_text, font_size, align="center")
-        if has_total_col:
-            total_pct = sum(percents[:len(axis_cats)])
-            total_cnt = sum(counts[:len(axis_cats)])
-            _set_cell(tbl, r_idx, n_cols - 1,
-                      _format_cell(total_pct, total_cnt, content_mode, dec_places),
-                      font_size, align="center")
+            _set_cell(tbl, r_idx, axis_col_start + ci, cell_text, font_size, align="center")
 
     # 罫線
     _set_table_borders(tbl, TABLE_BORDER_PT, TABLE_BORDER_COLOR)

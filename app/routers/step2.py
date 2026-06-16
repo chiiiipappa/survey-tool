@@ -15,10 +15,13 @@ from fastapi.responses import StreamingResponse
 from app.data_store import survey_cache
 from app.parquet_cache import load_parquet, save_parquet
 from app.parser.response_csv import (
+    apply_label_fixes,
+    apply_manual_matches,
     build_axis_candidates,
     build_codebook,
     build_fa_data,
     build_fa_meta,
+    build_questant_codebook,
     classify_missing_columns,
     convert_labels,
     detect_multi_select,
@@ -32,6 +35,10 @@ from app.schemas import (
     FaAttrCandidate,
     FaColumnInfo,
     FaRow,
+    LabelFixRequest,
+    LabelFixResponse,
+    ManualMatchRequest,
+    ManualMatchResponse,
     MissingColumnDetail,
     Step2AxisSaveRequest,
     Step2FaMetaResponse,
@@ -65,12 +72,15 @@ async def get_step2_progress(session_token: str):
 async def step2_upload(
     session_token: str = Form(...),
     file: UploadFile = ...,
+    response_format: str = Form("auto"),
 ) -> Step2UploadResponse:
     """
     回答 CSV / xlsx をアップロードし、STEP1 のレイアウト情報でラベル変換する。
 
     - raw_data と labeled_data を分離して保持する
     - 変換辞書は Question 単位で作成する
+    - 回答データ形式は STEP1 で確定した survey_format をサーバ側で参照する
+      （クライアントから送られる response_format は使用しない）
     """
     filename = file.filename or ""
     suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -85,6 +95,16 @@ async def step2_upload(
     if questions is None:
         raise HTTPException(404, "セッションが見つかりません。STEP1 からやり直してください。")
 
+    meta = survey_cache.get_meta(session_token) or {}
+    survey_format = meta.get("survey_format", "unknown")
+    if survey_format not in ("intage", "questant"):
+        raise HTTPException(400, "先に調査票レイアウトを読み込み、形式を確定してください。")
+    response_format = survey_format
+
+    # 既存の手動ラベル修正を保持（差し替え時の自動再適用）
+    _existing_step2 = survey_cache.get_step2(session_token)
+    _pre_existing_fixes: list[dict] = (_existing_step2 or {}).get("manual_label_fixes", [])
+
     # 重い同期処理をスレッドプールで実行（イベントループをブロックしない）
     def _process():
         _set_progress(session_token, 10, "ファイル解析中…")
@@ -92,9 +112,12 @@ async def step2_upload(
         layout_codes_ = [q.question_code for q in questions]
 
         _set_progress(session_token, 30, "変換辞書を構築中…")
-        codebook_ = build_codebook(questions)
+        if response_format == "questant":
+            codebook_ = build_questant_codebook(questions)
+        else:
+            codebook_ = build_codebook(questions)
         matched_, missing_, extra_, bracket_cols_raw_ = match_columns(
-            list(df_.columns), layout_codes_, questions
+            list(df_.columns), layout_codes_, questions, format_hint=response_format
         )
         missing_details_raw_ = classify_missing_columns(
             missing_, questions, matched_, bracket_cols_raw_
@@ -103,24 +126,34 @@ async def step2_upload(
         _set_progress(session_token, 55, "ラベル変換中…")
         labeled_df_, unmatched_ = convert_labels(df_, codebook_, matched_, bracket_cols_raw_)
 
+        # 既存の手動修正を再適用
+        manual_fixes_result_: list[dict] = []
+        if _pre_existing_fixes:
+            labeled_df_, unmatched_, manual_fixes_result_, _ = apply_label_fixes(
+                df_, labeled_df_, _pre_existing_fixes, unmatched_, []
+            )
+
         _set_progress(session_token, 75, "MA展開・集計軸検出中…")
         multi_select_ = detect_multi_select(df_, questions, matched_)
         axis_candidates_ = build_axis_candidates(questions, matched_)
 
         _set_progress(session_token, 90, "Parquet保存中…")
+        rp_ = save_parquet(session_token, df_, "raw_data")
         lp_ = save_parquet(session_token, labeled_df_, "labeled_data")
 
         _upload_progress[session_token] = {"pct": 100, "message": "完了", "done": True}
         return (df_, enc, labeled_df_, unmatched_,
                 matched_, missing_, extra_,
                 bracket_cols_raw_, missing_details_raw_,
-                multi_select_, axis_candidates_, lp_, codebook_)
+                multi_select_, axis_candidates_, rp_, lp_, codebook_,
+                manual_fixes_result_)
 
     try:
         (df, encoding, labeled_df, unmatched_values,
          matched, missing, extra,
          bracket_cols_raw, missing_details_raw,
-         multi_select_cols, axis_candidates, labeled_parquet_path, codebook,
+         multi_select_cols, axis_candidates, raw_parquet_path, labeled_parquet_path, codebook,
+         manual_label_fixes,
          ) = await asyncio.to_thread(_process)
     except Exception as exc:
         _upload_progress.pop(session_token, None)
@@ -136,12 +169,15 @@ async def step2_upload(
     bracket_columns = [BracketColumnItem(**bc) for bc in bracket_cols_raw]
     missing_details = [MissingColumnDetail(**d) for d in missing_details_raw]
 
+    all_response_cols = list(df.columns)
+
     survey_cache.set_step2(
         session_token,
         {
             "filename": filename,
             "encoding": encoding,
             "file_size": len(raw_bytes),
+            "raw_parquet_path": str(raw_parquet_path),
             "labeled_parquet_path": str(labeled_parquet_path),
             "codebook": codebook,
             "matched_columns": matched,
@@ -158,6 +194,10 @@ async def step2_upload(
             "axis_display_order": [],
             "axis_filter_settings": {},
             "multi_select_columns": multi_select_cols,
+            "manual_match_rules": [],
+            "manual_label_fixes": manual_label_fixes,
+            "all_response_columns": all_response_cols,
+            "response_format": response_format,
         },
     )
 
@@ -185,6 +225,76 @@ async def step2_upload(
         multi_select_columns=multi_select_cols,
         bracket_columns=bracket_columns,
         missing_column_details=missing_details,
+        all_response_columns=all_response_cols,
+    )
+
+
+@router.post("/step2/manual-match", response_model=ManualMatchResponse, summary="手動照合ルールを適用")
+async def step2_manual_match(body: ManualMatchRequest) -> ManualMatchResponse:
+    """
+    手動照合ルールを受け取り、該当する回答データ列にレイアウトコードのコードブックを適用する。
+    更新後の labeled_data を Parquet に保存し、照合結果詳細を返す。
+    """
+    data = survey_cache.get_step2(body.session_token)
+    if not data:
+        raise HTTPException(404, "STEP2 データが見つかりません。先に回答データをアップロードしてください。")
+
+    raw_path = data.get("raw_parquet_path")
+    labeled_path = data.get("labeled_parquet_path")
+    if not raw_path or not labeled_path:
+        raise HTTPException(422, "データが見つかりません。回答データを再アップロードしてください。")
+
+    try:
+        raw_df = load_parquet(Path(raw_path))
+        labeled_df = load_parquet(Path(labeled_path))
+    except FileNotFoundError:
+        raise HTTPException(422, "データが失われています。回答データを再アップロードしてください。")
+
+    rules = [r.model_dump() for r in body.rules]
+    codebook = data.get("codebook", {})
+    existing_details = data.get("missing_column_details", [])
+
+    def _apply():
+        return apply_manual_matches(raw_df, labeled_df, codebook, rules, existing_details)
+
+    try:
+        updated_labeled_df, updated_details, new_unmatched = await asyncio.to_thread(_apply)
+    except Exception as exc:
+        logger.exception("手動照合エラー")
+        raise HTTPException(422, f"手動照合の適用に失敗しました: {exc}") from exc
+
+    new_lp = save_parquet(body.session_token, updated_labeled_df, "labeled_data")
+
+    # 手動照合済みの回答データ列を extra_columns から除外
+    manually_used_cols: set[str] = set()
+    for rule in rules:
+        manually_used_cols.update(rule.get("response_cols", []))
+    existing_extra = data.get("extra_columns", [])
+    new_extra = [c for c in existing_extra if c not in manually_used_cols]
+
+    data["missing_column_details"] = updated_details
+    data["labeled_parquet_path"] = str(new_lp)
+    data["manual_match_rules"] = rules
+    data["extra_columns"] = new_extra
+    survey_cache.set_step2(body.session_token, data)
+
+    warnings: list[str] = []
+    all_response_cols = set(raw_df.columns)
+    for rule in rules:
+        for col in rule.get("response_cols", []):
+            if col not in all_response_cols:
+                warnings.append(f"列 '{col}' は回答データに存在しません。")
+
+    logger.info("手動照合適用: %d ルール, warnings=%d", len(rules), len(warnings))
+
+    return ManualMatchResponse(
+        matched_columns=data.get("matched_columns", []),
+        extra_columns=new_extra,
+        missing_column_details=[MissingColumnDetail(**d) for d in updated_details],
+        labeled_preview_rows=df_preview(updated_labeled_df),
+        unmatched_values=[UnmatchedValueItem(**u) for u in new_unmatched],
+        manual_match_rules=rules,
+        warnings=warnings,
     )
 
 
@@ -410,6 +520,56 @@ async def step2_fa_export(
         iter([content.encode("utf-8-sig")]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{dl_filename}"'},
+    )
+
+
+@router.post("/step2/label-fix", response_model=LabelFixResponse, summary="変換不可値の手動ラベル修正を適用")
+async def step2_label_fix(body: LabelFixRequest) -> LabelFixResponse:
+    """
+    指定された変換不可値に手動ラベルを割り当て、labeled_df を更新する。
+    修正済みの値は変換不可値リストから除外される。
+    """
+    data = survey_cache.get_step2(body.session_token)
+    if not data:
+        raise HTTPException(404, "STEP2 データが見つかりません。先に回答データをアップロードしてください。")
+
+    raw_path = data.get("raw_parquet_path")
+    labeled_path = data.get("labeled_parquet_path")
+    if not raw_path or not labeled_path:
+        raise HTTPException(422, "データが見つかりません。回答データを再アップロードしてください。")
+
+    try:
+        raw_df = load_parquet(Path(raw_path))
+        labeled_df = load_parquet(Path(labeled_path))
+    except FileNotFoundError:
+        raise HTTPException(422, "データが失われています。回答データを再アップロードしてください。")
+
+    fixes = [f.model_dump() for f in body.fixes]
+    existing_unmatched = data.get("unmatched_values", [])
+    existing_manual_fixes = data.get("manual_label_fixes", [])
+
+    def _apply():
+        return apply_label_fixes(raw_df, labeled_df, fixes, existing_unmatched, existing_manual_fixes)
+
+    try:
+        updated_labeled_df, remaining_unmatched, merged_fixes, resolved_count = await asyncio.to_thread(_apply)
+    except Exception as exc:
+        logger.exception("ラベル修正エラー")
+        raise HTTPException(422, f"ラベル修正の適用に失敗しました: {exc}") from exc
+
+    new_lp = save_parquet(body.session_token, updated_labeled_df, "labeled_data")
+
+    data["labeled_parquet_path"] = str(new_lp)
+    data["unmatched_values"] = remaining_unmatched
+    data["manual_label_fixes"] = merged_fixes
+    survey_cache.set_step2(body.session_token, data)
+
+    logger.info("ラベル修正適用: %d 件修正, 残り %d 件", resolved_count, len(remaining_unmatched))
+
+    return LabelFixResponse(
+        applied_count=resolved_count,
+        remaining_unmatched=[UnmatchedValueItem(**u) for u in remaining_unmatched],
+        labeled_preview_rows=df_preview(updated_labeled_df),
     )
 
 

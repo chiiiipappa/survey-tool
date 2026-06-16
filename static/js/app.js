@@ -179,7 +179,27 @@ document.addEventListener("DOMContentLoaded", () => {
     if (AppState.sessionToken) activatePanel("step2");
   });
   document.getElementById("btn-to-step3")?.addEventListener("click", () => {
-    if (AppState.sessionToken) activatePanel("step3");
+    if (!AppState.sessionToken) return;
+    const unmatchedCount = AppState.step2UnmatchedValues?.length ?? 0;
+    if (unmatchedCount > 0) {
+      const modal = document.getElementById("step2-unmatched-confirm-modal");
+      const countEl = document.getElementById("step2-unmatched-confirm-count");
+      if (countEl) countEl.textContent = unmatchedCount;
+      if (modal) modal.style.display = "";
+    } else {
+      activatePanel("step3");
+    }
+  });
+
+  document.getElementById("step2-unmatched-confirm-cancel")?.addEventListener("click", () => {
+    document.getElementById("step2-unmatched-confirm-modal").style.display = "none";
+  });
+  document.getElementById("step2-unmatched-confirm-proceed")?.addEventListener("click", () => {
+    document.getElementById("step2-unmatched-confirm-modal").style.display = "none";
+    activatePanel("step3");
+  });
+  document.getElementById("step2-unmatched-confirm-modal")?.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.style.display = "none";
   });
 
   // セッション確立後に ② ③ を有効化

@@ -113,6 +113,24 @@ export function initReport() {
   _bindEditPanelEvents();
 }
 
+export function resetReportUI() {
+  _charts.forEach(c => c.destroy());
+  _charts.clear();
+  _lastPreviewPageId = null;
+  _lastPreviewMode = null;
+
+  const pageItems = document.getElementById("report-page-items");
+  if (pageItems) pageItems.innerHTML = "";
+  const chartList = document.getElementById("report-chart-result-list");
+  if (chartList) chartList.innerHTML = "";
+  const canvas = document.getElementById("report-preview-canvas");
+  if (canvas) canvas.innerHTML = "";
+  const previewPanel = document.getElementById("report-preview-panel");
+  if (previewPanel) previewPanel.style.display = "none";
+  const genError = document.getElementById("report-generate-error");
+  if (genError) genError.style.display = "none";
+}
+
 function _bindEvents() {
   document.getElementById("report-generate-btn")?.addEventListener("click", _onGenerate);
 

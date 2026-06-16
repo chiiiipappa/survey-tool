@@ -26,6 +26,8 @@ class SurveySessionCache:
         parse_warnings : List[str]
         unknown_types  : List[str]
         all_type_codes : List[str]
+        layout_format  : str   ("auto" | "intage" | "questant") STEP1 でのユーザー選択
+        survey_format  : str   ("intage" | "questant" | "unknown") プロジェクト全体で確定した調査形式
 
     step2 dict のキー:
         filename            : str
@@ -80,6 +82,10 @@ class SurveySessionCache:
     def get_step2(self, token: str) -> dict:
         with self._lock:
             return self._step2.get(token) or {}
+
+    def clear_step2(self, token: str) -> None:
+        with self._lock:
+            self._step2.pop(token, None)
 
     def delete(self, token: str) -> None:
         with self._lock:
