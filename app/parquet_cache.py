@@ -30,7 +30,7 @@ def load_parquet(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
     return pd.read_parquet(path, engine="pyarrow", columns=columns)
 
 
-def cleanup_old_sessions(max_age_seconds: int = 7200) -> int:
+def cleanup_old_sessions(max_age_seconds: int = 86400) -> int:
     """起動時クリーンアップ。max_age_seconds より古いセッションディレクトリを削除する。"""
     if not _BASE_DIR.exists():
         return 0

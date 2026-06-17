@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3SelectedQuestionCodes, setStep3AttrSimpleCodes, setStep3AttrCrossPairs, setStep3FanDegreeType, setStep3FanRowCode, setStep3FanColCode, setStep3FanMatrix, setStep3FanDenominatorMode, setStep3FanFilterColumn, setStep3FanFilterValues, addDerivedAxisQuestions, addSavedIndicator, setStep3AvgTargets, setStep3AvgIndicatorCodes } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3SelectedQuestionCodes, setStep3AttrSimpleCodes, setStep3AttrCrossPairs, setStep3FanDegreeType, setStep3FanRowCode, setStep3FanColCode, setStep3FanMatrix, setStep3FanDenominatorMode, setStep3FanFilterColumn, setStep3FanFilterValues, addDerivedAxisQuestions, addSavedIndicator, setStep3AvgTargets, setStep3AvgIndicatorCodes, computeAutoColorMapping } from "./state.js";
 
 import { generateCrosstab, generateAttributeAnalysis, generateFanAnalysis, exportFanAnalysis, saveFanDegreeAsAxis, generateAverageAnalysis, saveAverageAsIndicator, saveAttributeAsAxis } from "./api.js";
 import { yieldToMain, showToast } from "./app.js";
@@ -696,10 +696,10 @@ function _buildAxisSelectOptions(candidates, selectedCode, includeNone, noneLabe
     ? `<option value="">${_esc(noneLabel ?? "（なし）")}</option>`
     : "";
 
-  // DERIVED 型（特定分析で作成した軸）を先頭に optgroup として表示
+  // DERIVED / SCORE 型（特定分析で作成した軸・指標）を先頭に optgroup として表示
   const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
-  const derivedCodes = candidates.filter(code => qMap[code]?.question_type === "DERIVED");
-  const regularCodes = candidates.filter(code => qMap[code]?.question_type !== "DERIVED");
+  const derivedCodes = candidates.filter(code => ["DERIVED", "SCORE"].includes(qMap[code]?.question_type));
+  const regularCodes = candidates.filter(code => !["DERIVED", "SCORE"].includes(qMap[code]?.question_type));
 
   let derivedGroup = "";
   if (derivedCodes.length) {
@@ -2353,6 +2353,8 @@ function _renderSpecialAddButton(block) {
     container.appendChild(btn);
 
   } else if (modeTag === "attribute_analysis" && rowCode && colCode) {
+    const rowTypeCode = (qMap[rowCode]?.type_code ?? "").toUpperCase();
+    if (["MA", "ML", "M"].includes(rowTypeCode)) return;
     const rowText = qMap[rowCode]?.question_text ?? rowCode;
     const colText = qMap[colCode]?.question_text ?? colCode;
     const btn = document.createElement("button");
@@ -2740,51 +2742,105 @@ async function _runStep3() {
   if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
 
   const selectedCodes = AppState.step3SelectedQuestionCodes;
-  if (!selectedCodes.length) { showToast("集計対象設問を1つ以上選択してください"); return; }
+  const basicAxis     = AppState.step3BasicAxisCode;
+  const compAxis      = AppState.step3ComparisonAxisCode || "";
 
-  let axisCode, secAxisCode, filterColumn, filterValues;
+  let axisCode, secAxisCode, filterColumn, filterValues, overrideCodes;
 
   if (mode === "brand_comparison") {
-    axisCode = AppState.step3BasicAxisCode;
-    secAxisCode = AppState.step3ComparisonAxisCode || "";
     filterColumn = AppState.step3TargetFilterColumn;
     filterValues = AppState.step3TargetFilterValues;
-    if (!axisCode) { showToast("基本軸を選択してください"); return; }
+
+    if (selectedCodes.length) {
+      // 集計セットあり: 既存挙動
+      axisCode      = basicAxis;
+      secAxisCode   = compAxis;
+      overrideCodes = selectedCodes;
+      if (!axisCode) { showToast("基本軸を選択してください"); return; }
+    } else {
+      // 集計セットなし: 軸を集計対象として使用
+      if (!basicAxis && !compAxis) {
+        showToast("集計セット、基本軸、比較軸のいずれかを選択してください");
+        return;
+      }
+      if (basicAxis && compAxis) {
+        // 基本軸 × 比較軸のクロス集計
+        axisCode      = compAxis;
+        secAxisCode   = "";
+        overrideCodes = [basicAxis];
+      } else if (basicAxis) {
+        // 基本軸を全体集計（単純集計）
+        axisCode      = "";
+        secAxisCode   = "";
+        overrideCodes = [basicAxis];
+      } else {
+        // 比較軸を全体集計（単純集計）
+        axisCode      = "";
+        secAxisCode   = "";
+        overrideCodes = [compAxis];
+      }
+    }
 
   } else if (mode === "deep_dive") {
-    axisCode = AppState.step3ComparisonAxisCode;
-    secAxisCode = "";
-    filterColumn = AppState.step3BasicAxisCode;
+    filterColumn = basicAxis;
     filterValues = AppState.step3DeepDiveTarget ? [AppState.step3DeepDiveTarget] : [];
-    if (!axisCode) { showToast("比較軸を選択してください"); return; }
-    if (!filterColumn || !filterValues.length) { showToast("基本軸と対象を選択してください"); return; }
 
-    // dive専用の追加フィルタは現在未実装（拡張余地あり）
+    if (!filterColumn || !filterValues.length) {
+      showToast("深掘り対象を選択してください");
+      return;
+    }
+
+    if (selectedCodes.length) {
+      // 集計セットあり: 既存挙動
+      axisCode      = compAxis;
+      secAxisCode   = "";
+      overrideCodes = selectedCodes;
+      if (!axisCode) { showToast("比較軸を選択してください"); return; }
+    } else {
+      // 集計セットなし: 軸を集計対象として使用
+      if (!basicAxis && !compAxis) {
+        showToast("集計セット、基本軸、比較軸のいずれかを選択してください");
+        return;
+      }
+      if (compAxis) {
+        // 比較軸で全設問を集計（対象フィルタ付き）
+        axisCode      = compAxis;
+        secAxisCode   = "";
+        overrideCodes = [];
+      } else {
+        // 基本軸のみ → 全体集計（対象フィルタ付き）
+        axisCode      = "";
+        secAxisCode   = "";
+        overrideCodes = [];
+      }
+    }
   }
 
   // 旧stateを同期（キャッシュキーと ChartResult 生成のため）
-  AppState.step3ActiveAxisCode = axisCode;
-  AppState.step3SecondaryAxisCode = secAxisCode;
-  AppState.step3TargetFilterColumn = filterColumn;
-  AppState.step3TargetFilterValues = Array.isArray(filterValues) ? filterValues : [];
+  AppState.step3ActiveAxisCode        = axisCode;
+  AppState.step3SecondaryAxisCode     = secAxisCode;
+  AppState.step3TargetFilterColumn    = filterColumn;
+  AppState.step3TargetFilterValues    = Array.isArray(filterValues) ? filterValues : [];
 
-  await _runCrosstab(null, selectedCodes);
+  await _runCrosstab(null, overrideCodes);
   // deep_dive: step3ActiveViewId は "basicAxis||compAxis" のままなので
   // スワップした axisCode を元に戻して一貫性を保つ
   if (mode === "deep_dive") {
-    AppState.step3ActiveAxisCode = AppState.step3BasicAxisCode;
-    AppState.step3SecondaryAxisCode = AppState.step3ComparisonAxisCode;
+    AppState.step3ActiveAxisCode    = basicAxis;
+    AppState.step3SecondaryAxisCode = compAxis;
   }
 }
 
 async function _runCrosstab(setId, overrideCodes) {
   const activeSetId = setId || AppState.step3ActiveSetId;
   const axisCode = AppState.step3ActiveAxisCode;
-  if (!axisCode || !AppState.sessionToken) return;
+  // axisCode が "" の場合は 全体集計（軸なし）として許可
+  if (axisCode === null || axisCode === undefined || !AppState.sessionToken) return;
 
   const secAxisCode = AppState.step3SecondaryAxisCode;
   let targetCodes;
-  if (overrideCodes) {
+  if (overrideCodes !== null && overrideCodes !== undefined) {
+    // 明示的に渡された場合はそのまま使用（[] は全設問をバックエンドに委ねる）
     targetCodes = overrideCodes;
   } else {
     // フラット一覧で検索、なければ children を探索（カスタム親セットの子）
@@ -2797,8 +2853,8 @@ async function _runCrosstab(setId, overrideCodes) {
     }
     const _excl = new Set(AppState.excludedQuestionCodes);
     targetCodes = (set?.questionCodes ?? []).filter(c => !_excl.has(c));
+    if (!targetCodes.length) { showToast("集計対象設問がありません"); return; }
   }
-  if (!targetCodes.length) { showToast("集計対象設問がありません"); return; }
   const key = _getCacheKey(axisCode, secAxisCode, activeSetId || targetCodes.join(","));
 
   const progressEl  = document.getElementById("step3-progress");
@@ -4065,9 +4121,8 @@ function _renderSplitInArea(areaEl, result, settings, axisCategories, axisTotals
   const n    = datasets.length;
   const cols = settings.splitColumns || (n <= 2 ? 1 : n <= 4 ? 2 : 3);
 
-  // 各サブチャートの単一系列カラー（元データのパレットから取得）
-  const paletteLabels = mode === "by_axis" ? axisCategories : filteredRows.map(r => r.label);
-  const palette       = _getColorsForGraph(result.question_code, paletteLabels);
+  // 選択肢ラベルに対するカラーを取得（分割モードに関わらず選択肢順で一致させる）
+  const choiceColors = _getColorsForGraph(result.question_code, filteredRows.map(r => r.label));
 
   // グリッド HTML (aspect-ratio/overflow を上書きして全グラフを表示)
   areaEl.style.display     = "";
@@ -4092,7 +4147,11 @@ function _renderSplitInArea(areaEl, result, settings, axisCategories, axisTotals
   datasets.forEach((ds, di) => {
     const canvas = document.getElementById(`${areaKey}-split-${di}`);
     if (!canvas) return;
-    const color  = palette[di] ?? COLORS[di % COLORS.length];
+    // by_axis: カード内のバーは選択肢ごとに色が異なるため配列を渡す
+    // by_comparison: カード = 1選択肢なので di 番目の色を単色で渡す
+    const color = mode === "by_axis"
+      ? choiceColors
+      : (choiceColors[di] ?? COLORS[di % COLORS.length]);
     const chart  = _buildSplitSubChart(canvas, ds, isH, showLabel, barWidth, aggMode, sharedMax, color);
     if (chart) chartInstances.push(chart);
   });
@@ -5307,11 +5366,30 @@ function _initColorModal() {
     _refreshColorModal(_colorModalLabels);
   });
 
-  // 「STEP1設定に戻す」→ 全カラー設定をクリア
+  // 「デフォルトカラーを再適用」→ 選択肢順の自動カラーをモーダルに反映
+  document.getElementById("step3-color-reapply-default")?.addEventListener("click", () => {
+    const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
+    const result = d?.results[_colorModalIdx];
+    if (!result) return;
+    if (!confirm(`「${result.question_code} ${result.question_text}」のカラーをデフォルト配色に戻しますか？\n現在のモーダル内の設定は上書きされます。`)) return;
+    const q = (AppState.questions ?? []).find(q => q.question_code === result.question_code);
+    const mapping = q ? computeAutoColorMapping(q) : null;
+    if (!mapping) {
+      alert("この設問には自動カラーパターンがありません（対象は選択肢数 7・8・11 の設問です）。");
+      return;
+    }
+    _colorModalPaletteKey   = null;
+    _colorModalOverrides    = {};
+    _colorModalValueMapping = mapping.map(e => ({ ...e }));
+    _refreshColorModal(_colorModalLabels);
+  });
+
+  // 「この設問のカラーをリセット」→ 全カラー設定をクリア
   document.getElementById("step3-color-reset")?.addEventListener("click", () => {
     const d = (_currentCacheKey && _crosstabCache[_currentCacheKey]) || _lastCrosstabData;
     const result = d?.results[_colorModalIdx];
     if (!result) return;
+    if (!confirm(`「${result.question_code} ${result.question_text}」のカラー設定をすべてリセットしますか？`)) return;
     clearQuestionColorState(result.question_code);
     _reRenderCard(_colorModalIdx);
     modal.hidden = true;

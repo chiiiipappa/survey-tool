@@ -150,10 +150,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // プロジェクト読込後のパネル遷移と STEP2 UI 復元
   document.addEventListener("survey:projectloaded", async (e) => {
     const resp = e.detail;
-    activatePanel(resp.has_step2 ? "step2" : "questions");
     if (resp.has_step2) {
+      // 回答データあり: STEP2 パネルで復元表示
+      activatePanel("step2");
       const { restoreStep2FromState } = await import("./step2.js");
       restoreStep2FromState();
+    } else if (resp.step2_needs_reupload) {
+      // 回答データなし・軸設定等のメタデータあり: STEP2 パネルで再アップロード促す
+      activatePanel("step2");
+      const { restoreStep2FromState } = await import("./step2.js");
+      restoreStep2FromState();
+    } else {
+      activatePanel("questions");
     }
   });
 

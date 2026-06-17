@@ -48,7 +48,10 @@ function _defaultChartSettings() {
     titleOverride: null,
     questionTextOverride: null,
     showQuestionText: true,
+    titleFontSize: 10,
     subtitleFontSize: 8,
+    headerHeightPx: 18,
+    footerFontSize: 4,
     chartMode: "auto",
     showLabels: true,
     labelDecimalPlaces: 1,
@@ -63,9 +66,9 @@ function _defaultChartSettings() {
     barThickness: null,
     categoryPercentage: 0.8,
     barPercentage: 0.9,
-    axisFontSize: 10,
-    labelFontSize: 10,
-    legendFontSize: 11,
+    axisFontSize: 8,
+    labelFontSize: 8,
+    legendFontSize: 6,
     // ラベル設定
     labelMinPercent: 2,
     labelAnchor: "center",
@@ -77,14 +80,19 @@ function _defaultChartSettings() {
     // 選択肢フィルタ
     hiddenChoices: [],
     // 集計表設定
+    tablePosition: "none",    // "none" | "bottom" | "top" | "right" | "left" | "separate"
+    tableWidthPct: 35,        // right/left配置時の集計表幅 (%)
+    tableHeightPct: 40,       // top/bottom配置時の集計表高さ (%)
     tableContentMode: "percent",  // "percent" | "count" | "both"
     showTableRowTotal: false,
     showTableColTotal: false,
     tableFontSize: 9,
     tableDecimalPlaces: 1,
+    // 下部情報
+    showFooter: true,
     // カラー設定
     colorSettings: {
-      selectedPalette: null,
+      // selectedPalette キーを含まない = グレー判定なし（null は明示的グレーの意味のため）
       valueColorMapping: null,
       overriddenSeriesColors: {},
     },
@@ -263,9 +271,23 @@ function _bindEditPanelEvents() {
     _patchChartSettings({ legendFontSize: parseInt(e.target.value, 10) || 11 });
   });
 
-  // 集計表
-  document.getElementById("edit-show-table")?.addEventListener("change", (e) => {
-    _patchChartSettings({ showTable: e.target.checked });
+  // 集計表の配置位置
+  document.getElementById("edit-table-position")?.addEventListener("change", (e) => {
+    const v = e.target.value;
+    _patchChartSettings({ tablePosition: v, showTable: v !== "none" });
+  });
+
+  // 集計表のサイズ
+  document.getElementById("edit-table-width-pct")?.addEventListener("input", (e) => {
+    _patchChartSettings({ tableWidthPct: parseInt(e.target.value, 10) || 35 });
+  });
+  document.getElementById("edit-table-height-pct")?.addEventListener("input", (e) => {
+    _patchChartSettings({ tableHeightPct: parseInt(e.target.value, 10) || 40 });
+  });
+
+  // 下部情報の表示切り替え
+  document.getElementById("edit-show-footer")?.addEventListener("change", (e) => {
+    _patchChartSettings({ showFooter: e.target.checked });
   });
 
   // カラー: STEP3同期ボタン
@@ -285,6 +307,21 @@ function _bindEditPanelEvents() {
   // 設問文フォントサイズ
   document.getElementById("edit-subtitle-font-size")?.addEventListener("input", (e) => {
     _patchChartSettings({ subtitleFontSize: parseInt(e.target.value, 10) || 8 });
+  });
+
+  // タイトルフォントサイズ
+  document.getElementById("edit-title-font-size")?.addEventListener("input", (e) => {
+    _patchChartSettings({ titleFontSize: parseInt(e.target.value, 10) || 18 });
+  });
+
+  // ヘッダー帯の高さ
+  document.getElementById("edit-header-height")?.addEventListener("input", (e) => {
+    _patchChartSettings({ headerHeightPx: parseInt(e.target.value, 10) || 52 });
+  });
+
+  // 下部情報フォントサイズ
+  document.getElementById("edit-footer-font-size")?.addEventListener("input", (e) => {
+    _patchChartSettings({ footerFontSize: parseInt(e.target.value, 10) || 8 });
   });
 
   // 集計表: コンテンツモード
@@ -578,9 +615,31 @@ function _renderEditPanel(page) {
   const stFsEl = document.getElementById("edit-subtitle-font-size");
   if (stFsEl && stFsEl !== document.activeElement) stFsEl.value = String(cs.subtitleFontSize ?? 8);
 
-  // 集計表
-  const showTableEl = document.getElementById("edit-show-table");
-  if (showTableEl) showTableEl.checked = cs.showTable;
+  // タイトルフォントサイズ
+  const titleFsEl = document.getElementById("edit-title-font-size");
+  if (titleFsEl && titleFsEl !== document.activeElement) titleFsEl.value = String(cs.titleFontSize ?? 10);
+
+  // ヘッダー帯の高さ
+  const headerHEl = document.getElementById("edit-header-height");
+  if (headerHEl && headerHEl !== document.activeElement) headerHEl.value = String(cs.headerHeightPx ?? 18);
+
+  // 下部情報フォントサイズ
+  const footerFsEl = document.getElementById("edit-footer-font-size");
+  if (footerFsEl && footerFsEl !== document.activeElement) footerFsEl.value = String(cs.footerFontSize ?? 4);
+
+  // 集計表の配置位置
+  const tablePosEl = document.getElementById("edit-table-position");
+  if (tablePosEl) tablePosEl.value = _getEffectiveTablePosition(cs);
+
+  // 集計表のサイズ
+  const twEl = document.getElementById("edit-table-width-pct");
+  if (twEl && twEl !== document.activeElement) twEl.value = String(cs.tableWidthPct ?? 35);
+  const thEl = document.getElementById("edit-table-height-pct");
+  if (thEl && thEl !== document.activeElement) thEl.value = String(cs.tableHeightPct ?? 40);
+
+  // 下部情報の表示
+  const showFooterEl = document.getElementById("edit-show-footer");
+  if (showFooterEl) showFooterEl.checked = cs.showFooter !== false;
 
   // 集計表 詳細設定
   const tcmEl = document.getElementById("edit-table-content-mode");
@@ -952,12 +1011,17 @@ const CHART_COLORS = [
 
 function _resolveColorsForPage(cs, labels) {
   const co = cs?.colorSettings ?? {};
+  // selectedPalette キーが存在してかつ null = 明示的グレーパレット（STEP3のグレー設定）
+  const isGrayPalette = "selectedPalette" in co && co.selectedPalette === null;
   return labels.map((label, i) => {
     if (co.overriddenSeriesColors?.[label]) return co.overriddenSeriesColors[label];
     if (label === "その他") return "#aaaaaa";
     if (label === "全体" && labels.length > 1) return "#555555";
-    const vm = (co.valueColorMapping ?? []).find(e => e.label === label);
+    const vm = Array.isArray(co.valueColorMapping)
+      ? co.valueColorMapping.find(e => e.label === label)
+      : null;
     if (vm) return vm.color;
+    if (isGrayPalette) return "#767676";
     return CHART_COLORS[i % CHART_COLORS.length];
   });
 }
@@ -1003,6 +1067,11 @@ function _applyRowChoiceOrder(rows, order) {
 // ページ HTML 構築
 // ---------------------------------------------------------------------------
 
+function _getEffectiveTablePosition(cs) {
+  if (cs.tablePosition !== undefined && cs.tablePosition !== null) return cs.tablePosition;
+  return cs.showTable ? "bottom" : "none";
+}
+
 function _buildPageElement(page, idSuffix, cs) {
   cs = cs ?? _defaultChartSettings();
   const bandClass = page.mode === "comparison" ? "report-band-comparison" : "report-band-single";
@@ -1036,26 +1105,67 @@ function _buildPageElement(page, idSuffix, cs) {
   wrap.className = "report-page";
   wrap.dataset.pageId = page.page_id;
 
-  wrap.innerHTML = `
-    <div class="${bandClass}">
-      <div class="report-page-title">${_esc(title)}</div>
+  const tablePos = _getEffectiveTablePosition(cs);
+  const showFooterFlag = cs.showFooter !== false;
+
+  const bandHtml = `
+    <div class="${bandClass}" style="min-height:${cs.headerHeightPx ?? 18}px">
+      <div class="report-page-title" style="font-size:${cs.titleFontSize ?? 10}px">${_esc(title)}</div>
       ${subtitle ? `<div class="report-page-subtitle" style="font-size:${cs.subtitleFontSize ?? 8}px">${_esc(subtitle)}</div>` : ""}
       ${targetBadge}
-    </div>
-    <div class="report-page-body">
-      <div class="report-page-export-row"></div>
-      ${isBrandChart
-        ? `<div class="report-chart-wrap" ${chartStyle}><canvas id="report-chart-${idSuffix}"></canvas></div>`
-        : isSmallMultiple
-          ? _buildSmallMultiplesHtml(page, idSuffix, chartStyle, cs)
-          : `<div class="report-chart-wrap" ${chartStyle}><canvas id="report-chart-${idSuffix}"></canvas></div>`}
-      ${cs.showTable ? _buildTableHtml(page, cs) : ""}
-      <div class="report-page-footer">
+    </div>`;
+
+  const footerHtml = showFooterFlag
+    ? `<div class="report-page-footer" style="font-size:${cs.footerFontSize ?? 4}px">
         ${_buildNCountHtml(page, isSmallMultiple)}
         <span class="report-axis-label">分析軸: ${_esc(page.axis_label)}</span>
-      </div>
-    </div>
-  `;
+       </div>`
+    : "";
+
+  const tableHtml = (tablePos !== "none" && tablePos !== "separate")
+    ? _buildTableHtml(page, cs) : "";
+
+  // 単一チャートのHTMLを取得（サイドバイサイド用に部品として使う）
+  const singleChartWrap = `<div class="report-chart-wrap" ${chartStyle}><canvas id="report-chart-${idSuffix}"></canvas></div>`;
+
+  // 右/左配置（単一チャートのみ対応）
+  const canSideBySide = !isBrandChart && !isSmallMultiple && tableHtml;
+  if (canSideBySide && (tablePos === "right" || tablePos === "left")) {
+    const tableW = cs.tableWidthPct ?? 35;
+    const chartW = 100 - tableW;
+    const chartPart = `<div class="report-chart-wrap" style="flex:${chartW};height:auto;min-height:0;margin-bottom:0"><canvas id="report-chart-${idSuffix}"></canvas></div>`;
+    const tablePart = `<div class="report-table-wrap" style="flex:${tableW};overflow-y:auto;min-height:0;margin-bottom:0">${tableHtml}</div>`;
+    const [leftPart, rightPart] = tablePos === "right" ? [chartPart, tablePart] : [tablePart, chartPart];
+    wrap.innerHTML = `${bandHtml}
+      <div class="report-page-body">
+        <div class="report-page-export-row"></div>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:row;gap:8px;overflow:hidden">
+          ${leftPart}${rightPart}
+        </div>
+        ${footerHtml}
+      </div>`;
+    return wrap;
+  }
+
+  // チャートHTML（通常 / ブランド / スモールマルチプル）
+  const mainChartHtml = isBrandChart
+    ? singleChartWrap
+    : isSmallMultiple
+      ? _buildSmallMultiplesHtml(page, idSuffix, chartStyle, cs)
+      : singleChartWrap;
+
+  const topTable = (tablePos === "top" && tableHtml)
+    ? `<div class="report-table-wrap" style="flex-shrink:0">${tableHtml}</div>` : "";
+  const bottomTable = (tablePos === "bottom" && tableHtml) ? tableHtml : "";
+
+  wrap.innerHTML = `${bandHtml}
+    <div class="report-page-body">
+      <div class="report-page-export-row"></div>
+      ${topTable}
+      ${mainChartHtml}
+      ${bottomTable}
+      ${footerHtml}
+    </div>`;
 
   return wrap;
 }
@@ -1109,7 +1219,7 @@ function _buildSplitSubChartR4(canvas, chartId, ds, cs, color, sharedMax) {
   const showLabel = cs.showLabels ?? true;
   const dec       = cs.labelDecimalPlaces ?? 1;
   const minPct    = cs.labelMinPercent ?? 2;
-  const axisFs    = cs.axisFontSize ?? 10;
+  const axisFs    = cs.axisFontSize ?? 8;
 
   const dataset = {
     label:           row.label,
@@ -1133,7 +1243,7 @@ function _buildSplitSubChartR4(canvas, chartId, ds, cs, color, sharedMax) {
         datalabels: {
           display: showLabel ? ctx => ctx.dataset.data[ctx.dataIndex] >= minPct : false,
           color: "#fff",
-          font: { size: cs.labelFontSize ?? 10, weight: "bold" },
+          font: { size: cs.labelFontSize ?? 8, weight: "bold" },
           formatter: v => `${v.toFixed(dec)}%`,
           anchor: cs.labelAnchor ?? "center",
           align: cs.labelAlign ?? "center",
@@ -1489,14 +1599,14 @@ function _buildBarChart(canvas, chartId, rows, axisCats, axisTotals, cs, opts) {
         legend: {
           display: (cs.showLegend ?? true) && !isSingleCat,
           position: cs.legendPosition ?? "bottom",
-          labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 11 } },
+          labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 6 } },
         },
         datalabels: {
           display: (cs.showLabels ?? true)
             ? (ctx) => ctx.dataset.data[ctx.dataIndex] >= (cs.labelMinPercent ?? 2)
             : false,
           color: "#fff",
-          font: { size: cs.labelFontSize ?? 10, weight: "bold" },
+          font: { size: cs.labelFontSize ?? 8, weight: "bold" },
           formatter: (v) => `${v.toFixed(cs.labelDecimalPlaces ?? 1)}%`,
           anchor: cs.labelAnchor ?? "center",
           align: cs.labelAlign ?? "center",
@@ -1508,13 +1618,13 @@ function _buildBarChart(canvas, chartId, rows, axisCats, axisTotals, cs, opts) {
           beginAtZero: true,
           max: (indexAxis === "y" && !isStacked) ? 100 : (isPercentage ? 100 : undefined),
           ticks: {
-            font: { size: cs.axisFontSize ?? 10 },
+            font: { size: cs.axisFontSize ?? 8 },
             callback: indexAxis === "y" ? (v) => `${v}%` : undefined,
           },
         },
         y: {
           stacked: isStacked,
-          ticks: { font: { size: cs.axisFontSize ?? 10 } },
+          ticks: { font: { size: cs.axisFontSize ?? 8 } },
           max: (indexAxis === "x" && !isStacked) ? 100 : (isPercentage && indexAxis === "x" ? 100 : undefined),
           ...(indexAxis === "x" ? { beginAtZero: true } : {}),
         },
@@ -1564,21 +1674,21 @@ function _buildBrandHbarChart(canvas, chartId, comparisonDatasets, cs) {
       categoryPercentage: cs.categoryPercentage ?? 0.8,
       barPercentage: cs.barPercentage ?? 0.9,
       plugins: {
-        legend: { display: cs.showLegend ?? true, position: cs.legendPosition ?? "bottom", labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 11 } } },
+        legend: { display: cs.showLegend ?? true, position: cs.legendPosition ?? "bottom", labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 6 } } },
         datalabels: {
           display: (cs.showLabels ?? true)
             ? (ctx) => ctx.dataset.data[ctx.dataIndex] >= (cs.labelMinPercent ?? 2)
             : false,
           color: "#fff",
-          font: { size: cs.labelFontSize ?? 10, weight: "bold" },
+          font: { size: cs.labelFontSize ?? 8, weight: "bold" },
           formatter: (v) => `${v.toFixed(cs.labelDecimalPlaces ?? 1)}%`,
           anchor: cs.labelAnchor ?? "center",
           align: cs.labelAlign ?? "center",
         },
       },
       scales: {
-        x: { ticks: { font: { size: cs.axisFontSize ?? 10 } } },
-        y: { beginAtZero: true, max: 100, ticks: { font: { size: cs.axisFontSize ?? 10 }, callback: (v) => `${v}%` } },
+        x: { ticks: { font: { size: cs.axisFontSize ?? 8 } } },
+        y: { beginAtZero: true, max: 100, ticks: { font: { size: cs.axisFontSize ?? 8 }, callback: (v) => `${v}%` } },
       },
     },
   });
@@ -1626,13 +1736,13 @@ function _buildBrandVbarChart(canvas, chartId, comparisonDatasets, cs, stacked, 
       categoryPercentage: cs.categoryPercentage ?? 0.8,
       barPercentage: cs.barPercentage ?? 0.9,
       plugins: {
-        legend: { display: cs.showLegend ?? true, position: cs.legendPosition ?? "bottom", labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 11 } } },
+        legend: { display: cs.showLegend ?? true, position: cs.legendPosition ?? "bottom", labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 6 } } },
         datalabels: {
           display: (cs.showLabels ?? true)
             ? (ctx) => ctx.dataset.data[ctx.dataIndex] >= (cs.labelMinPercent ?? 2)
             : false,
           color: "#fff",
-          font: { size: cs.labelFontSize ?? 10, weight: "bold" },
+          font: { size: cs.labelFontSize ?? 8, weight: "bold" },
           formatter: (v) => `${v.toFixed(cs.labelDecimalPlaces ?? 1)}%`,
           anchor: cs.labelAnchor ?? "center",
           align: cs.labelAlign ?? "center",
@@ -1643,11 +1753,11 @@ function _buildBrandVbarChart(canvas, chartId, comparisonDatasets, cs, stacked, 
           stacked,
           beginAtZero: true,
           max: percentage ? 100 : undefined,
-          ticks: { font: { size: cs.axisFontSize ?? 10 }, callback: (v) => `${v}%` },
+          ticks: { font: { size: cs.axisFontSize ?? 8 }, callback: (v) => `${v}%` },
         },
         y: {
           stacked,
-          ticks: { font: { size: cs.axisFontSize ?? 10 } },
+          ticks: { font: { size: cs.axisFontSize ?? 8 } },
         },
       },
     },
@@ -1731,25 +1841,25 @@ function _renderFunnelChart(page, idSuffix, cs) {
         legend: {
           display: cs.showLegend ?? true,
           position: cs.legendPosition ?? "bottom",
-          labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 11 } },
+          labels: { boxWidth: 14, font: { size: cs.legendFontSize ?? 6 } },
         },
         datalabels: {
           display: (cs.showLabels ?? true)
             ? (ctx) => ctx.dataset.data[ctx.dataIndex] >= (cs.labelMinPercent ?? 2)
             : false,
           color: "#fff",
-          font: { size: cs.labelFontSize ?? 10, weight: "bold" },
+          font: { size: cs.labelFontSize ?? 8, weight: "bold" },
           formatter: (v) => `${v.toFixed(cs.labelDecimalPlaces ?? 1)}%`,
           anchor: cs.labelAnchor ?? "center",
           align: cs.labelAlign ?? "center",
         },
       },
       scales: {
-        x: { ticks: { font: { size: cs.axisFontSize ?? 10 } } },
+        x: { ticks: { font: { size: cs.axisFontSize ?? 8 } } },
         y: {
           beginAtZero: true,
           max: 100,
-          ticks: { font: { size: cs.axisFontSize ?? 10 }, callback: (v) => `${v}%` },
+          ticks: { font: { size: cs.axisFontSize ?? 8 }, callback: (v) => `${v}%` },
         },
       },
     },

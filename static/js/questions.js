@@ -1282,6 +1282,8 @@ async function _doLoadProject(file) {
 
     if (resp.has_step2) {
       document.dispatchEvent(new CustomEvent("survey:projectloaded", { detail: resp }));
+    } else if (resp.step2_needs_reupload) {
+      document.dispatchEvent(new CustomEvent("survey:projectloaded", { detail: resp }));
     } else {
       activatePanel("questions");
     }

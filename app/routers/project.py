@@ -70,6 +70,16 @@ async def save_project(body: ProjectSaveRequest) -> StreamingResponse:
     saved_at = datetime.now(timezone.utc).isoformat()
 
     def _build_zip() -> bytes:
+        # Parquet ファイルの存在を事前確認して has_step2 フラグを正確に設定する
+        raw_path = step2.get("raw_parquet_path") if step2 else None
+        labeled_path = step2.get("labeled_parquet_path") if step2 else None
+        raw_exists = bool(raw_path and Path(raw_path).exists())
+        labeled_exists = bool(labeled_path and Path(labeled_path).exists())
+        # has_step2: 回答データ本体（Parquet）が ZIP に含まれる場合のみ True
+        has_step2_data = bool(step2) and raw_exists and labeled_exists
+        # has_step2_meta: step2.json（メタデータ）だけでも保存する場合は True
+        has_step2_meta = bool(step2)
+
         project_data = {
             "version": _FORMAT_VERSION,
             "saved_at": saved_at,
@@ -110,7 +120,8 @@ async def save_project(body: ProjectSaveRequest) -> StreamingResponse:
             "score_mapping": body.score_mapping,
             "fan_degree_settings": body.fan_degree_settings,
             "attr_settings": body.attr_settings,
-            "has_step2": bool(step2),
+            "has_step2": has_step2_data,
+            "has_step2_meta": has_step2_meta,
         }
 
         buf = io.BytesIO()
@@ -127,11 +138,9 @@ async def save_project(body: ProjectSaveRequest) -> StreamingResponse:
                                    if k not in ("raw_parquet_path", "labeled_parquet_path")}
                 zf.writestr("step2.json", json.dumps(step2_json_data, ensure_ascii=False, indent=2))
 
-                raw_path = step2.get("raw_parquet_path")
-                labeled_path = step2.get("labeled_parquet_path")
-                if raw_path and Path(raw_path).exists():
+                if raw_exists:
                     zf.write(raw_path, "raw_data.parquet")
-                if labeled_path and Path(labeled_path).exists():
+                if labeled_exists:
                     zf.write(labeled_path, "labeled_data.parquet")
 
         return buf.getvalue()
@@ -291,8 +300,32 @@ async def load_project(file: UploadFile = File(...)) -> dict:
     survey_cache.set(new_token, questions, meta)
 
     # STEP2 復元
+    # has_step2: 回答データ本体（Parquet）が ZIP に含まれていたか
+    # step2_data: step2.json の内容（メタデータのみの場合も含む）
     has_step2 = project_data.get("has_step2", False) and step2_data is not None
     step2_resp: dict | None = None
+    step2_needs_reupload: bool = False
+
+    def _build_step2_resp(src: dict) -> dict:
+        """step2.json の内容からフロントエンド向けレスポンスを組み立てる。"""
+        return {
+            "filename": src.get("filename", ""),
+            "encoding": src.get("encoding", ""),
+            "file_size": src.get("file_size", 0),
+            "response_row_count": src.get("response_row_count", 0),
+            "response_col_count": src.get("response_col_count", 0),
+            "matched_columns": src.get("matched_columns", []),
+            "missing_columns": src.get("missing_columns", []),
+            "extra_columns": src.get("extra_columns", []),
+            "codebook": src.get("codebook", {}),
+            "axis_candidates": src.get("axis_candidates", []),
+            "selected_axis_columns": src.get("selected_axis_columns", []),
+            "unmatched_values": src.get("unmatched_values", []),
+            "multi_select_columns": src.get("multi_select_columns", []),
+            "selected_fa_codes": src.get("selected_fa_codes", []),
+            "selected_attr_columns": src.get("selected_attr_columns", []),
+            "bracket_columns": src.get("bracket_columns", []),
+        }
 
     if has_step2:
         if raw_parquet_bytes and labeled_parquet_bytes:
@@ -309,35 +342,32 @@ async def load_project(file: UploadFile = File(...)) -> dict:
                 restored_step2["raw_parquet_path"] = raw_path
                 restored_step2["labeled_parquet_path"] = labeled_path
                 survey_cache.set_step2(new_token, restored_step2)
-
-                step2_resp = {
-                    "filename": step2_data.get("filename", ""),
-                    "encoding": step2_data.get("encoding", ""),
-                    "file_size": step2_data.get("file_size", 0),
-                    "response_row_count": step2_data.get("response_row_count", 0),
-                    "response_col_count": step2_data.get("response_col_count", 0),
-                    "matched_columns": step2_data.get("matched_columns", []),
-                    "missing_columns": step2_data.get("missing_columns", []),
-                    "extra_columns": step2_data.get("extra_columns", []),
-                    "codebook": step2_data.get("codebook", {}),
-                    "axis_candidates": step2_data.get("axis_candidates", []),
-                    "selected_axis_columns": step2_data.get("selected_axis_columns", []),
-                    "unmatched_values": step2_data.get("unmatched_values", []),
-                    "multi_select_columns": step2_data.get("multi_select_columns", []),
-                    "selected_fa_codes": step2_data.get("selected_fa_codes", []),
-                    "selected_attr_columns": step2_data.get("selected_attr_columns", []),
-                }
+                step2_resp = _build_step2_resp(step2_data)
             except Exception as e:
                 logger.warning("STEP2 Parquet 復元エラー: %s", e)
                 has_step2 = False
+                step2_needs_reupload = True
+                step2_resp = _build_step2_resp(step2_data)
                 load_warnings.append(
                     "回答データの復元に失敗しました。回答データを再アップロードしてください。"
                 )
         else:
             has_step2 = False
+            step2_needs_reupload = True
+            step2_resp = _build_step2_resp(step2_data)
             load_warnings.append(
-                "回答データが保存されていません。回答データを再アップロードしてください。"
+                "このプロジェクトには回答データ本体が保存されていないため、"
+                "再分析には回答データの再アップロードが必要です。"
             )
+    elif step2_data is not None:
+        # has_step2=False だが step2.json は存在する場合（旧形式 or has_step2_meta=True）
+        has_step2 = False
+        step2_needs_reupload = True
+        step2_resp = _build_step2_resp(step2_data)
+        load_warnings.append(
+            "このプロジェクトには回答データ本体が保存されていないため、"
+            "再分析には回答データの再アップロードが必要です。"
+        )
 
     layout_section = {
         **layout_meta_raw,
@@ -380,6 +410,7 @@ async def load_project(file: UploadFile = File(...)) -> dict:
         "survey_format": project_data.get("survey_format", "unknown"),
         "layout": layout_section,
         "has_step2": has_step2,
+        "step2_needs_reupload": step2_needs_reupload,
         "step2": step2_resp,
         "step3_crosstab_configs": [],
         "step3_active_axis_code": project_data.get("step3_basic_axis_code", ""),

@@ -339,7 +339,7 @@ async function handleProjectLoad(file) {
       </div>
       <div class="info-item">
         <span class="info-label">設問数:</span>
-        <span class="info-value">${resp.questions.length}</span>
+        <span class="info-value">${(resp.layout?.questions ?? []).length}</span>
       </div>
     `;
 

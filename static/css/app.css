@@ -1990,13 +1990,14 @@ details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { tra
 /* ヘッダー帯: 比較 → 赤→青グラデーション */
 .report-band-comparison {
   background: linear-gradient(135deg, #DF0515 0%, #0071BC 100%);
-  padding: 14px 20px 12px;
+  padding: 4px 20px 4px;
   color: #fff;
-  min-height: 72px;
+  min-height: 18px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   position: relative;
+  flex-shrink: 0;
 }
 
 /* ヘッダー帯: 単一 → 青ストライプ */
@@ -2008,13 +2009,14 @@ details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { tra
     #1a90d9 4px,
     #1a90d9 8px
   );
-  padding: 14px 20px 12px;
+  padding: 4px 20px 4px;
   color: #fff;
-  min-height: 72px;
+  min-height: 18px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   position: relative;
+  flex-shrink: 0;
 }
 
 .report-page-title {
@@ -2147,12 +2149,10 @@ details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { tra
 }
 
 .report-n-count {
-  font-size: .78rem;
   color: var(--color-text-muted);
 }
 
 .report-axis-label {
-  font-size: .78rem;
   color: var(--color-text-muted);
 }
 .step1-set-back-btn:hover { color: var(--color-primary); text-decoration: underline; }
@@ -2331,21 +2331,18 @@ details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { tra
   position: absolute;
   inset: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 .report-preview-canvas .report-band-comparison,
 .report-preview-canvas .report-band-single {
-  padding: 10px 20px 6px;
-}
-.report-preview-canvas .report-page-title {
-  font-size: 1rem;
-}
-.report-preview-canvas .report-page-subtitle {
-  font-size: 8px;
+  padding: 6px 16px 4px;
 }
 .report-preview-canvas .report-page-body {
+  flex: 1;
+  min-height: 0;
   padding: 8px 16px 4px;
   overflow: hidden;
-  height: calc(100% - 72px);
   display: flex;
   flex-direction: column;
 }

@@ -497,6 +497,7 @@
         <nav id="step3-sidebar-nav">
           <!-- step3.js で動的生成 -->
         </nav>
+        <div style="color:var(--color-text-muted); font-size:.75rem; padding:6px 12px; line-height:1.4">マトリクス設問など設問セットを一気に生成します。</div>
       </aside>
 
       <!-- 右メインエリア: 分析設定 + 結果 -->
@@ -516,8 +517,8 @@
         <div class="card" id="step3-mode-card" style="margin-bottom:12px">
           <div class="card-body" style="padding:10px 16px">
             <div class="step3-mode-tabs">
-              <button class="step3-mode-tab" data-mode="brand_comparison">ブランド比較</button>
-              <button class="step3-mode-tab" data-mode="deep_dive">特定対象深掘り</button>
+              <button class="step3-mode-tab" data-mode="brand_comparison">比較モード</button>
+              <button class="step3-mode-tab" data-mode="deep_dive">特定深掘りモード</button>
             </div>
           </div>
         </div>
@@ -540,13 +541,13 @@
             <!-- ブランド比較パネル -->
             <div id="step3-panel-brand_comparison">
               <div class="step3-config-row">
-                <label class="step3-config-label">基本軸</label>
+                <label class="step3-config-label">基本軸 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">ブランド軸などを必ず１つ選択</span></label>
                 <select id="step3-basic-axis-select" class="step3-config-select">
                   <option value="">（未選択）</option>
                 </select>
               </div>
               <div class="step3-config-row">
-                <label class="step3-config-label">比較軸</label>
+                <label class="step3-config-label">比較軸 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">２軸目を追加したい場合に選択</span></label>
                 <select id="step3-comparison-axis-select" class="step3-config-select">
                   <option value="">（なし）</option>
                 </select>
@@ -575,14 +576,8 @@
                 </div>
               </details>
               <div class="step3-config-row" style="margin-top:12px">
-                <label class="step3-config-label">集計対象設問</label>
+                <label class="step3-config-label">集計対象設問 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">マトリクス設問を一気に生成するのに便利です。</span></label>
                 <div id="step3-question-checkboxes" class="step3-question-cb-list"></div>
-              </div>
-              <div id="step3-avg-indicator-section" class="step3-config-row" style="margin-top:12px; display:none">
-                <label class="step3-config-label">平均点指標</label>
-                <select id="step3-avg-indicator-select" class="step3-config-select">
-                  <option value="">（指標を選択）</option>
-                </select>
               </div>
               <div style="margin-top:16px; text-align:right">
                 <button id="step3-generate-btn" class="btn btn-primary">グラフ生成</button>
@@ -592,7 +587,7 @@
             <!-- 特定対象深掘りパネル -->
             <div id="step3-panel-deep_dive" hidden>
               <div class="step3-config-row">
-                <label class="step3-config-label">基本軸</label>
+                <label class="step3-config-label">基本軸 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">ブランド軸などを必ず１つ選択</span></label>
                 <select id="step3-dive-basic-axis-select" class="step3-config-select">
                   <option value="">（未選択）</option>
                 </select>
@@ -604,7 +599,7 @@
                 </select>
               </div>
               <div class="step3-config-row">
-                <label class="step3-config-label">比較軸</label>
+                <label class="step3-config-label">比較軸 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">２軸目を追加したい場合に選択</span></label>
                 <select id="step3-dive-comparison-axis-select" class="step3-config-select">
                   <option value="">（未選択）</option>
                 </select>
@@ -624,14 +619,8 @@
                 </div>
               </details>
               <div class="step3-config-row" style="margin-top:12px">
-                <label class="step3-config-label">集計対象設問</label>
+                <label class="step3-config-label">集計対象設問 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">マトリクス設問を一気に生成するのに便利です。</span></label>
                 <div id="step3-dive-question-checkboxes" class="step3-question-cb-list"></div>
-              </div>
-              <div id="step3-dive-avg-indicator-section" class="step3-config-row" style="margin-top:12px; display:none">
-                <label class="step3-config-label">平均点指標</label>
-                <select id="step3-dive-avg-indicator-select" class="step3-config-select">
-                  <option value="">（指標を選択）</option>
-                </select>
               </div>
               <div style="margin-top:16px; text-align:right">
                 <button id="step3-dive-generate-btn" class="btn btn-primary">生成</button>
@@ -847,6 +836,17 @@
                     <input type="number" id="edit-subtitle-font-size" min="4" max="18" step="1" value="8" class="report-edit-number-sm">px
                   </div>
                 </div>
+                <div class="report-edit-field">
+                  <label class="report-edit-label">タイトル・ヘッダー</label>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">タイトルサイズ</label>
+                    <input type="number" id="edit-title-font-size" min="4" max="36" step="1" value="10" class="report-edit-number-sm">px
+                  </div>
+                  <div class="report-edit-inline" style="margin-top:4px">
+                    <label class="report-edit-label-sm">ヘッダー帯の高さ</label>
+                    <input type="number" id="edit-header-height" min="4" max="120" step="2" value="18" class="report-edit-number-sm">px
+                  </div>
+                </div>
               </div>
 
               <!-- グラフタブ -->
@@ -923,15 +923,19 @@
                   <label class="report-edit-label">フォントサイズ</label>
                   <div class="report-edit-inline">
                     <label class="report-edit-label-sm">軸ラベル</label>
-                    <input type="number" id="edit-axis-font-size" min="4" max="18" step="1" value="10" class="report-edit-number-sm">px
+                    <input type="number" id="edit-axis-font-size" min="4" max="18" step="1" value="8" class="report-edit-number-sm">px
                   </div>
                   <div class="report-edit-inline">
                     <label class="report-edit-label-sm">データラベル</label>
-                    <input type="number" id="edit-label-font-size" min="4" max="18" step="1" value="10" class="report-edit-number-sm">px
+                    <input type="number" id="edit-label-font-size" min="4" max="18" step="1" value="8" class="report-edit-number-sm">px
                   </div>
                   <div class="report-edit-inline">
                     <label class="report-edit-label-sm">凡例</label>
-                    <input type="number" id="edit-legend-font-size" min="4" max="18" step="1" value="11" class="report-edit-number-sm">px
+                    <input type="number" id="edit-legend-font-size" min="4" max="18" step="1" value="6" class="report-edit-number-sm">px
+                  </div>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-label-sm">下部情報</label>
+                    <input type="number" id="edit-footer-font-size" min="2" max="14" step="1" value="4" class="report-edit-number-sm">px
                   </div>
                 </div>
                 <!-- 分割グラフ設定 (splitMode != "normal" のとき表示) -->
@@ -995,12 +999,32 @@
                   <label class="report-edit-label">選択肢の並び替え・表示／非表示</label>
                   <div id="edit-choice-filter-list" class="report-choice-filter-list"></div>
                 </div>
-                <!-- 集計表 -->
+                <!-- 下部情報 -->
                 <div class="report-edit-field report-edit-section-divider">
                   <label class="report-edit-toggle-row">
-                    <input type="checkbox" id="edit-show-table">
-                    <span>集計表を表示</span>
+                    <input type="checkbox" id="edit-show-footer" checked>
+                    <span>下部情報を表示（n数・分析軸）</span>
                   </label>
+                </div>
+                <!-- 集計表 -->
+                <div class="report-edit-field report-edit-section-divider">
+                  <label class="report-edit-label">集計表の配置</label>
+                  <select id="edit-table-position" class="report-edit-select-sm" style="margin-bottom:6px">
+                    <option value="none">非表示</option>
+                    <option value="bottom">下（デフォルト）</option>
+                    <option value="top">上</option>
+                    <option value="right">右（グラフ左・表右）</option>
+                    <option value="left">左（表左・グラフ右）</option>
+                    <option value="separate">別スライド（PPTのみ）</option>
+                  </select>
+                  <div class="report-edit-inline" style="margin-top:4px">
+                    <label class="report-edit-label-sm">表の幅（右/左配置）</label>
+                    <input type="number" id="edit-table-width-pct" min="20" max="55" step="5" value="35" class="report-edit-number-sm">%
+                  </div>
+                  <div class="report-edit-inline" style="margin-top:4px">
+                    <label class="report-edit-label-sm">表の高さ（上/下配置）</label>
+                    <input type="number" id="edit-table-height-pct" min="20" max="55" step="5" value="40" class="report-edit-number-sm">%
+                  </div>
                   <div class="report-edit-inline" style="margin-top:4px">
                     <label class="report-edit-label-sm">表示内容</label>
                     <select id="edit-table-content-mode" class="report-edit-select-sm">
@@ -1141,11 +1165,12 @@
     <div style="margin-bottom:4px; font-size:.8rem; color:var(--color-text-muted)">プレビュー</div>
     <div id="step3-color-preview" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px; min-height:26px; padding:6px; background:var(--color-surface-2,#f8f8f8); border-radius:4px"></div>
     <div style="display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid var(--color-border); padding-top:12px">
-      <button id="step3-color-clear-overrides" class="btn btn-secondary btn-sm">個別変更を破棄</button>
-      <button id="step3-color-reset"           class="btn btn-secondary btn-sm">STEP1設定に戻す</button>
-      <button id="step3-color-apply-one"       class="btn btn-primary btn-sm">現在のグラフだけ変更</button>
-      <button id="step3-color-apply-all"       class="btn btn-primary btn-sm">同じ集計軸すべてに適用</button>
-      <button id="step3-color-cancel"          class="btn btn-secondary btn-sm">キャンセル</button>
+      <button id="step3-color-clear-overrides"  class="btn btn-secondary btn-sm">個別変更を破棄</button>
+      <button id="step3-color-reapply-default"  class="btn btn-secondary btn-sm">デフォルトカラーを再適用</button>
+      <button id="step3-color-reset"            class="btn btn-secondary btn-sm">この設問のカラーをリセット</button>
+      <button id="step3-color-apply-one"        class="btn btn-primary btn-sm">現在のグラフだけ変更</button>
+      <button id="step3-color-apply-all"        class="btn btn-primary btn-sm">同じ集計軸すべてに適用</button>
+      <button id="step3-color-cancel"           class="btn btn-secondary btn-sm">キャンセル</button>
     </div>
   </div>
 </div>

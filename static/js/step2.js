@@ -1678,7 +1678,7 @@ export function restoreStep2FromState() {
     axis_candidates:       s.step2AxisCandidates,
     unmatched_values:      s.step2UnmatchedValues,
     multi_select_columns:  s.step2MultiSelectColumns,
-    bracket_columns:       [],
+    bracket_columns:       AppState.step2BracketColumns ?? [],
     missing_column_details: [],
   };
 

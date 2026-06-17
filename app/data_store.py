@@ -102,4 +102,4 @@ class SurveySessionCache:
 
 
 # モジュールレベルのシングルトン（routers 間で共有）
-survey_cache = SurveySessionCache(maxsize=10, ttl=3600)
+survey_cache = SurveySessionCache(maxsize=10, ttl=86400)

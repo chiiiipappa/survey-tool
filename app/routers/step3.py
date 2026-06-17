@@ -531,6 +531,15 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
     if axis_col not in df.columns:
         raise HTTPException(422, f"集計軸列 '{axis_col}' がデータに存在しません。")
 
+    # 数値型の軸列（スコア指標など）を文字列に正規化して比較を統一する
+    if pd.api.types.is_numeric_dtype(df[axis_col]):
+        def _num_to_str(v):
+            if pd.isna(v):
+                return ""
+            iv = int(v)
+            return str(iv) if iv == v else str(v)
+        df[axis_col] = df[axis_col].apply(_num_to_str)
+
     axis_cats = _build_axis_cats(df, axis_col, axis_q)
     axis_totals = [int((df[axis_col] == cat).sum()) for cat in axis_cats]
 
@@ -543,6 +552,8 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
         if secondary_axis_code not in df.columns:
             raise HTTPException(422, f"集計軸②列 '{secondary_axis_code}' がデータに存在しません。")
         secondary_axis_q = q_map.get(secondary_axis_code)
+        if pd.api.types.is_numeric_dtype(df[secondary_axis_code]):
+            df[secondary_axis_code] = df[secondary_axis_code].apply(_num_to_str)
         sec_cats = _build_axis_cats(df, secondary_axis_code, secondary_axis_q)
 
         primary_axis_cats = sec_cats

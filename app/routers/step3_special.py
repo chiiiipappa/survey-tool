@@ -630,7 +630,13 @@ async def save_average_as_indicator(body: AverageSaveAsIndicatorRequest) -> Aver
 async def save_attribute_as_axis(body: AttributeSaveAsAxisRequest) -> AttributeSaveAsAxisResponse:
     df, questions, q_map, _ = _load_session(body.session_token)
 
+    q_row = q_map.get(body.row_code)
     if body.row_code not in df.columns:
+        if q_row and q_row.type_code.upper() in _CROSSTAB_MA_TYPES:
+            raise HTTPException(
+                422,
+                f"MA設問 '{body.row_code}' は複数回答のため1対1の軸として保存できません。",
+            )
         raise HTTPException(422, f"行設問 '{body.row_code}' がデータに存在しません。")
     if body.col_code not in df.columns:
         raise HTTPException(422, f"列設問 '{body.col_code}' がデータに存在しません。")

@@ -10,6 +10,70 @@ function _deriveExcludedDefaults(questions) {
     .map(q => q.question_code);
 }
 
+// ---------------------------------------------------------------------------
+// 自動カラー設定
+// 設問の選択肢数に応じてデフォルトの valueColorMapping を生成する。
+// ---------------------------------------------------------------------------
+
+const _AC_7  = ["#9D174D","#EC4899","#F9A8D4","#D9D9D9","#93C5FD","#3B82F6","#1E3A8A"];
+const _AC_8A = ["#3B0603","#782535","#AA355D","#DF5088","#ED80B8","#F3B0E7","#FAE2FD","#676767"];
+const _AC_8B = ["#3B0603","#782535","#AA355D","#DF5088","#ED80B8","#F3B0E7","#FAE2FD","#D9D9D9"];
+const _AC_11 = ["#9D174D","#DB2777","#EC4899","#F472B6","#F9A8D4","#D9D9D9","#93C5FD","#60A5FA","#3B82F6","#1D4ED8","#1E3A8A"];
+
+const _AC_SCALE_KW = /とても|やや|どちら|あまり|まったく|そう思う|あてはまる|満足|好き|評価|意向|推奨/;
+
+/**
+ * 設問オブジェクトから自動 valueColorMapping を生成して返す。
+ * 対象外の場合は null を返す。
+ * @param {object} question - { choices: [{choice_text}], ... }
+ * @returns {{label: string, color: string}[] | null}
+ */
+export function computeAutoColorMapping(question) {
+  const choices = (question?.choices ?? []).map(c => c.choice_text).filter(Boolean);
+  const n = choices.length;
+
+  // ファンラベル系は FIXED_PALETTES で対応するためスキップ
+  if (choices.some(l => /コアファン/.test(l)) && choices.some(l => /ライトファン/.test(l))) return null;
+
+  let palette;
+  if (n === 7) {
+    palette = _AC_7;
+  } else if (n === 8) {
+    const isScale = choices.some(t => _AC_SCALE_KW.test(t));
+    palette = isScale ? _AC_8A : _AC_8B;
+  } else if (n === 11) {
+    palette = _AC_11;
+  } else {
+    return null;
+  }
+
+  return choices.map((label, i) => ({ label, color: palette[i] }));
+}
+
+/**
+ * AppState.questions の中で、step3QuestionSettings に valueColorMapping が
+ * まだ設定されていない設問に対して自動カラーを適用する。
+ * 保存済みカラーは上書きしない。
+ */
+function _applyAutoColorsIfUnset() {
+  const questions = AppState.questions ?? [];
+  if (!questions.length) return;
+
+  const next = { ...AppState.step3QuestionSettings };
+  let changed = false;
+  for (const q of questions) {
+    const code = q.question_code;
+    if (!code) continue;
+    if (next[code]?.valueColorMapping?.length) continue; // 保存済みをスキップ
+    const mapping = computeAutoColorMapping(q);
+    if (mapping) {
+      next[code] = { ...(next[code] ?? {}), valueColorMapping: mapping };
+      changed = true;
+    }
+  }
+  if (changed) AppState.step3QuestionSettings = next;
+}
+
 export const AppState = {
   // セッション
   sessionToken: null,
@@ -47,6 +111,7 @@ export const AppState = {
   step2MultiSelectColumns: [],
   step2AttrCandidates: [],
   step2SelectedAttrColumns: [],
+  step2BracketColumns: [],    // MA展開列情報（bracket_columns）
   // STEP2 FA 永続化
   step2SelectedFaCodes: [],
   // プロジェクト管理
@@ -379,6 +444,7 @@ export function setUploadResult(resp) {
   AppState.surveyFormat    = resp.survey_format ?? "unknown";
   AppState.excludedQuestionCodes = _deriveExcludedDefaults(AppState.questions);
   AppState.isDirty               = true;
+  _applyAutoColorsIfUnset();
   _emit();
 }
 
@@ -399,8 +465,9 @@ export function setLoadedProject(resp) {
   AppState.responseFormat  = resp.response_format ?? layout.response_format ?? "auto";
   AppState.surveyFormat    = resp.survey_format ?? "unknown";
 
-  if (resp.has_step2 && resp.step2) {
+  if (resp.step2) {
     const s2 = resp.step2;
+    // Parquet あり（通常復元）または Parquet なし（メタデータのみ）どちらも共通で復元する
     AppState.step2Filename            = s2.filename ?? null;
     AppState.step2Encoding            = s2.encoding ?? "";
     AppState.step2FileSize            = s2.file_size ?? 0;
@@ -416,6 +483,7 @@ export function setLoadedProject(resp) {
     AppState.step2MultiSelectColumns  = s2.multi_select_columns ?? [];
     AppState.step2SelectedFaCodes     = s2.selected_fa_codes ?? [];
     AppState.step2SelectedAttrColumns = s2.selected_attr_columns ?? [];
+    AppState.step2BracketColumns      = s2.bracket_columns ?? [];
     // プレビュー行は保存対象外
     AppState.step2PreviewRows         = [];
     AppState.step2LabeledPreviewRows  = [];
@@ -522,6 +590,7 @@ export function setLoadedProject(resp) {
     AppState.step3AttrSimpleCodes = attr.attrSimpleCodes ?? [];
     AppState.step3AttrCrossPairs  = attr.attrCrossPairs  ?? [];
   }
+  _applyAutoColorsIfUnset();
   _emit();
 }
 
@@ -820,6 +889,18 @@ export function addDerivedAxisQuestions(questionItems) {
       ...(AppState.step3SavedIndicators ?? []).filter(q => !scoreCodes.has(q.question_code)),
       ...scoreItems,
     ];
+    // 平均点指標も軸候補に追加（基本軸・比較軸ドロップダウンで選択可能にする）
+    const scoreAxisCandidates = scoreItems.map(q => ({
+      question_code: q.question_code,
+      question_text: q.question_text,
+      type_code: q.type_code,
+      type_label: q.type_label,
+      is_default_selected: false,
+    }));
+    AppState.step2AxisCandidates = [
+      ...(AppState.step2AxisCandidates ?? []).filter(c => !scoreCodes.has(c.question_code)),
+      ...scoreAxisCandidates,
+    ];
   }
 
   AppState.step2MatchedColumns = [
@@ -912,11 +993,15 @@ function _buildAggregationConfig(cr) {
 }
 
 function _buildChartConfig(cr, s3) {
+  const chartMode = _deriveChartMode(cr, s3);
+  // stacked100/grouped は STEP3で X軸=axis_categories、凡例=rows として描画するため
+  // STEP4でも同じ向きにするために transpose: true が必要
+  const needsAutoTranspose = chartMode.startsWith("stacked100") || chartMode.startsWith("grouped");
   return {
-    chartMode:          _deriveChartMode(cr, s3),
+    chartMode,
     aggMode:            s3.aggMode          ?? "col_pct",
     sortOrder:          s3.sortOrder        ?? "original",
-    transpose:          s3.transpose        ?? false,
+    transpose:          needsAutoTranspose ? true : (s3.transpose ?? false),
     hiddenChoices:      [...(s3.hiddenChoices ?? [])],
     showLabels:         s3.showPctLabel     ?? true,
     showLegend:         true,
@@ -932,7 +1017,8 @@ function _buildChartConfig(cr, s3) {
     pageLayout:         s3.pageLayout       ?? "auto",
     showTotalCol:       s3.showTotalCol     ?? true,
     colorSettings: {
-      selectedPalette:        s3.selectedPalette        ?? null,
+      // undefined(未設定) と null(明示的グレー) を区別するため ?? null を使わない
+      ...(s3.selectedPalette !== undefined ? { selectedPalette: s3.selectedPalette } : {}),
       valueColorMapping:      s3.valueColorMapping      ?? null,
       overriddenSeriesColors: { ...(s3.overriddenSeriesColors ?? {}) },
     },
@@ -945,7 +1031,7 @@ function _defaultLayoutConfig() {
     subtitleFontSize: 8,
     chartHeightPx: null, chartWidthPx: null, chartMaxWidthPx: null,
     categoryPercentage: 0.8, barPercentage: 0.9,
-    axisFontSize: 10, labelFontSize: 10, legendFontSize: 11,
+    axisFontSize: 8, labelFontSize: 8, legendFontSize: 6,
     labelAnchor: "center", labelAlign: "center",
     showTable: false, tableContentMode: "percent",
     showTableRowTotal: false, showTableColTotal: false,
