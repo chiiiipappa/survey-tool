@@ -9,10 +9,11 @@
   python3 build_release.py                 # デフォルト: zip
 
 出力先: release/
+  README.txt                 生成内容に合わせた説明書
   survey-tool-mac.zip        ZIP形式（Mac用）
   survey-tool-windows.zip    ZIP形式（Windows用）
-  SurveyTool-Mac.zip         アプリ形式（DMG入り）
-  SurveyTool-Windows.zip     アプリ形式（EXE入り）
+  survey-tool-mac.dmg        アプリ形式（Mac用）
+  survey-tool-windows.exe    アプリ形式（Windows用）
 """
 
 from __future__ import annotations
@@ -44,20 +45,19 @@ EXCLUDE_FILES = {
 }
 EXCLUDE_EXTS = {".pyc", ".pyo", ".log", ".tmp"}
 
-# ZIP に含めるディレクトリ・ファイル
-ZIP_INCLUDE_DIRS = ["app", "static", "sample_data"]
+ZIP_INCLUDE_DIRS  = ["app", "static", "sample_data"]
 ZIP_INCLUDE_FILES = ["requirements.txt"]
 
 
 # ────────────────────────────────────────────────
-# ZIP 専用 README
+# ZIP 内部 README（起動スクリプト方式の説明）
 # ────────────────────────────────────────────────
-ZIP_README = """\
+_ZIP_README = """\
 ====================================================
  SurveyTool（サーベイBIツール）ZIP 配布版
 ====================================================
 
-このZIPはインストール不要の配布版です。
+このZIPはインストール不要の配布版です（起動スクリプト方式）。
 解凍してから、以下の手順で起動してください。
 
 ----------------------------------------------------
@@ -116,6 +116,69 @@ Mac の場合：
 
 
 # ────────────────────────────────────────────────
+# release/README.txt（実際の生成物に合わせて動的に作成）
+# ────────────────────────────────────────────────
+def _make_release_readme(has_zip: bool, has_app: bool) -> str:
+    lines = [
+        "====================================================",
+        " SurveyTool（サーベイBIツール）配布パッケージ",
+        "====================================================",
+        "",
+    ]
+    if has_zip and has_app:
+        lines += ["このフォルダには2種類の配布形式が含まれています。", ""]
+
+    if has_app:
+        lines += [
+            "----------------------------------------------------",
+            "【アプリ形式】インストーラで使う方へ",
+            "----------------------------------------------------",
+            "",
+            "■ Windows の方",
+            "  survey-tool-windows.exe をダブルクリックしてください。",
+            "  「Windows によって PC が保護されました」が出た場合は、",
+            "  「詳細情報」→「実行」をクリックしてください。",
+            "",
+            "■ Mac の方",
+            "  survey-tool-mac.dmg をダブルクリックして開き、",
+            "  SurveyTool アイコンを Applications フォルダにドラッグしてください。",
+            "  「開発元を確認できません」が出た場合は、",
+            "  右クリック→「開く」→「開く」をクリックしてください。",
+            "",
+        ]
+
+    if has_zip:
+        lines += [
+            "----------------------------------------------------",
+            "【ZIP版】インストール不要で使う方へ（Python が必要）",
+            "----------------------------------------------------",
+            "",
+            "■ Windows の方",
+            "  survey-tool-windows.zip を展開し、",
+            "  start_windows.bat をダブルクリックしてください。",
+            "",
+            "■ Mac の方",
+            "  survey-tool-mac.zip を展開し、",
+            "  start_mac.command を右クリック→「開く」→「開く」で起動してください。",
+            "",
+            "※ ZIP版の起動には Python（3.10以上）が必要です。",
+            "   https://www.python.org/",
+            "   Windows の場合：インストール時に「Add Python to PATH」にチェック。",
+            "",
+            "※ 初回起動時はインターネット接続が必要です（ライブラリの自動インストール）。",
+            "",
+        ]
+
+    lines += [
+        "====================================================",
+        "このツールはお使いのパソコンの中だけで動作します。",
+        "データが外部に送信されることはありません。",
+        "====================================================",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+# ────────────────────────────────────────────────
 # 共通ユーティリティ
 # ────────────────────────────────────────────────
 
@@ -132,7 +195,6 @@ def should_exclude(path: pathlib.Path) -> bool:
 
 def _add_dir_to_zip(zf: zipfile.ZipFile, src_dir: pathlib.Path,
                     arcdir: str) -> int:
-    """ディレクトリ以下のファイルを ZIP に追加し、追加数を返す。"""
     added = 0
     for f in sorted(src_dir.rglob("*")):
         if not f.is_file():
@@ -147,18 +209,6 @@ def _add_dir_to_zip(zf: zipfile.ZipFile, src_dir: pathlib.Path,
     return added
 
 
-def _check_prereqs_zip() -> bool:
-    """ZIP 生成に必要なファイルが揃っているか確認する。"""
-    missing = [d for d in ZIP_INCLUDE_DIRS if not (ROOT / d).is_dir()]
-    missing += [f for f in ZIP_INCLUDE_FILES if not (ROOT / f).is_file()]
-    if missing:
-        print("[エラー] 以下のファイル/ディレクトリが見つかりません:")
-        for m in missing:
-            print(f"  - {m}")
-        return False
-    return True
-
-
 # ────────────────────────────────────────────────
 # ZIP 形式ビルド
 # ────────────────────────────────────────────────
@@ -169,22 +219,18 @@ def _build_zip_platform(
     startup_arcname: str,
     startup_src: pathlib.Path | None,
 ) -> bool:
-    """指定プラットフォーム向けの ZIP を生成する共通処理。"""
     DEST.mkdir(exist_ok=True)
     if zipout.exists():
         zipout.unlink()
-        print(f"  既存ファイルを削除: {zipout.name}")
 
     added = 0
     try:
         with zipfile.ZipFile(zipout, "w", zipfile.ZIP_DEFLATED) as zf:
-            # ディレクトリ
             for d in ZIP_INCLUDE_DIRS:
                 src = ROOT / d
                 if src.is_dir():
                     added += _add_dir_to_zip(zf, src, f"{top_dir}/{d}")
 
-            # ファイル
             for fname in ZIP_INCLUDE_FILES:
                 src = ROOT / fname
                 if src.is_file():
@@ -197,25 +243,23 @@ def _build_zip_platform(
             if startup_src and startup_src.is_file():
                 arcname = f"{top_dir}/{startup_arcname}"
                 info = zipfile.ZipInfo(arcname)
-                # Mac の .command に実行権限を付与
                 if startup_arcname.endswith(".command"):
                     info.external_attr = (
                         stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP |
                         stat.S_IROTH | stat.S_IXOTH
                     ) << 16
-                content = startup_src.read_bytes()
-                zf.writestr(info, content)
+                zf.writestr(info, startup_src.read_bytes())
                 print(f"  追加: {arcname}")
                 added += 1
 
             # ZIP 専用 README
             readme_arcname = f"{top_dir}/README.txt"
-            zf.writestr(readme_arcname, ZIP_README.encode("utf-8"))
+            zf.writestr(readme_arcname, _ZIP_README.encode("utf-8"))
             print(f"  追加: {readme_arcname}")
             added += 1
 
     except Exception as e:
-        print(f"[エラー] ZIP 生成中に失敗しました: {e}")
+        print(f"  [エラー] ZIP 生成中に失敗: {e}")
         return False
 
     size_kb = zipout.stat().st_size // 1024
@@ -224,7 +268,11 @@ def _build_zip_platform(
 
 
 def build_zip_mac(root: pathlib.Path, dest: pathlib.Path) -> bool:
-    print("\n--- ZIP (Mac) を生成しています ---")
+    missing = [d for d in ZIP_INCLUDE_DIRS if not (root / d).is_dir()]
+    missing += [f for f in ZIP_INCLUDE_FILES if not (root / f).is_file()]
+    if missing:
+        print(f"  [エラー] 必要なファイルが見つかりません: {missing}")
+        return False
     return _build_zip_platform(
         zipout=dest / "survey-tool-mac.zip",
         top_dir="survey-tool-mac",
@@ -234,7 +282,11 @@ def build_zip_mac(root: pathlib.Path, dest: pathlib.Path) -> bool:
 
 
 def build_zip_windows(root: pathlib.Path, dest: pathlib.Path) -> bool:
-    print("\n--- ZIP (Windows) を生成しています ---")
+    missing = [d for d in ZIP_INCLUDE_DIRS if not (root / d).is_dir()]
+    missing += [f for f in ZIP_INCLUDE_FILES if not (root / f).is_file()]
+    if missing:
+        print(f"  [エラー] 必要なファイルが見つかりません: {missing}")
+        return False
     return _build_zip_platform(
         zipout=dest / "survey-tool-windows.zip",
         top_dir="survey-tool-windows",
@@ -247,25 +299,65 @@ def build_zip_windows(root: pathlib.Path, dest: pathlib.Path) -> bool:
 # アプリ形式ビルド
 # ────────────────────────────────────────────────
 
-def build_app(root: pathlib.Path) -> bool:
-    print("\n--- アプリ形式 (.dmg / .exe) を生成しています ---")
+def build_app(root: pathlib.Path, dest: pathlib.Path) -> dict[str, bool]:
+    """Electron ビルドを実行し、dmg/exe を release/ にコピーする。"""
+    results: dict[str, bool] = {}
 
     if not shutil.which("npm"):
-        print("[エラー] npm コマンドが見つかりません。")
-        print("         Node.js をインストールしてから再試行してください。")
-        print("         https://nodejs.org/")
-        return False
+        print("  [エラー] npm が見つかりません。Node.js をインストールしてください。")
+        print("           https://nodejs.org/")
+        results["survey-tool-mac.dmg"]     = False
+        results["survey-tool-windows.exe"] = False
+        return results
 
-    script = root / "scripts" / "build-release.sh"
-    if not script.exists():
-        print(f"[エラー] ビルドスクリプトが見つかりません: {script}")
-        return False
+    build_steps = [
+        (["npm", "install"],                 "npm install"),
+        (["npm", "run", "build"],            "npm run build（prebuild 検証）"),
+        (["npx", "electron-builder", "-mw"], "electron-builder（Mac dmg + Windows exe）"),
+    ]
 
-    result = subprocess.run(["bash", str(script)], cwd=root)
-    if result.returncode != 0:
-        print(f"[エラー] アプリ形式のビルドに失敗しました (終了コード: {result.returncode})")
-        return False
-    return True
+    for cmd, label in build_steps:
+        print(f"\n  実行中: {label}")
+        result = subprocess.run(cmd, cwd=root)
+        if result.returncode != 0:
+            print(f"  [エラー] {label} に失敗しました（終了コード: {result.returncode}）")
+            results["survey-tool-mac.dmg"]     = False
+            results["survey-tool-windows.exe"] = False
+            return results
+
+    dest.mkdir(exist_ok=True)
+
+    # .dmg を release/ にコピー
+    dmg_src = next(
+        (p for p in root.glob("dist/*.dmg") if not p.name.endswith(".blockmap")),
+        None,
+    )
+    if dmg_src:
+        dst = dest / "survey-tool-mac.dmg"
+        shutil.copy2(dmg_src, dst)
+        size_kb = dst.stat().st_size // 1024
+        print(f"\n  → survey-tool-mac.dmg  ({size_kb:,} KB)")
+        results["survey-tool-mac.dmg"] = True
+    else:
+        print("  [エラー] dist/*.dmg が見つかりません")
+        results["survey-tool-mac.dmg"] = False
+
+    # .exe を release/ にコピー
+    exe_src = next(
+        (p for p in root.glob("dist/*.exe") if not p.name.endswith(".blockmap")),
+        None,
+    )
+    if exe_src:
+        dst = dest / "survey-tool-windows.exe"
+        shutil.copy2(exe_src, dst)
+        size_kb = dst.stat().st_size // 1024
+        print(f"  → survey-tool-windows.exe  ({size_kb:,} KB)")
+        results["survey-tool-windows.exe"] = True
+    else:
+        print("  [エラー] dist/*.exe が見つかりません")
+        results["survey-tool-windows.exe"] = False
+
+    return results
 
 
 # ────────────────────────────────────────────────
@@ -292,39 +384,60 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print("=" * 52)
+    print("=" * 54)
     print("  SurveyTool 配布パッケージ生成")
     print(f"  形式: {args.format}")
-    print("=" * 52)
+    print("=" * 54)
 
-    if args.format in ("zip", "all"):
-        if not _check_prereqs_zip():
-            sys.exit(1)
+    DEST.mkdir(exist_ok=True)
 
     results: dict[str, bool] = {}
 
+    # ── ZIP 形式 ──
     if args.format in ("zip", "all"):
-        results["survey-tool-mac.zip"]     = build_zip_mac(ROOT, DEST)
+        print("\n--- ZIP (Mac) を生成しています ---")
+        results["survey-tool-mac.zip"] = build_zip_mac(ROOT, DEST)
+
+        print("\n--- ZIP (Windows) を生成しています ---")
         results["survey-tool-windows.zip"] = build_zip_windows(ROOT, DEST)
 
+    # ── アプリ形式 ──
     if args.format in ("app", "all"):
-        results["アプリ形式 (.dmg / .exe)"] = build_app(ROOT)
+        print("\n--- アプリ形式 (.dmg / .exe) を生成しています ---")
+        results.update(build_app(ROOT, DEST))
 
-    # ────── サマリ ──────
-    print("\n" + "=" * 52)
-    print("  生成結果")
-    print("=" * 52)
+    # ── release/README.txt を生成物に合わせて書き出し ──
+    has_zip = results.get("survey-tool-mac.zip", False) or \
+              results.get("survey-tool-windows.zip", False)
+    has_app = results.get("survey-tool-mac.dmg", False) or \
+              results.get("survey-tool-windows.exe", False)
+
+    readme_path = DEST / "README.txt"
+    readme_path.write_text(
+        _make_release_readme(has_zip=has_zip, has_app=has_app),
+        encoding="utf-8",
+    )
+
+    # ── サマリ ──
+    print("\n" + "=" * 54)
+    print("  生成結果サマリ")
+    print("=" * 54)
+
     all_ok = True
     for name, ok in results.items():
         mark = "✓" if ok else "✗"
-        print(f"  {mark}  {name}")
-        if ok and (DEST / name).exists():
-            size_kb = (DEST / name).stat().st_size // 1024
-            print(f"       → {DEST / name}  ({size_kb:,} KB)")
-        if not ok:
+        path = DEST / name
+        if ok and path.exists():
+            size_kb = path.stat().st_size // 1024
+            print(f"  {mark}  {name:<35}  ({size_kb:,} KB)")
+            print(f"       {path}")
+        else:
+            print(f"  {mark}  {name}  ← 生成に失敗しました")
             all_ok = False
 
-    print("=" * 52)
+    print(f"\n  README.txt を更新しました: {readme_path}")
+    print("=" * 54)
+
     if not all_ok:
         print("  一部の生成に失敗しました。上記のエラーを確認してください。")
         sys.exit(1)
