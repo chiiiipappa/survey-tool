@@ -348,6 +348,8 @@ class ProjectSaveRequest(BaseModel):
     chart_results: List[dict] = Field(default_factory=list)
     layout_format: str = "auto"
     response_format: str = "auto"
+    score_settings: dict = Field(default_factory=dict)  # 平均点分析: question_code -> ScaleSettings
+    score_mapping: dict = Field(default_factory=dict)    # 平均点分析: question_code -> ScoreMappingEntry[]
 
 
 class LayoutSaveData(BaseModel):
@@ -380,6 +382,8 @@ class LayoutSaveData(BaseModel):
     step3_views: dict = Field(default_factory=dict)
     report_project: dict = Field(default_factory=dict)
     chart_results: List[dict] = Field(default_factory=list)
+    score_settings: dict = Field(default_factory=dict)  # 平均点分析: question_code -> ScaleSettings
+    score_mapping: dict = Field(default_factory=dict)    # 平均点分析: question_code -> ScoreMappingEntry[]
 
 
 class Step2SaveData(BaseModel):
@@ -452,6 +456,7 @@ class Step3CrosstabRequest(BaseModel):
     target_question_codes: List[str] = Field(default_factory=list)
     target_filter_column: str = ""
     target_filter_values: List[str] = Field(default_factory=list)
+    avg_indicator_codes: List[str] = Field(default_factory=list)
 
 
 class CrosstabRow(BaseModel):
@@ -467,6 +472,13 @@ class CrosstabResult(BaseModel):
     rows: List[CrosstabRow]
 
 
+class AvgIndicatorResult(BaseModel):
+    """通常分析で基本軸カテゴリ別に集計した平均点指標の結果。"""
+    indicator_code: str
+    indicator_name: str
+    stats: List[AverageAxisStat]
+
+
 class Step3CrosstabResponse(BaseModel):
     axis_question_code: str
     axis_question_text: str
@@ -478,6 +490,213 @@ class Step3CrosstabResponse(BaseModel):
     secondary_axis_question_text: str = ""
     primary_axis_categories: List[str] = Field(default_factory=list)
     secondary_axis_categories: List[str] = Field(default_factory=list)
+    avg_indicator_results: List[AvgIndicatorResult] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP3: 特定分析（属性分析・ファン度分析・平均点分析）
+# ---------------------------------------------------------------------------
+
+class AverageAxisStat(BaseModel):
+    """平均点分析: 1カテゴリ分の統計量（全体 or 属性別の1行）。"""
+    category: str
+    n_valid: int = 0
+    n_excluded: int = 0
+    mean: Optional[float] = None
+    std: Optional[float] = None
+    median: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+
+
+class Step3SpecialBlock(Step3CrosstabResponse):
+    """特定分析の1結果ブロック（結果切替タブの単位）。"""
+    block_label: str
+    axis_stats: List[AverageAxisStat] = Field(default_factory=list)  # 平均点分析でのみ使用
+
+
+class Step3SpecialResponse(BaseModel):
+    blocks: List[Step3SpecialBlock] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class AttributeCrossPair(BaseModel):
+    row_code: str
+    col_code: str
+
+
+class AttributeAnalysisRequest(BaseModel):
+    session_token: str
+    simple_tally_codes: List[str] = Field(default_factory=list)
+    cross_pairs: List[AttributeCrossPair] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP3: ファン度分析 — 新ファン度（好意度×応援意向）/旧ファン度（好意度×ファンステージ）/カスタム
+# ---------------------------------------------------------------------------
+#
+# 新旧ファン度は設問形式が異なるため別ロジックで判定するが、共通化できるのは
+# 「2設問を選ぶ→行×列の判定マトリクスを作る→セルにラベルを割り当てる→
+#  回答者ごとに該当セルを見てfan_degreeを付与する→集計する」という処理の骨格のみ。
+# 新旧それぞれの違い（設問自動検出・初期マトリクス）はフロントエンド側で吸収する。
+
+class FanDegreeMatrixCell(BaseModel):
+    """ファン度判定マトリクスの1セル（行選択肢×列選択肢→ラベル）。"""
+    row_value: str
+    col_value: str
+    label: str = ""  # ""=未設定（判定不能になる）
+
+
+class FanAnalysisRequest(BaseModel):
+    session_token: str
+    fan_degree_type: Literal["new", "old", "custom"] = "new"
+    row_question_code: str
+    col_question_code: str
+    row_question_role: str = ""  # 表示用ラベル（好意度/縦軸 等）
+    col_question_role: str = ""  # 表示用ラベル（応援意向/ファンステージ/横軸 等）
+    matrix: List[FanDegreeMatrixCell] = Field(default_factory=list)
+    denominator_mode: Literal["all", "valid", "excluding_undetermined", "filtered"] = "valid"
+    target_filter_column: str = ""
+    target_filter_values: List[str] = Field(default_factory=list)
+
+
+class FanDegreeCount(BaseModel):
+    label: str
+    n: int = 0
+    pct: float = 0.0
+    cum_pct: float = 0.0
+
+
+class FanDegreeSummary(BaseModel):
+    counts: List[FanDegreeCount] = Field(default_factory=list)
+    denominator_n: int = 0
+    denominator_mode: str = "valid"
+    core_fan_rate: float = 0.0
+    fan_or_above_rate: float = 0.0
+    light_fan_or_above_rate: float = 0.0
+    undetermined_n: int = 0
+    excluded_n: int = 0
+
+
+class FanDegreeRespondentRow(BaseModel):
+    response_id: int
+    row_answer: str
+    col_answer: str
+    fan_degree_label: str
+    status: str  # "判定済" | "判定不能"
+    is_core_fan: int = 0
+    is_fan_or_above: int = 0
+    is_light_fan_or_above: int = 0
+    is_fan_degree_valid: int = 0
+
+
+class FanAnalysisResponse(BaseModel):
+    blocks: List[Step3SpecialBlock] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    summary: FanDegreeSummary = Field(default_factory=FanDegreeSummary)
+    matrix: List[FanDegreeMatrixCell] = Field(default_factory=list)
+    row_question_code: str = ""
+    row_question_text: str = ""
+    col_question_code: str = ""
+    col_question_text: str = ""
+    row_categories: List[str] = Field(default_factory=list)
+    col_categories: List[str] = Field(default_factory=list)
+    respondent_rows: List[FanDegreeRespondentRow] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP3: ファン度分析結果を通常分析の派生属性として保存する
+# ---------------------------------------------------------------------------
+#
+# ファン度分析画面では判定のみを行い、属性別の内訳は通常分析側で
+# fan_degree_label を集計軸として使うことで実現する。そのために、判定結果を
+# response_id（データフレームの行位置）をキーに通常分析用データへ列として
+# 永続化（labeled_parquetへ追記）し、STEP1設問マスタにも仮想設問として登録する。
+
+class FanDegreeSaveRequest(BaseModel):
+    session_token: str
+    fan_degree_type: Literal["new", "old", "custom"]
+    row_question_code: str
+    col_question_code: str
+    matrix: List[FanDegreeMatrixCell] = Field(default_factory=list)
+    overwrite: bool = False
+
+
+class FanDegreeSaveResponse(BaseModel):
+    message: str
+    overwritten: bool
+    axis_questions: List[QuestionItem] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# STEP3: 平均点分析 — スコア設定（「データは何点満点か」→「表示は何点満点か」の換算）
+# ---------------------------------------------------------------------------
+
+class ScaleSettings(BaseModel):
+    """設問単位の尺度設定。最低値/最高点は尺度全体の範囲であり、選択肢個別の点数ではない。
+
+    UI文言: data_*_score = 「データの満点/最低値」, display_*_score = 「表示する満点/最低点」。
+    calc_method: linear=線形換算（既定） / raw=選択肢の数値をそのまま使う / manual=手動スコアのみ使う。
+    """
+    data_min_score: float = 0
+    data_max_score: float
+    display_min_score: float = 0
+    display_max_score: float
+    scale_direction: Literal["forward", "reverse"] = "forward"
+    calc_method: Literal["linear", "raw", "manual"] = "linear"
+
+
+class ScoreMappingEntry(BaseModel):
+    """選択肢単位のスコアマッピング1行（score_mappingテーブル相当）。"""
+    choice_text: str
+    raw_score: Optional[float] = None
+    converted_score: Optional[float] = None
+    manual_score: Optional[float] = None
+    final_score: Optional[float] = None
+    exclude_flag: bool = False
+    missing_flag: bool = False
+
+
+class AverageAnalysisTarget(BaseModel):
+    question_code: str
+    scale_settings: ScaleSettings
+    choice_scores: List[ScoreMappingEntry] = Field(default_factory=list)
+
+
+class AverageAnalysisRequest(BaseModel):
+    session_token: str
+    targets: List[AverageAnalysisTarget]
+
+
+# ---------------------------------------------------------------------------
+# STEP3: 属性軸・平均点指標を通常分析へ保存する
+# ---------------------------------------------------------------------------
+
+class AttributeSaveAsAxisRequest(BaseModel):
+    session_token: str
+    row_code: str
+    col_code: str       # row_code と同じ場合は単一軸のエイリアス
+    axis_name: str      # ユーザー定義の表示名（例: "性年代"）
+    overwrite: bool = False
+
+
+class AttributeSaveAsAxisResponse(BaseModel):
+    axis_questions: List[QuestionItem]
+    saved_column: str
+
+
+class AverageSaveAsIndicatorRequest(BaseModel):
+    session_token: str
+    question_code: str
+    scale_settings: ScaleSettings
+    choice_scores: List[ScoreMappingEntry]
+    indicator_name: str  # 例: "顧客幸福度"
+    overwrite: bool = False
+
+
+class AverageSaveAsIndicatorResponse(BaseModel):
+    indicator_question: QuestionItem
+    saved_column: str
 
 
 # ---------------------------------------------------------------------------

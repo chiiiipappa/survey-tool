@@ -13,6 +13,8 @@ from fastapi import APIRouter, HTTPException
 from app.data_store import survey_cache
 from app.parquet_cache import load_parquet
 from app.schemas import (
+    AvgIndicatorResult,
+    AverageAxisStat,
     CrosstabResult,
     CrosstabRow,
     Step3CrosstabRequest,
@@ -112,6 +114,38 @@ def _crosstab_ma(
     return rows
 
 
+def _crosstab_total(
+    df: pd.DataFrame,
+    q_code: str,
+    type_code: str,
+    bracket_cols: list[dict],
+) -> tuple[list[CrosstabRow], int]:
+    """軸なし全体集計。(rows, total_n) を返す。"""
+    tc = type_code.upper()
+    n = len(df)
+    rows: list[CrosstabRow] = []
+
+    if tc in _CROSSTAB_SA_TYPES:
+        if q_code not in df.columns:
+            return [], n
+        vc = df[q_code].value_counts()
+        for label, cnt in vc.items():
+            pct = _safe_float(cnt / n * 100) if n > 0 else 0.0
+            rows.append(CrosstabRow(label=str(label), counts=[int(cnt)], percents=[pct]))
+
+    elif tc in _CROSSTAB_MA_TYPES:
+        for bc in bracket_cols:
+            dcol = bc["display_header"]
+            if dcol not in df.columns:
+                continue
+            val_str = df[dcol].fillna("").astype(str).str.strip()
+            cnt = int((~val_str.isin(["", "-"])).sum())
+            pct = _safe_float(cnt / n * 100) if n > 0 else 0.0
+            rows.append(CrosstabRow(label=bc["choice_label"], counts=[cnt], percents=[pct]))
+
+    return rows, n
+
+
 _COMPOSITE_SEP = " × "
 
 
@@ -207,6 +241,11 @@ def _resolve_needed_columns(
         elif fc in available:
             needed.add(fc)
 
+    # 平均点指標列も追加
+    for indicator_code in body.avg_indicator_codes:
+        if indicator_code in available:
+            needed.add(indicator_code)
+
     return list(needed)
 
 
@@ -274,6 +313,43 @@ def _crosstab_ma_bracket_axis(
             percents.append(p)
         rows.append(CrosstabRow(label=bc_target["choice_label"], counts=counts, percents=percents))
     return rows
+
+
+def _compute_avg_indicator_results(
+    df: pd.DataFrame,
+    q_map: dict,
+    avg_indicator_codes: list[str],
+    axis_col: str,
+    axis_cats: list[str],
+    axis_totals: list[int],
+) -> list[AvgIndicatorResult]:
+    """数値指標列を基本軸カテゴリ別に集計し AvgIndicatorResult リストを返す。"""
+    results: list[AvgIndicatorResult] = []
+    for code in avg_indicator_codes:
+        if code not in df.columns:
+            continue
+        q = q_map.get(code)
+        indicator_name = q.question_text if q else code
+        stats: list[AverageAxisStat] = []
+        for cat, total in zip(axis_cats, axis_totals):
+            scores = pd.to_numeric(df.loc[df[axis_col] == cat, code], errors="coerce").dropna()
+            n_valid = int(scores.shape[0])
+            n_excluded = max(total - n_valid, 0)
+            if n_valid == 0:
+                stats.append(AverageAxisStat(category=cat, n_valid=0, n_excluded=n_excluded))
+            else:
+                stats.append(AverageAxisStat(
+                    category=cat,
+                    n_valid=n_valid,
+                    n_excluded=n_excluded,
+                    mean=_safe_float(float(scores.mean())),
+                    std=_safe_float(float(scores.std())) if n_valid > 1 else 0.0,
+                    median=_safe_float(float(scores.median())),
+                    min=_safe_float(float(scores.min())),
+                    max=_safe_float(float(scores.max())),
+                ))
+        results.append(AvgIndicatorResult(indicator_code=code, indicator_name=indicator_name, stats=stats))
+    return results
 
 
 @router.post("/step3/crosstab", response_model=Step3CrosstabResponse, summary="クロス集計実行")
@@ -402,6 +478,52 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
             secondary_axis_question_text="",
             primary_axis_categories=[],
             secondary_axis_categories=[],
+            avg_indicator_results=[],
+        )
+
+    # --- 軸なしモード（全体集計） ---
+    if not axis_col_raw:
+        if body.target_question_codes:
+            target_codes = [c for c in body.target_question_codes if c in q_map]
+        else:
+            target_codes = [q.question_code for q in questions]
+
+        total_results: list[CrosstabResult] = []
+        total_warnings: list[str] = []
+        total_n = len(df)
+
+        for code in target_codes:
+            q = q_map.get(code)
+            if q is None:
+                continue
+            tc = q.type_code.upper()
+            if tc in _SKIP_TYPES:
+                continue
+            bcs = bracket_by_base.get(code, [])
+            rows, n = _crosstab_total(df, code, q.type_code, bcs)
+            total_n = n
+            if not rows:
+                continue
+            total_results.append(CrosstabResult(
+                question_code=code,
+                question_text=q.question_text,
+                type_code=q.type_code,
+                rows=rows,
+            ))
+
+        logger.info("クロス集計完了(全体集計): 設問数=%d, 警告=%d", len(total_results), len(total_warnings))
+        return Step3CrosstabResponse(
+            axis_question_code="",
+            axis_question_text="全体",
+            axis_categories=["全体"],
+            axis_totals=[total_n],
+            results=total_results,
+            warnings=total_warnings,
+            secondary_axis_question_code="",
+            secondary_axis_question_text="",
+            primary_axis_categories=[],
+            secondary_axis_categories=[],
+            avg_indicator_results=[],
         )
 
     # --- 通常軸モード ---
@@ -487,9 +609,16 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
                 rows=rows,
             ))
 
+    # 平均点指標の軸別集計（通常軸モードのみ対応）
+    avg_indicator_results: list[AvgIndicatorResult] = []
+    if body.avg_indicator_codes and axis_col in df.columns:
+        avg_indicator_results = _compute_avg_indicator_results(
+            df, q_map, body.avg_indicator_codes, axis_col, axis_cats, axis_totals,
+        )
+
     logger.info(
-        "クロス集計完了: axis=%s, secondary=%s, 設問数=%d, 警告=%d",
-        axis_col_raw, secondary_axis_code, len(results), len(warnings),
+        "クロス集計完了: axis=%s, secondary=%s, 設問数=%d, 指標数=%d, 警告=%d",
+        axis_col_raw, secondary_axis_code, len(results), len(avg_indicator_results), len(warnings),
     )
 
     return Step3CrosstabResponse(
@@ -505,4 +634,5 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
         ),
         primary_axis_categories=primary_axis_cats,
         secondary_axis_categories=secondary_axis_cats,
+        avg_indicator_results=avg_indicator_results,
     )

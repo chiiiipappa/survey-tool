@@ -502,13 +502,33 @@
       <!-- 右メインエリア: 分析設定 + 結果 -->
       <div id="step3-main" class="step3-main">
 
-        <!-- ① 分析モード選択 -->
+        <!-- ⓪ 分析カテゴリ選択（通常分析 / 特定分析） -->
+        <div class="card" id="step3-category-card" style="margin-bottom:12px">
+          <div class="card-body" style="padding:10px 16px">
+            <div class="step3-mode-tabs">
+              <button class="step3-mode-tab" data-category="normal">通常分析</button>
+              <button class="step3-mode-tab" data-category="special">特定分析</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ① 分析モード選択（通常分析） -->
         <div class="card" id="step3-mode-card" style="margin-bottom:12px">
           <div class="card-body" style="padding:10px 16px">
             <div class="step3-mode-tabs">
               <button class="step3-mode-tab" data-mode="brand_comparison">ブランド比較</button>
               <button class="step3-mode-tab" data-mode="deep_dive">特定対象深掘り</button>
-              <button class="step3-mode-tab" data-mode="question_comparison">設問比較</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ①' 分析メニュー選択（特定分析） -->
+        <div class="card" id="step3-special-mode-card" style="margin-bottom:12px" hidden>
+          <div class="card-body" style="padding:10px 16px">
+            <div class="step3-mode-tabs">
+              <button class="step3-mode-tab" data-mode="attribute">属性分析</button>
+              <button class="step3-mode-tab" data-mode="fan">ファン度分析</button>
+              <button class="step3-mode-tab" data-mode="average">平均点分析</button>
             </div>
           </div>
         </div>
@@ -558,6 +578,12 @@
                 <label class="step3-config-label">集計対象設問</label>
                 <div id="step3-question-checkboxes" class="step3-question-cb-list"></div>
               </div>
+              <div id="step3-avg-indicator-section" class="step3-config-row" style="margin-top:12px; display:none">
+                <label class="step3-config-label">平均点指標</label>
+                <select id="step3-avg-indicator-select" class="step3-config-select">
+                  <option value="">（指標を選択）</option>
+                </select>
+              </div>
               <div style="margin-top:16px; text-align:right">
                 <button id="step3-generate-btn" class="btn btn-primary">グラフ生成</button>
               </div>
@@ -601,43 +627,119 @@
                 <label class="step3-config-label">集計対象設問</label>
                 <div id="step3-dive-question-checkboxes" class="step3-question-cb-list"></div>
               </div>
+              <div id="step3-dive-avg-indicator-section" class="step3-config-row" style="margin-top:12px; display:none">
+                <label class="step3-config-label">平均点指標</label>
+                <select id="step3-dive-avg-indicator-select" class="step3-config-select">
+                  <option value="">（指標を選択）</option>
+                </select>
+              </div>
               <div style="margin-top:16px; text-align:right">
                 <button id="step3-dive-generate-btn" class="btn btn-primary">生成</button>
               </div>
             </div>
 
-            <!-- 設問比較パネル -->
-            <div id="step3-panel-question_comparison" hidden>
+          </div>
+        </div>
+
+        <!-- ②' 設定カード（特定分析） -->
+        <div class="card" id="step3-special-config-card" style="margin-bottom:16px" hidden>
+          <div class="card-body">
+
+            <!-- 属性分析パネル -->
+            <div id="step3-special-panel-attribute">
               <div class="step3-config-row">
-                <label class="step3-config-label">集計軸</label>
-                <select id="step3-qcomp-axis-select" class="step3-config-select">
-                  <option value="">（なし — 全体集計）</option>
-                </select>
+                <label class="step3-config-label">単純集計対象（属性設問）</label>
+                <div id="step3-attr-simple-checkboxes" class="step3-question-cb-list"></div>
               </div>
-              <div class="step3-config-row" style="margin-top:12px">
-                <label class="step3-config-label">集計対象設問</label>
-                <div id="step3-qcomp-question-checkboxes" class="step3-question-cb-list"></div>
-              </div>
-              <div class="step3-config-row" style="margin-top:12px">
-                <label class="step3-config-label">ページ生成方式</label>
-                <div class="step3-radio-group">
-                  <label class="step3-radio-item">
-                    <input type="radio" name="step3-page-mode" value="per_question" checked>
-                    <span>設問ごとに1ページ</span>
-                  </label>
-                  <label class="step3-radio-item">
-                    <input type="radio" name="step3-page-mode" value="integrated">
-                    <span>1ページに統合</span>
-                  </label>
-                </div>
+              <div class="step3-config-row" style="margin-top:16px">
+                <label class="step3-config-label">クロス集計ペア</label>
+                <div id="step3-attr-pair-picker"></div>
+                <div id="step3-attr-pairs-list" style="margin-top:8px"></div>
               </div>
               <div style="margin-top:16px; text-align:right">
-                <button id="step3-qcomp-generate-btn" class="btn btn-primary">生成</button>
+                <button id="step3-attr-generate-btn" class="btn btn-primary">生成</button>
+              </div>
+            </div>
+
+            <!-- ファン度分析パネル -->
+            <div id="step3-special-panel-fan" hidden>
+              <div class="step3-config-row">
+                <label class="step3-config-label">ファン度の判定方式</label>
+                <select id="step3-fan-type-select" class="step3-config-select">
+                  <option value="auto">自動判定</option>
+                  <option value="new">新ファン度：好意度 × 応援意向</option>
+                  <option value="old">旧ファン度：好意度 × ファンステージ</option>
+                  <option value="custom">カスタム</option>
+                </select>
+              </div>
+              <div id="step3-fan-detect-hint" class="step3-config-sublabel" style="margin-top:4px"></div>
+
+              <div class="step3-config-row" style="margin-top:12px">
+                <label class="step3-config-label" id="step3-fan-row-label">好意度設問</label>
+                <select id="step3-fan-row-select" class="step3-config-select">
+                  <option value="">（未選択）</option>
+                </select>
+              </div>
+              <div class="step3-config-row" style="margin-top:8px">
+                <label class="step3-config-label" id="step3-fan-col-label">応援意向設問</label>
+                <select id="step3-fan-col-select" class="step3-config-select">
+                  <option value="">（未選択）</option>
+                </select>
+              </div>
+
+              <div class="step3-config-row" style="margin-top:16px">
+                <label class="step3-config-label">判定マトリクス</label>
+                <div id="step3-fan-matrix-editor"></div>
+              </div>
+
+              <div class="step3-config-row" style="margin-top:16px">
+                <label class="step3-config-label">構成比の分母</label>
+                <select id="step3-fan-denominator-select" class="step3-config-select">
+                  <option value="all">全回答者</option>
+                  <option value="valid">有効回答者（除外・判定不能を除く）</option>
+                  <option value="excluding_undetermined">判定不能を除く</option>
+                  <option value="filtered">任意のフィルタ後の回答者</option>
+                </select>
+                <div id="step3-fan-filter-section" style="display:none; margin-top:8px">
+                  <select id="step3-fan-filter-column" class="step3-config-select" style="margin-bottom:4px">
+                    <option value="">（絞り込み列を選択）</option>
+                  </select>
+                  <div id="step3-fan-filter-values" class="step3-target-cb-list"></div>
+                </div>
+              </div>
+
+              <div style="margin-top:16px; text-align:right">
+                <button id="step3-fan-generate-btn" class="btn btn-primary">生成</button>
+              </div>
+            </div>
+
+            <!-- 平均点分析パネル -->
+            <div id="step3-special-panel-average" hidden>
+              <div class="step3-config-row">
+                <label class="step3-config-label">対象スコア設問</label>
+                <p style="font-size:.78rem; color:var(--color-text-muted); margin:2px 0 6px">平均点を出したい設問を選択</p>
+                <div id="step3-avg-target-checkboxes" class="step3-question-cb-list"></div>
+              </div>
+              <div id="step3-avg-target-settings" style="margin-top:12px"></div>
+              <div style="margin-top:16px; text-align:right">
+                <button id="step3-avg-generate-btn" class="btn btn-primary">生成</button>
               </div>
             </div>
 
           </div>
         </div>
+
+        <!-- 結果切替ピル（特定分析） -->
+        <div id="step3-special-blocks-nav" style="margin-bottom:12px" hidden></div>
+
+        <!-- 平均点分析: 統計量テーブル + 平均バーチャート -->
+        <div id="step3-special-stats" style="margin-bottom:12px" hidden></div>
+
+        <!-- ファン度分析: 集計サマリー（N数・構成比・各種率）+ エクスポート -->
+        <div id="step3-fan-summary-panel" style="margin-bottom:12px" hidden></div>
+
+        <!-- 特定分析「通常分析へ追加」ボタンエリア（平均点・属性） -->
+        <div id="step3-special-add-btn-area" style="margin-bottom:8px; text-align:right"></div>
 
         <!-- 進捗表示 -->
         <div id="step3-progress" style="display:none; margin-bottom:16px">

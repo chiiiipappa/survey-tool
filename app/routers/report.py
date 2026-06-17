@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.data_store import survey_cache
 from app.parquet_cache import load_parquet
-from app.routers.step3 import _build_axis_cats, _crosstab_ma, _crosstab_sa
+from app.routers.step3 import _build_axis_cats, _crosstab_ma, _crosstab_sa, _crosstab_total
 from app.schemas import (
     ReportComparisonDataset,
     ReportGenerateRequest,
@@ -41,38 +41,6 @@ def _safe_float(val: float) -> float:
     if math.isnan(val) or math.isinf(val):
         return 0.0
     return round(val, 1)
-
-
-def _crosstab_total(
-    df: pd.DataFrame,
-    q_code: str,
-    type_code: str,
-    bracket_cols: list[dict],
-) -> tuple[list[ReportRow], int]:
-    """軸なし全体集計。(rows, total_n) を返す。"""
-    tc = type_code.upper()
-    n = len(df)
-    rows: list[ReportRow] = []
-
-    if tc in _CROSSTAB_SA_TYPES:
-        if q_code not in df.columns:
-            return [], n
-        vc = df[q_code].value_counts()
-        for label, cnt in vc.items():
-            pct = _safe_float(cnt / n * 100) if n > 0 else 0.0
-            rows.append(ReportRow(label=str(label), percents=[pct], counts=[int(cnt)]))
-
-    elif tc in _CROSSTAB_MA_TYPES:
-        for bc in bracket_cols:
-            dcol = bc["display_header"]
-            if dcol not in df.columns:
-                continue
-            val_str = df[dcol].fillna("").astype(str).str.strip()
-            cnt = int((~val_str.isin(["", "-"])).sum())
-            pct = _safe_float(cnt / n * 100) if n > 0 else 0.0
-            rows.append(ReportRow(label=bc["choice_label"], percents=[pct], counts=[cnt]))
-
-    return rows, n
 
 
 def _make_page_id(mode: str, q_code: str, axis_code: str) -> str:
@@ -289,7 +257,8 @@ async def generate_report(body: ReportGenerateRequest) -> ReportGenerateResponse
                     else:
                         # target_column なし → 全体集計（比較なし）
                         tgt_bcs = bracket_by_base.get(q_code, [])
-                        rows, n = _crosstab_total(df_full, q_code, q.type_code, tgt_bcs)
+                        raw_rows, n = _crosstab_total(df_full, q_code, q.type_code, tgt_bcs)
+                        rows = [ReportRow(label=r.label, percents=r.percents, counts=r.counts) for r in raw_rows]
                         title = f"{theme}：{axis_label}"
                         pages.append(ReportPageData(
                             page_id=page_id,
@@ -401,7 +370,8 @@ async def generate_report(body: ReportGenerateRequest) -> ReportGenerateResponse
 
                 if axis_spec.type == "total":
                     bcs = bracket_by_base.get(q_code, [])
-                    rows, n = _crosstab_total(df_work, q_code, q.type_code, bcs)
+                    raw_rows, n = _crosstab_total(df_work, q_code, q.type_code, bcs)
+                    rows = [ReportRow(label=r.label, percents=r.percents, counts=r.counts) for r in raw_rows]
                     title = f"{target_label}｜{theme}：{axis_label}"
                     pages.append(ReportPageData(
                         page_id=page_id,

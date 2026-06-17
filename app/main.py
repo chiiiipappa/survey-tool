@@ -15,6 +15,7 @@ from app.routers import questions, upload
 from app.routers import step2 as step2_router
 from app.routers import step3 as step3_router
 from app.routers import step3_export as step3_export_router
+from app.routers import step3_special as step3_special_router
 from app.routers import report as report_router
 from app.routers import pptx_export as pptx_export_router
 from app.routers import project as project_router
@@ -63,6 +64,7 @@ app.include_router(questions.router, prefix="/api", tags=["questions"])
 app.include_router(step2_router.router, prefix="/api", tags=["step2"])
 app.include_router(step3_router.router, prefix="/api", tags=["step3"])
 app.include_router(step3_export_router.router, prefix="/api", tags=["step3-export"])
+app.include_router(step3_special_router.router, prefix="/api", tags=["step3-special"])
 app.include_router(report_router.router, prefix="/api", tags=["report"])
 app.include_router(pptx_export_router.router, prefix="/api", tags=["pptx-export"])
 app.include_router(project_router.router, prefix="/api", tags=["project"])

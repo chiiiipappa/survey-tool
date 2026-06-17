@@ -2910,6 +2910,39 @@ details.step1-collapsible[open] > .step1-details-summary {
   border-color: var(--color-primary, #E53E3E);
 }
 
+/* 特定分析: 結果切替ピル */
+#step3-special-blocks-nav .step3-mode-tabs {
+  flex-wrap: wrap;
+}
+
+/* 特定分析: クロス集計ペア／集計軸グループの追加済みタグ */
+.step3-bd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+  margin: 2px 4px 2px 0;
+  font-size: .8rem;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface-2, #f5f5f5);
+  color: var(--color-text);
+}
+
+.step3-bd-remove {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: .9rem;
+  line-height: 1;
+  color: var(--color-text-muted);
+  padding: 0 2px;
+}
+
+.step3-bd-remove:hover {
+  color: var(--color-danger, #e53e3e);
+}
+
 /* 設定行 */
 .step3-config-row {
   margin-bottom: 10px;
@@ -3037,6 +3070,93 @@ details.step3-filter-details[open] > .step3-filter-summary::before {
 
 .step3-radio-item input[type="radio"] {
   cursor: pointer;
+}
+
+/* ============================================================
+   特定分析: ファン度分析 — 判定マトリクス・サマリー
+   ============================================================ */
+
+.step3-fan-matrix-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.step3-fan-matrix-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.step3-fan-matrix-th {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  white-space: nowrap;
+}
+
+.step3-fan-matrix-rowth {
+  text-align: left;
+  position: sticky;
+  left: 0;
+}
+
+.step3-fan-matrix-corner {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.step3-fan-matrix-td {
+  padding: 2px;
+  border: 1px solid var(--color-border);
+}
+
+.step3-fan-matrix-select {
+  width: 100%;
+  min-width: 110px;
+  font-size: .78rem;
+  padding: 5px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* ファン度サマリー: ラベル別チップ・指標カード */
+.step3-fan-label-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: .8rem;
+  font-weight: 600;
+}
+
+.step3-fan-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.step3-fan-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-alt);
+  min-width: 110px;
+}
+
+.step3-fan-metric-label {
+  font-size: .72rem;
+  color: var(--color-text-muted);
+}
+
+.step3-fan-metric-value {
+  font-size: 1.05rem;
+  font-weight: 700;
 }
 
 /* STEP4 グラフ種別 読み取り専用バッジ */
@@ -3732,4 +3852,51 @@ details.step3-filter-details[open] > .step3-filter-summary::before {
 .unmatched-apply-btn:hover {
   background: #eff6ff;
   border-color: var(--color-primary);
+}
+
+/* ★ 特定分析で作成した軸・指標 — optgroup ラベル */
+.step3-config-select optgroup[label^="★"] {
+  font-weight: 700;
+  color: var(--color-primary, #3b82f6);
+}
+
+/* 通常分析に追加ボタン（平均点指標・属性軸） */
+.btn-special-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  font-size: .82rem;
+  font-weight: 600;
+  background: var(--color-primary, #3b82f6);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s, opacity .15s;
+}
+.btn-special-add:hover:not(:disabled) {
+  background: var(--color-primary-dark, #2563eb);
+}
+.btn-special-add:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 平均点指標 × 軸 クロス集計テーブル */
+.avg-indicator-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .85rem;
+}
+.avg-indicator-table th,
+.avg-indicator-table td {
+  padding: 5px 10px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  text-align: right;
+}
+.avg-indicator-table th:first-child,
+.avg-indicator-table td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+.avg-indicator-table thead tr {
+  background: var(--color-surface-alt, #f8fafc);
 }

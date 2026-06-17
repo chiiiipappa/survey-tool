@@ -69,12 +69,26 @@ export const AppState = {
   step3TargetFilterColumn: "",   // 分析対象列 (question_code or "")
   step3TargetFilterValues: [],   // 分析対象値 (string[])
   // STEP3 分析モード（新UI）
-  step3Mode: "brand_comparison",           // "brand_comparison" | "deep_dive" | "question_comparison"
+  step3Mode: "brand_comparison",           // "brand_comparison" | "deep_dive" | "attribute" | "fan" | "average"
   step3BasicAxisCode: "",                   // 基本軸 question_code
   step3ComparisonAxisCode: "",              // 比較軸 question_code (optional)
   step3DeepDiveTarget: "",                  // 特定対象深掘りの対象値
-  step3QuestionPageMode: "per_question",    // "per_question" | "integrated"
   step3SelectedQuestionCodes: [],           // 集計対象設問（明示選択分）
+  // STEP3 特定分析: 属性分析
+  step3AttrSimpleCodes: [],        // 単純集計対象の属性設問コード
+  step3AttrCrossPairs: [],         // [{rowCode, colCode}]
+  // STEP3 特定分析: ファン度分析
+  step3FanDegreeType: "auto",      // "auto" | "new" | "old" | "custom"
+  step3FanRowCode: "",              // 行（縦軸）設問コード: 好意度 等
+  step3FanColCode: "",              // 列（横軸）設問コード: 応援意向/ファンステージ 等
+  step3FanMatrix: [],               // [{rowValue, colValue, label}]
+  step3FanDenominatorMode: "valid", // "all" | "valid" | "excluding_undetermined" | "filtered"
+  step3FanFilterColumn: "",         // denominator_mode==="filtered" のときの絞り込み列
+  step3FanFilterValues: [],
+  // STEP3 特定分析: 平均点分析
+  step3AvgTargets: [],             // [{code, scaleSettings:{...}, choiceScores:[...]}]
+  step3SavedIndicators: [],        // 通常分析で使う平均点指標 QuestionItem[]（question_type==="SCORE"）
+  step3AvgIndicatorCodes: [],      // 通常分析で現在選択中の平均点指標コード string[]
   // STEP3 集計ビュー
   step3Views: {},         // { [viewId]: ViewRecord } — viewId = `${axisCode}||${secAxisCode}`
   step3ActiveViewId: "",  // 現在アクティブなビューのID
@@ -478,6 +492,36 @@ export function setLoadedProject(resp) {
     AppState.step3ComparisonAxisCode || AppState.step3SecondaryAxisCode,
   );
   AppState.chartResults = resp.layout?.chart_results ?? [];
+  // 平均点分析: スコア設定・マッピングの復元
+  {
+    const savedScaleSettings = resp.layout?.score_settings ?? {};
+    const savedScoreMapping  = resp.layout?.score_mapping  ?? {};
+    AppState.step3AvgTargets = Object.keys(savedScaleSettings).map(code => ({
+      code,
+      scaleSettings: savedScaleSettings[code],
+      choiceScores:  savedScoreMapping[code] ?? [],
+    }));
+  }
+  // ファン度分析: 判定方式・設問選択・マトリクス等の復元
+  {
+    const fd = resp.layout?.fan_degree_settings ?? {};
+    AppState.step3FanDegreeType      = fd.fanDegreeType ?? "auto";
+    AppState.step3FanRowCode         = fd.rowCode ?? "";
+    AppState.step3FanColCode         = fd.colCode ?? "";
+    // 旧仕様で保存された「非ファン」は表記揺れになるため復元時に「未ファン」へ統一する
+    AppState.step3FanMatrix          = (fd.matrix ?? []).map(c => (
+      c.label === "非ファン" ? { ...c, label: "未ファン" } : c
+    ));
+    AppState.step3FanDenominatorMode = fd.denominatorMode ?? "valid";
+    AppState.step3FanFilterColumn    = fd.filterColumn ?? "";
+    AppState.step3FanFilterValues    = fd.filterValues ?? [];
+  }
+  // 属性分析: 単純集計対象・クロスペアの復元
+  {
+    const attr = resp.layout?.attr_settings ?? {};
+    AppState.step3AttrSimpleCodes = attr.attrSimpleCodes ?? [];
+    AppState.step3AttrCrossPairs  = attr.attrCrossPairs  ?? [];
+  }
   _emit();
 }
 
@@ -600,8 +644,19 @@ export function resetState() {
   AppState.step3BasicAxisCode         = "";
   AppState.step3ComparisonAxisCode    = "";
   AppState.step3DeepDiveTarget        = "";
-  AppState.step3QuestionPageMode      = "per_question";
   AppState.step3SelectedQuestionCodes = [];
+  AppState.step3AttrSimpleCodes       = [];
+  AppState.step3AttrCrossPairs        = [];
+  AppState.step3FanDegreeType         = "auto";
+  AppState.step3FanRowCode            = "";
+  AppState.step3FanColCode            = "";
+  AppState.step3FanMatrix             = [];
+  AppState.step3FanDenominatorMode    = "valid";
+  AppState.step3FanFilterColumn       = "";
+  AppState.step3FanFilterValues       = [];
+  AppState.step3AvgTargets            = [];
+  AppState.step3SavedIndicators       = [];
+  AppState.step3AvgIndicatorCodes     = [];
   AppState.reportMode              = "comparison";
   AppState.reportTargetColumn      = "";
   AppState.reportTargetValues      = [];
@@ -659,14 +714,139 @@ export function setStep3DeepDiveTarget(value) {
   _emit();
 }
 
-export function setStep3QuestionPageMode(mode) {
-  AppState.step3QuestionPageMode = mode ?? "per_question";
+export function setStep3SelectedQuestionCodes(codes) {
+  AppState.step3SelectedQuestionCodes = Array.isArray(codes) ? [...codes] : [];
   AppState.isDirty = true;
   _emit();
 }
 
-export function setStep3SelectedQuestionCodes(codes) {
-  AppState.step3SelectedQuestionCodes = Array.isArray(codes) ? [...codes] : [];
+// ---------------------------------------------------------------------------
+// STEP3 特定分析: 属性分析
+// ---------------------------------------------------------------------------
+
+export function setStep3AttrSimpleCodes(codes) {
+  AppState.step3AttrSimpleCodes = Array.isArray(codes) ? [...codes] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3AttrCrossPairs(pairs) {
+  AppState.step3AttrCrossPairs = Array.isArray(pairs) ? [...pairs] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+// ---------------------------------------------------------------------------
+// STEP3 特定分析: ファン度分析
+// ---------------------------------------------------------------------------
+
+export function setStep3FanDegreeType(type) {
+  AppState.step3FanDegreeType = type ?? "auto";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3FanRowCode(code) {
+  AppState.step3FanRowCode = code ?? "";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3FanColCode(code) {
+  AppState.step3FanColCode = code ?? "";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3FanMatrix(matrix) {
+  AppState.step3FanMatrix = Array.isArray(matrix) ? [...matrix] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3FanDenominatorMode(mode) {
+  AppState.step3FanDenominatorMode = mode ?? "valid";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3FanFilterColumn(code) {
+  AppState.step3FanFilterColumn = code ?? "";
+  AppState.step3FanFilterValues = [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3FanFilterValues(values) {
+  AppState.step3FanFilterValues = Array.isArray(values) ? [...values] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+/**
+ * 特定分析から「通常分析で使う軸・指標」を追加したあとに呼ぶ。
+ * question_type === "SCORE" は平均点指標として step3SavedIndicators へ、
+ * それ以外（"DERIVED" 等）はクロス集計軸として step2AxisCandidates へ追加する。
+ */
+export function addDerivedAxisQuestions(questionItems) {
+  if (!Array.isArray(questionItems) || !questionItems.length) return;
+  const newCodes = new Set(questionItems.map(q => q.question_code));
+
+  AppState.questions = [
+    ...(AppState.questions ?? []).filter(q => !newCodes.has(q.question_code)),
+    ...questionItems,
+  ];
+
+  const axisItems = questionItems.filter(q => (q.question_type ?? "") !== "SCORE");
+  const scoreItems = questionItems.filter(q => (q.question_type ?? "") === "SCORE");
+
+  if (axisItems.length) {
+    const newCandidates = axisItems.map(q => ({
+      question_code: q.question_code,
+      question_text: q.question_text,
+      type_code: q.type_code,
+      type_label: q.type_label,
+      is_default_selected: true,
+    }));
+    AppState.step2AxisCandidates = [
+      ...(AppState.step2AxisCandidates ?? []).filter(c => !newCodes.has(c.question_code)),
+      ...newCandidates,
+    ];
+  }
+
+  if (scoreItems.length) {
+    const scoreCodes = new Set(scoreItems.map(q => q.question_code));
+    AppState.step3SavedIndicators = [
+      ...(AppState.step3SavedIndicators ?? []).filter(q => !scoreCodes.has(q.question_code)),
+      ...scoreItems,
+    ];
+  }
+
+  AppState.step2MatchedColumns = [
+    ...new Set([...(AppState.step2MatchedColumns ?? []), ...newCodes]),
+  ];
+
+  _emit();
+}
+
+/** 平均点指標を1件追加する（save-as-indicator 成功後に呼ぶ）。 */
+export function addSavedIndicator(questionItem) {
+  if (!questionItem) return;
+  addDerivedAxisQuestions([questionItem]);
+}
+
+// ---------------------------------------------------------------------------
+// STEP3 特定分析: 平均点分析
+// ---------------------------------------------------------------------------
+
+export function setStep3AvgTargets(targets) {
+  AppState.step3AvgTargets = Array.isArray(targets) ? [...targets] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3AvgIndicatorCodes(codes) {
+  AppState.step3AvgIndicatorCodes = Array.isArray(codes) ? [...codes] : [];
   AppState.isDirty = true;
   _emit();
 }

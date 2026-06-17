@@ -52,6 +52,10 @@ class ProjectSaveRequest(BaseModel):
     layout_format: str = "auto"
     response_format: str = "auto"
     survey_format: str = "unknown"
+    score_settings: dict = Field(default_factory=dict)  # 平均点分析: question_code -> ScaleSettings
+    score_mapping: dict = Field(default_factory=dict)    # 平均点分析: question_code -> ScoreMappingEntry[]
+    fan_degree_settings: dict = Field(default_factory=dict)  # ファン度分析: type/設問選択/判定マトリクス等
+    attr_settings: dict = Field(default_factory=dict)        # 属性分析: 単純集計対象・クロスペア
 
 
 @router.post("/project/save", summary="プロジェクトを .surveyproject に保存")
@@ -102,6 +106,10 @@ async def save_project(body: ProjectSaveRequest) -> StreamingResponse:
             "step3_views": body.step3_views,
             "chart_results": body.chart_results,
             "report_project": body.report_project,
+            "score_settings": body.score_settings,
+            "score_mapping": body.score_mapping,
+            "fan_degree_settings": body.fan_degree_settings,
+            "attr_settings": body.attr_settings,
             "has_step2": bool(step2),
         }
 
@@ -352,6 +360,10 @@ async def load_project(file: UploadFile = File(...)) -> dict:
         "step3_views": project_data.get("step3_views", {}),
         "chart_results": project_data.get("chart_results", []),
         "step3_crosstab_cache": project_data.get("step3_crosstab_cache", {}),
+        "score_settings": project_data.get("score_settings", {}),
+        "score_mapping": project_data.get("score_mapping", {}),
+        "fan_degree_settings": project_data.get("fan_degree_settings", {}),
+        "attr_settings": project_data.get("attr_settings", {}),
     }
 
     logger.info(

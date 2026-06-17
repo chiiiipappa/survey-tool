@@ -71,7 +71,7 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surveyproject) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}, reportProject = {}, chartResults = [], layoutFormat = "auto", responseFormat = "auto", surveyFormat = "unknown") {
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}, reportProject = {}, chartResults = [], layoutFormat = "auto", responseFormat = "auto", surveyFormat = "unknown", scoreSettings = {}, scoreMapping = {}, fanDegreeSettings = {}, attrSettings = {}) {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -101,6 +101,10 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       layout_format: layoutFormat,
       response_format: responseFormat,
       survey_format: surveyFormat,
+      score_settings: scoreSettings,
+      score_mapping: scoreMapping,
+      fan_degree_settings: fanDegreeSettings,
+      attr_settings: attrSettings,
     }),
   });
   if (!res.ok) {
@@ -313,7 +317,7 @@ export async function exportFaData(token, {
 // ---------------------------------------------------------------------------
 
 /** クロス集計を実行する。 */
-export async function generateCrosstab(sessionToken, axisCode, secondaryAxisCode = "", targetCodes = [], targetFilterColumn = "", targetFilterValues = []) {
+export async function generateCrosstab(sessionToken, axisCode, secondaryAxisCode = "", targetCodes = [], targetFilterColumn = "", targetFilterValues = [], avgIndicatorCodes = []) {
   const res = await fetch(`${BASE}/step3/crosstab`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -324,11 +328,192 @@ export async function generateCrosstab(sessionToken, axisCode, secondaryAxisCode
       target_question_codes: targetCodes,
       target_filter_column: targetFilterColumn,
       target_filter_values: targetFilterValues,
+      avg_indicator_codes: avgIndicatorCodes,
     }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "クロス集計に失敗しました。");
+  }
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// STEP3: 特定分析（属性分析・ファン度分析・平均点分析）
+// ---------------------------------------------------------------------------
+
+async function _postSpecialAnalysis(path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "分析の実行に失敗しました。");
+  }
+  return res.json();
+}
+
+/** 属性分析（単純集計＋クロス集計）を実行する。 */
+export async function generateAttributeAnalysis(sessionToken, simpleTallyCodes = [], crossPairs = []) {
+  return _postSpecialAnalysis("/step3/special/attribute", {
+    session_token: sessionToken,
+    simple_tally_codes: simpleTallyCodes,
+    cross_pairs: crossPairs.map(p => ({ row_code: p.rowCode, col_code: p.colCode })),
+  });
+}
+
+/** ファン度分析を実行する（新ファン度/旧ファン度/カスタム共通の汎用マトリクス方式）。常に全体集計のみを返す。 */
+export async function generateFanAnalysis(sessionToken, fanDegreeType, rowCode, colCode, matrix = [], denominatorMode = "valid", filterColumn = "", filterValues = []) {
+  return _postSpecialAnalysis("/step3/special/fan", {
+    session_token: sessionToken,
+    fan_degree_type: fanDegreeType,
+    row_question_code: rowCode,
+    col_question_code: colCode,
+    matrix: matrix.map(c => ({ row_value: c.rowValue, col_value: c.colValue, label: c.label })),
+    denominator_mode: denominatorMode,
+    target_filter_column: filterColumn,
+    target_filter_values: filterValues,
+  });
+}
+
+/**
+ * ファン度判定結果（fan_degree_label/各種フラグ）を通常分析用の派生属性として保存する。
+ * すでに同じfan_degree_typeで保存済み・overwrite=falseの場合は409エラーを投げる
+ * （呼び出し側でエラーの.statusを見て上書き確認→overwrite=trueで再送する想定）。
+ */
+export async function saveFanDegreeAsAxis(sessionToken, fanDegreeType, rowCode, colCode, matrix = [], overwrite = false) {
+  const res = await fetch(`${BASE}/step3/special/fan/save-as-axis`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: sessionToken,
+      fan_degree_type: fanDegreeType,
+      row_question_code: rowCode,
+      col_question_code: colCode,
+      matrix: matrix.map(c => ({ row_value: c.rowValue, col_value: c.colValue, label: c.label })),
+      overwrite,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const error = new Error(err.detail ?? "ファン度の保存に失敗しました。");
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/** ファン度分析結果をExcel (.xlsx) として出力する。fanAnalysisResponseは直前のgenerateFanAnalysis()の戻り値。 */
+export async function exportFanAnalysis(fanAnalysisResponse) {
+  const res = await fetch(`${BASE}/step3/special/fan/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fanAnalysisResponse),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "ファン度分析のエクスポートに失敗しました。");
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const match = cd.match(/filename\*=UTF-8''([^;\r\n]+)/i) ?? cd.match(/filename="?([^";\r\n]+)"?/i);
+  const filename = match ? decodeURIComponent(match[1]) : "fan_degree.xlsx";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** 平均点分析を実行する（全体統計のみ）。 */
+export async function generateAverageAnalysis(sessionToken, targets = []) {
+  return _postSpecialAnalysis("/step3/special/average", {
+    session_token: sessionToken,
+    targets: targets.map(t => ({
+      question_code: t.code,
+      scale_settings: {
+        data_min_score: t.scaleSettings.dataMin,
+        data_max_score: t.scaleSettings.dataMax,
+        display_min_score: t.scaleSettings.displayMin,
+        display_max_score: t.scaleSettings.displayMax,
+        scale_direction: t.scaleSettings.direction,
+        calc_method: t.scaleSettings.calcMethod,
+      },
+      choice_scores: t.choiceScores.map(c => ({
+        choice_text: c.choiceText,
+        raw_score: c.rawScore,
+        converted_score: c.convertedScore,
+        manual_score: c.manualScore,
+        final_score: c.finalScore,
+        exclude_flag: c.excludeFlag,
+        missing_flag: c.missingFlag,
+      })),
+    })),
+  });
+}
+
+/** 平均点指標を通常分析用の数値指標として保存する。 */
+export async function saveAverageAsIndicator(sessionToken, target, indicatorName, overwrite = false) {
+  const res = await fetch(`${BASE}/step3/special/average/save-as-indicator`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: sessionToken,
+      question_code: target.code,
+      scale_settings: {
+        data_min_score: target.scaleSettings.dataMin,
+        data_max_score: target.scaleSettings.dataMax,
+        display_min_score: target.scaleSettings.displayMin,
+        display_max_score: target.scaleSettings.displayMax,
+        scale_direction: target.scaleSettings.direction,
+        calc_method: target.scaleSettings.calcMethod,
+      },
+      choice_scores: target.choiceScores.map(c => ({
+        choice_text: c.choiceText,
+        raw_score: c.rawScore,
+        converted_score: c.convertedScore,
+        manual_score: c.manualScore,
+        final_score: c.finalScore,
+        exclude_flag: c.excludeFlag,
+        missing_flag: c.missingFlag,
+      })),
+      indicator_name: indicatorName,
+      overwrite,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const error = new Error(err.detail ?? "平均点指標の保存に失敗しました。");
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/** 属性クロスペアを通常分析用の派生軸として保存する。 */
+export async function saveAttributeAsAxis(sessionToken, rowCode, colCode, axisName, overwrite = false) {
+  const res = await fetch(`${BASE}/step3/special/attribute/save-as-axis`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: sessionToken,
+      row_code: rowCode,
+      col_code: colCode,
+      axis_name: axisName,
+      overwrite,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const error = new Error(err.detail ?? "属性軸の保存に失敗しました。");
+    error.status = res.status;
+    throw error;
   }
   return res.json();
 }

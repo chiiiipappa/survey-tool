@@ -4,9 +4,9 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3QuestionPageMode, setStep3SelectedQuestionCodes } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3SelectedQuestionCodes, setStep3AttrSimpleCodes, setStep3AttrCrossPairs, setStep3FanDegreeType, setStep3FanRowCode, setStep3FanColCode, setStep3FanMatrix, setStep3FanDenominatorMode, setStep3FanFilterColumn, setStep3FanFilterValues, addDerivedAxisQuestions, addSavedIndicator, setStep3AvgTargets, setStep3AvgIndicatorCodes } from "./state.js";
 
-import { generateCrosstab } from "./api.js";
+import { generateCrosstab, generateAttributeAnalysis, generateFanAnalysis, exportFanAnalysis, saveFanDegreeAsAxis, generateAverageAnalysis, saveAverageAsIndicator, saveAttributeAsAxis } from "./api.js";
 import { yieldToMain, showToast } from "./app.js";
 import {
   exportSingleExcel, exportAllExcel,
@@ -173,18 +173,24 @@ function _fixedColorFor(label) {
 const FIXED_PALETTES = {
   fan_label: {
     label: "ファンラベル",
-    preview: ["#FF5050","#FF9999","#FFCCCC","#BFBFBF"],
+    preview: ["#FF5050","#FF9999","#FFCCCC","#D9D9D9","#595959","#F2F2F2"],
     canonicalValues: [
       { label: "コアファン",       color: "#FF5050" },
       { label: "ファン",           color: "#FF9999" },
       { label: "ライトファン",     color: "#FFCCCC" },
-      { label: "非ファン",         color: "#BFBFBF" },
+      { label: "未ファン",         color: "#D9D9D9" },
+      { label: "除外",             color: "#595959" },
+      { label: "判定不能",         color: "#F2F2F2" },
     ],
     colorFor(label) {
+      // 「非ファン」は文字列として「ファン」を含むため、汎用の/ファン/判定より先にチェックする。
+      // 「非ファン」は表記として廃止済みだが、移行期の既存データ向けに未ファンと同色で表示する。
       if (/コアファン/.test(label))      return "#FF5050";
       if (/ライトファン/.test(label))    return "#FFCCCC";
+      if (/未ファン|非ファン|その他/.test(label)) return "#D9D9D9";
+      if (/判定不能/.test(label))        return "#F2F2F2";
+      if (/除外/.test(label))            return "#595959";
       if (/ファン/.test(label))          return "#FF9999";
-      if (/非ファン|その他/.test(label)) return "#BFBFBF";
       return null;
     },
   },
@@ -355,6 +361,11 @@ const _pendingChartRenders = new Map(); // { DOMElement: renderFn }
 let   _chartObserver = null;
 let   _currentCacheKey = "";            // 現在表示中のキャッシュキー
 
+// 画面ごとの結果キャッシュ（セッション内状態保持用）
+let _normalModeResultCache  = { brand_comparison: null, deep_dive: null };
+let _specialModeResultCache = { attribute: null, fan: null, average: null };
+let _prevStep3Mode = null; // 前回描画されたモード（切り替え検出用）
+
 export function getCrosstabCache() { return { ..._crosstabCache }; }
 export function setCrosstabCache(cache) { Object.assign(_crosstabCache, cache ?? {}); }
 
@@ -372,6 +383,9 @@ export function resetStep3UI() {
   _dragValue = null;
   _currentCacheKey = "";
   Object.keys(_crosstabCache).forEach(k => delete _crosstabCache[k]);
+  _normalModeResultCache  = { brand_comparison: null, deep_dive: null };
+  _specialModeResultCache = { attribute: null, fan: null, average: null };
+  _prevStep3Mode = null;
 
   const nav = document.getElementById("step3-sidebar-nav");
   if (nav) nav.innerHTML = "";
@@ -516,10 +530,68 @@ export function initStep3Panel() {
 // 状態変化ハンドラ
 // ---------------------------------------------------------------------------
 
+function _clearResultArea() {
+  _destroyAllCharts();
+  _clearPendingChartRenders();
+  const resultsEl = document.getElementById("step3-results");
+  if (resultsEl) {
+    resultsEl.innerHTML =
+      '<div id="step3-placeholder" style="text-align:center; padding:80px 0; color:var(--color-text-muted); font-size:1rem">設定を選択して「グラフ生成」を押してください</div>';
+  }
+  ["step3-special-blocks-nav", "step3-special-stats", "step3-fan-summary-panel"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.hidden = true; el.innerHTML = ""; el._navInitialized = false; }
+  });
+  const addBtn = document.getElementById("step3-special-add-btn-area");
+  if (addBtn) addBtn.innerHTML = "";
+}
+
+async function _restoreNormalResults(cached) {
+  const resultsEl = document.getElementById("step3-results");
+  if (!resultsEl) return;
+  _currentCacheKey = cached.cacheKey;
+  _destroyAllCharts();
+  _clearPendingChartRenders();
+  const placeholder = document.getElementById("step3-placeholder");
+  if (placeholder) placeholder.style.display = "none";
+  await _renderResults(resultsEl, cached.data);
+  _renderSidebar();
+}
+
 function _onStateChange() {
   if (AppState.activePanel !== "step3") return;
-  _renderModeCard();
-  _renderConfigCard();
+  _renderCategoryCard();
+  const category = _step3Category();
+  const mode = AppState.step3Mode;
+  const modeCard = document.getElementById("step3-mode-card");
+  const configCard = document.getElementById("step3-config-card");
+  const specialModeCard = document.getElementById("step3-special-mode-card");
+  const specialConfigCard = document.getElementById("step3-special-config-card");
+  if (modeCard) modeCard.hidden = category !== "normal";
+  if (configCard) configCard.hidden = category !== "normal";
+  if (specialModeCard) specialModeCard.hidden = category !== "special";
+  if (specialConfigCard) specialConfigCard.hidden = category !== "special";
+
+  // モード変化時: 結果エリアをクリアして新しいモードの結果を復元
+  if (mode !== _prevStep3Mode) {
+    _prevStep3Mode = mode;
+    _clearResultArea();
+    if (category === "normal") {
+      const cached = _normalModeResultCache[mode];
+      if (cached) _restoreNormalResults(cached).catch(() => {});
+    } else {
+      const cached = _specialModeResultCache[mode];
+      if (cached) _displaySpecialBlocks(cached.data, cached.modeTag).catch(() => {});
+    }
+  }
+
+  if (category === "normal") {
+    _renderModeCard();
+    _renderConfigCard();
+  } else {
+    _renderSpecialModeCard();
+    _renderSpecialConfigCard();
+  }
   _renderViewPanel();
   _renderSidebar();
 }
@@ -527,6 +599,33 @@ function _onStateChange() {
 // ---------------------------------------------------------------------------
 // セクション0-A: 分析モード管理
 // ---------------------------------------------------------------------------
+
+const _SPECIAL_MODES = new Set(["attribute", "fan", "average"]);
+
+function _step3Category() {
+  return _SPECIAL_MODES.has(AppState.step3Mode) ? "special" : "normal";
+}
+
+function _renderCategoryCard() {
+  const card = document.getElementById("step3-category-card");
+  if (!card) return;
+  const category = _step3Category();
+
+  card.querySelectorAll(".step3-mode-tab").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.category === category);
+  });
+
+  if (!card._categoryInitialized) {
+    card._categoryInitialized = true;
+    card.querySelectorAll(".step3-mode-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.category;
+        if (target === _step3Category()) return;
+        setStep3Mode(target === "special" ? "attribute" : "brand_comparison");
+      });
+    });
+  }
+}
 
 function _renderModeCard() {
   const card = document.getElementById("step3-mode-card");
@@ -549,7 +648,7 @@ function _renderModeCard() {
 
 function _renderConfigCard() {
   const mode = AppState.step3Mode || "brand_comparison";
-  const panels = ["brand_comparison", "deep_dive", "question_comparison"];
+  const panels = ["brand_comparison", "deep_dive"];
   panels.forEach(m => {
     const el = document.getElementById(`step3-panel-${m}`);
     if (el) el.hidden = (m !== mode);
@@ -557,7 +656,35 @@ function _renderConfigCard() {
 
   if (mode === "brand_comparison") _renderBrandComparisonPanel();
   else if (mode === "deep_dive") _renderDeepDivePanel();
-  else _renderQuestionComparisonPanel();
+}
+
+function _renderSpecialModeCard() {
+  const card = document.getElementById("step3-special-mode-card");
+  if (!card) return;
+
+  card.querySelectorAll(".step3-mode-tab").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.mode === AppState.step3Mode);
+  });
+
+  if (!card._modeInitialized) {
+    card._modeInitialized = true;
+    card.querySelectorAll(".step3-mode-tab").forEach(btn => {
+      btn.addEventListener("click", () => setStep3Mode(btn.dataset.mode));
+    });
+  }
+}
+
+function _renderSpecialConfigCard() {
+  const mode = AppState.step3Mode;
+  const panels = ["attribute", "fan", "average"];
+  panels.forEach(m => {
+    const el = document.getElementById(`step3-special-panel-${m}`);
+    if (el) el.hidden = (m !== mode);
+  });
+
+  if (mode === "attribute") _renderAttributePanel();
+  else if (mode === "fan") _renderFanPanel();
+  else if (mode === "average") _renderAveragePanel();
 }
 
 // ---------------------------------------------------------------------------
@@ -568,12 +695,28 @@ function _buildAxisSelectOptions(candidates, selectedCode, includeNone, noneLabe
   const noneOpt = includeNone
     ? `<option value="">${_esc(noneLabel ?? "（なし）")}</option>`
     : "";
-  const opts = candidates.map(code => {
+
+  // DERIVED 型（特定分析で作成した軸）を先頭に optgroup として表示
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  const derivedCodes = candidates.filter(code => qMap[code]?.question_type === "DERIVED");
+  const regularCodes = candidates.filter(code => qMap[code]?.question_type !== "DERIVED");
+
+  let derivedGroup = "";
+  if (derivedCodes.length) {
+    const derivedOpts = derivedCodes.map(code => {
+      const q = qMap[code];
+      const label = q ? (q.question_text || q.stub || code) : code;
+      return `<option value="${_esc(code)}"${code === selectedCode ? " selected" : ""}>${_esc(label)}</option>`;
+    }).join("");
+    derivedGroup = `<optgroup label="★ 特定分析で作成した軸・指標">${derivedOpts}</optgroup>`;
+  }
+
+  const opts = regularCodes.map(code => {
     const { text, badge } = _getAxisSelectorLabel(code);
     const label = `${code}　${text}　[${badge}]`;
     return `<option value="${_esc(code)}"${code === selectedCode ? " selected" : ""}>${_esc(label)}</option>`;
   }).join("");
-  return noneOpt + opts;
+  return noneOpt + derivedGroup + opts;
 }
 
 function _buildQuestionCheckboxes(containerId, questionCodes, selectedCodes) {
@@ -642,6 +785,8 @@ function _renderBrandComparisonPanel() {
     genBtn._genInitialized = true;
     genBtn.addEventListener("click", () => _runStep3());
   }
+
+  _renderNormalAnalysisAvgIndicatorSelectors();
 }
 
 // ---------------------------------------------------------------------------
@@ -731,47 +876,57 @@ function _renderDeepDivePanel() {
     genBtn._diveGenInitialized = true;
     genBtn.addEventListener("click", () => _runStep3());
   }
+
+  _renderNormalAnalysisAvgIndicatorSelectors();
 }
 
 // ---------------------------------------------------------------------------
-// セクション0-D: 設問比較パネル
+// セクション0-D: 平均点指標セレクタ（通常分析用）
 // ---------------------------------------------------------------------------
 
-function _renderQuestionComparisonPanel() {
-  const candidates = _getAxisCandidates();
+function _renderNormalAnalysisAvgIndicatorSelectors() {
+  const indicators = AppState.step3SavedIndicators ?? [];
 
-  // 集計軸（オプション）
-  const qcompAxisSel = document.getElementById("step3-qcomp-axis-select");
-  if (qcompAxisSel) {
-    qcompAxisSel.innerHTML = _buildAxisSelectOptions(candidates, AppState.step3BasicAxisCode, true, "（なし — 全体集計）");
-    if (!qcompAxisSel._qcompInitialized) {
-      qcompAxisSel._qcompInitialized = true;
-      qcompAxisSel.addEventListener("change", () => setStep3BasicAxis(qcompAxisSel.value));
+  function _buildIndicatorOptions(sel) {
+    const selected = AppState.step3AvgIndicatorCodes?.[0] ?? "";
+    sel.innerHTML = `<option value="">（なし）</option>` +
+      indicators.map(q =>
+        `<option value="${_esc(q.question_code)}"${q.question_code === selected ? " selected" : ""}>${_esc(q.question_text)}</option>`
+      ).join("");
+  }
+
+  function _syncOther(changedId, otherId) {
+    const other = document.getElementById(otherId);
+    const changed = document.getElementById(changedId);
+    if (other && changed) other.value = changed.value;
+  }
+
+  const brandSec = document.getElementById("step3-avg-indicator-section");
+  const brandSel = document.getElementById("step3-avg-indicator-select");
+  if (brandSec) brandSec.style.display = indicators.length ? "" : "none";
+  if (brandSel && indicators.length) {
+    _buildIndicatorOptions(brandSel);
+    if (!brandSel._avgInitialized) {
+      brandSel._avgInitialized = true;
+      brandSel.addEventListener("change", () => {
+        setStep3AvgIndicatorCodes(brandSel.value ? [brandSel.value] : []);
+        _syncOther("step3-avg-indicator-select", "step3-dive-avg-indicator-select");
+      });
     }
   }
 
-  // 集計対象設問（全セット or アクティブセット）
-  const activeCodes = _getActiveSetQuestionCodes();
-  const selected = AppState.step3SelectedQuestionCodes;
-  _buildQuestionCheckboxes("step3-qcomp-question-checkboxes", activeCodes, selected);
-
-  // ページ生成方式ラジオ
-  const pageMode = AppState.step3QuestionPageMode || "per_question";
-  document.querySelectorAll("input[name='step3-page-mode']").forEach(radio => {
-    radio.checked = (radio.value === pageMode);
-    if (!radio._pageModeInitialized) {
-      radio._pageModeInitialized = true;
-      radio.addEventListener("change", () => {
-        if (radio.checked) setStep3QuestionPageMode(radio.value);
+  const diveSec = document.getElementById("step3-dive-avg-indicator-section");
+  const diveSel = document.getElementById("step3-dive-avg-indicator-select");
+  if (diveSec) diveSec.style.display = indicators.length ? "" : "none";
+  if (diveSel && indicators.length) {
+    _buildIndicatorOptions(diveSel);
+    if (!diveSel._avgInitialized) {
+      diveSel._avgInitialized = true;
+      diveSel.addEventListener("change", () => {
+        setStep3AvgIndicatorCodes(diveSel.value ? [diveSel.value] : []);
+        _syncOther("step3-dive-avg-indicator-select", "step3-avg-indicator-select");
       });
     }
-  });
-
-  // 生成ボタン
-  const genBtn = document.getElementById("step3-qcomp-generate-btn");
-  if (genBtn && !genBtn._qcompGenInitialized) {
-    genBtn._qcompGenInitialized = true;
-    genBtn.addEventListener("click", () => _runStep3());
   }
 }
 
@@ -887,6 +1042,1345 @@ function _renderTargetFilterSection() {
   }
 
   if (badge) badge.hidden = selected.size === 0;
+}
+
+// ---------------------------------------------------------------------------
+// セクション0-F: 特定分析 共通ユーティリティ
+// ---------------------------------------------------------------------------
+
+const _SCALE_TYPES = new Set(["SA", "S", "NU", "N", "SL"]);
+
+// 属性候補の自動推定（設問コード・質問文のキーワードマッチ）。将来拡張しやすいよう配列定義。
+const _ATTRIBUTE_PATTERNS = [
+  { key: "sex",      label: "性別",         codeRe: /SEX|GENDER/i,             textRe: /性別/ },
+  { key: "age",      label: "年代",         codeRe: /\bAGE\b/i,                textRe: /年代|年齢/ },
+  { key: "sexage",   label: "性年代",       codeRe: /SEXAGE|AGESEX/i,          textRe: /性年代/ },
+  { key: "area",     label: "エリア",       codeRe: /AREA|REGION/i,            textRe: /エリア|地域/ },
+  { key: "pref",     label: "都道府県",     codeRe: /PREF/i,                   textRe: /都道府県/ },
+  { key: "job",      label: "職業",         codeRe: /JOB|OCCUPATION/i,         textRe: /職業/ },
+  { key: "marriage", label: "未既婚",       codeRe: /MARRY|MARRIAGE|MARITAL/i, textRe: /未既婚|既婚|婚姻/ },
+  { key: "child",    label: "子どもの有無", codeRe: /CHILD/i,                  textRe: /子供|子ども/ },
+];
+
+function _guessAttributeCandidates(candidates) {
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  return _ATTRIBUTE_PATTERNS
+    .map(p => ({
+      key: p.key,
+      label: p.label,
+      codes: candidates.filter(code => {
+        const text = qMap[code]?.question_text ?? "";
+        return p.codeRe.test(code) || p.textRe.test(text);
+      }),
+    }))
+    .filter(g => g.codes.length);
+}
+
+/** チェックボックス選択コードの汎用ビルダー（onChangeに最新の選択コード配列を渡す）。 */
+function _buildGenericCheckboxes(containerId, questionCodes, selectedCodes, onChange) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const selectedSet = new Set(selectedCodes);
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+
+  if (!questionCodes.length) {
+    el.innerHTML = `<div style="color:var(--color-text-muted); font-size:.82rem; padding:4px 0">対象設問がありません</div>`;
+    return;
+  }
+
+  el.innerHTML = questionCodes.map(code => {
+    const q = qMap[code];
+    const label = q ? `${code}　${q.question_text ?? ""}` : code;
+    return `<label class="step3-question-cb-item">
+      <input type="checkbox" value="${_esc(code)}"${selectedSet.has(code) ? " checked" : ""}>
+      <span>${_esc(label)}</span>
+    </label>`;
+  }).join("");
+
+  el._genCbSelected = selectedCodes;
+  el._genCbOnChange = onChange;
+  if (!el._genCbInitialized) {
+    el._genCbInitialized = true;
+    el.addEventListener("change", e => {
+      const cb = e.target.closest("input[type=checkbox]");
+      if (!cb) return;
+      const cur = new Set(el._genCbSelected ?? []);
+      cb.checked ? cur.add(cb.value) : cur.delete(cb.value);
+      el._genCbOnChange([...cur]);
+    });
+  }
+}
+
+/** 集計軸グループ（1要素=単一軸、2要素=複合軸）の追加UI。getGroups/setGroupsはAppStateへの読み書き関数。 */
+function _renderBreakdownGroupPicker(pickerId, listId, candidates, getGroups, setGroups) {
+  const picker = document.getElementById(pickerId);
+  const list = document.getElementById(listId);
+  if (!picker || !list) return;
+
+  const optsHtml = candidates.map(code => {
+    const { text } = _getAxisSelectorLabel(code);
+    return `<option value="${_esc(code)}">${_esc(code)}　${_esc(text)}</option>`;
+  }).join("");
+
+  if (!picker._bdInitialized) {
+    picker._bdInitialized = true;
+    picker.innerHTML = `
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
+        <select class="step3-config-select bd-sel-a" style="max-width:220px"></select>
+        <span style="font-size:.8rem; color:var(--color-text-muted)">×（複合軸・任意）</span>
+        <select class="step3-config-select bd-sel-b" style="max-width:220px"></select>
+        <button type="button" class="btn btn-secondary btn-sm bd-add-btn">＋ 軸を追加</button>
+      </div>`;
+    picker.querySelector(".bd-add-btn").addEventListener("click", () => {
+      const selA = picker.querySelector(".bd-sel-a");
+      const selB = picker.querySelector(".bd-sel-b");
+      const a = selA.value, b = selB.value;
+      if (!a) { showToast("集計軸を選択してください"); return; }
+      if (b && b === a) { showToast("同じ設問は選択できません"); return; }
+      setGroups([...getGroups(), b ? [a, b] : [a]]);
+      selA.value = ""; selB.value = "";
+    });
+  }
+  picker.querySelector(".bd-sel-a").innerHTML = `<option value="">（軸を選択）</option>${optsHtml}`;
+  picker.querySelector(".bd-sel-b").innerHTML = `<option value="">（なし）</option>${optsHtml}`;
+
+  const groups = getGroups();
+  if (!groups.length) {
+    list.innerHTML = `<div style="color:var(--color-text-muted); font-size:.82rem">集計軸：未選択（なし：全体平均を表示）。任意で追加すると、その軸ごとの平均点を表示します（複数追加すると結果を切り替えて表示できます）</div>`;
+  } else {
+    list.innerHTML = groups.map((g, idx) => {
+      const labels = g.map(code => _getAxisSelectorLabel(code).text).join(" × ");
+      return `<span class="step3-bd-pill">${_esc(labels)}<button type="button" class="step3-bd-remove" data-idx="${idx}">×</button></span>`;
+    }).join("");
+  }
+
+  if (!list._bdListInitialized) {
+    list._bdListInitialized = true;
+    list.addEventListener("click", e => {
+      const btn = e.target.closest(".step3-bd-remove");
+      if (!btn) return;
+      const idx = Number(btn.dataset.idx);
+      setGroups(getGroups().filter((_, i) => i !== idx));
+    });
+  }
+}
+
+/** 属性分析: クロス集計ペア（行設問 × 列設問）の追加UI。 */
+function _renderCrossPairPicker(pickerId, listId, candidates) {
+  const picker = document.getElementById(pickerId);
+  const list = document.getElementById(listId);
+  if (!picker || !list) return;
+
+  const optsHtml = candidates.map(code => {
+    const { text } = _getAxisSelectorLabel(code);
+    return `<option value="${_esc(code)}">${_esc(code)}　${_esc(text)}</option>`;
+  }).join("");
+
+  if (!picker._pairInitialized) {
+    picker._pairInitialized = true;
+    picker.innerHTML = `
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
+        <select class="step3-config-select pair-sel-row" style="max-width:220px"></select>
+        <span style="font-size:.8rem; color:var(--color-text-muted)">×</span>
+        <select class="step3-config-select pair-sel-col" style="max-width:220px"></select>
+        <button type="button" class="btn btn-secondary btn-sm pair-add-btn">＋ ペアを追加</button>
+      </div>`;
+    picker.querySelector(".pair-add-btn").addEventListener("click", () => {
+      const selRow = picker.querySelector(".pair-sel-row");
+      const selCol = picker.querySelector(".pair-sel-col");
+      const rowCode = selRow.value, colCode = selCol.value;
+      if (!rowCode || !colCode) { showToast("行・列の両方の設問を選択してください"); return; }
+      if (rowCode === colCode) { showToast("同じ設問は選択できません"); return; }
+      setStep3AttrCrossPairs([...AppState.step3AttrCrossPairs, { rowCode, colCode }]);
+      selRow.value = ""; selCol.value = "";
+    });
+  }
+  picker.querySelector(".pair-sel-row").innerHTML = `<option value="">（行設問）</option>${optsHtml}`;
+  picker.querySelector(".pair-sel-col").innerHTML = `<option value="">（列＝軸設問）</option>${optsHtml}`;
+
+  const pairs = AppState.step3AttrCrossPairs;
+  if (!pairs.length) {
+    list.innerHTML = `<div style="color:var(--color-text-muted); font-size:.82rem">クロス集計ペアが未追加です</div>`;
+  } else {
+    list.innerHTML = pairs.map((p, idx) => {
+      const rowText = _getAxisSelectorLabel(p.rowCode).text;
+      const colText = _getAxisSelectorLabel(p.colCode).text;
+      return `<span class="step3-bd-pill">${_esc(rowText)} × ${_esc(colText)}<button type="button" class="step3-bd-remove" data-idx="${idx}">×</button></span>`;
+    }).join("");
+  }
+
+  if (!list._pairListInitialized) {
+    list._pairListInitialized = true;
+    list.addEventListener("click", e => {
+      const btn = e.target.closest(".step3-bd-remove");
+      if (!btn) return;
+      const idx = Number(btn.dataset.idx);
+      setStep3AttrCrossPairs(AppState.step3AttrCrossPairs.filter((_, i) => i !== idx));
+    });
+  }
+}
+
+
+/** 平均点分析: 選択肢ラベル先頭の数値を自動抽出する（例: "0 まったく幸せを感じない" → 0）。 */
+function _extractRawScore(choiceText) {
+  const m = /^\s*(-?\d+(?:\.\d+)?)/.exec(choiceText ?? "");
+  return m ? parseFloat(m[1]) : null;
+}
+
+/**
+ * 「データの満点/最低値」→「表示する満点/最低点」の換算。
+ * calcMethod: "linear"=線形換算（既定） / "raw"=選択肢の数値をそのまま使う / "manual"=自動換算しない。
+ */
+function _convertScore(raw, scaleSettings) {
+  if (raw === null || raw === undefined || Number.isNaN(raw)) return null;
+  if (scaleSettings.calcMethod === "raw") return raw;
+  if (scaleSettings.calcMethod === "manual") return null;
+  const { dataMin, dataMax, displayMin, displayMax, direction } = scaleSettings;
+  const span = dataMax - dataMin;
+  if (span === 0) return displayMin;
+  const ratio = (raw - dataMin) / span;
+  const converted = direction === "reverse"
+    ? displayMax - ratio * (displayMax - displayMin)
+    : ratio * (displayMax - displayMin) + displayMin;
+  return Math.round(converted * 10) / 10;
+}
+
+/** 満点のデフォルトは選択肢ラベルから抽出できた数値の最大値。最低値は常に0（詳細設定で変更可）。 */
+function _defaultScaleSettings(choices) {
+  const rawScores = choices.map(c => _extractRawScore(c.choice_text)).filter(v => v !== null);
+  const dataMax = rawScores.length ? Math.max(...rawScores) : Math.max(choices.length - 1, 1);
+  return { dataMax, displayMax: dataMax, direction: "forward", dataMin: 0, displayMin: 0, calcMethod: "linear" };
+}
+
+function _buildChoiceScores(choices, scaleSettings, prevScores = []) {
+  const prevMap = Object.fromEntries(prevScores.map(c => [c.choiceText, c]));
+  return choices.map(c => {
+    const prev = prevMap[c.choice_text];
+    const rawScore = _extractRawScore(c.choice_text);
+    const convertedScore = _convertScore(rawScore, scaleSettings);
+    const manualScore = prev?.manualScore ?? null;
+    const excludeFlag = prev?.excludeFlag ?? false;
+    // ラベルから数値を抽出できない選択肢（無回答/わからない等）はデフォルトで欠損扱いにする
+    const missingFlag = prev ? prev.missingFlag : (rawScore === null);
+    const finalScore = (manualScore !== null && manualScore !== undefined) ? manualScore : convertedScore;
+    return { choiceText: c.choice_text, rawScore, convertedScore, manualScore, finalScore, excludeFlag, missingFlag };
+  });
+}
+
+function _buildAvgTargetEntry(code, qMap) {
+  const choices = qMap[code]?.choices ?? [];
+  return { code, scaleSettings: _defaultScaleSettings(choices), choiceScores: [] };
+}
+
+function _buildAvgScoreTableHtml(t, idx) {
+  const rows = t.choiceScores.map(c => `
+    <tr${(c.excludeFlag || c.missingFlag) ? ' style="opacity:.55"' : ""}>
+      <td style="padding:2px 8px; font-size:.82rem">${_esc(c.choiceText)}</td>
+      <td style="padding:2px 8px; font-size:.82rem; text-align:right">${c.rawScore ?? "-"}</td>
+      <td style="padding:2px 8px; font-size:.82rem; text-align:right">${c.convertedScore ?? "-"}</td>
+      <td style="padding:2px 8px"><input type="number" class="step3-avg-manual-input" data-idx="${idx}" data-choice="${_esc(c.choiceText)}" value="${c.manualScore ?? ""}" step="0.1" style="width:70px" placeholder="(表示点)"></td>
+      <td style="padding:2px 8px; font-size:.82rem; text-align:right; font-weight:600">${c.finalScore ?? "-"}</td>
+      <td style="padding:2px 8px; text-align:center"><input type="checkbox" class="step3-avg-exclude-input" data-idx="${idx}" data-choice="${_esc(c.choiceText)}" ${c.excludeFlag ? "checked" : ""}></td>
+      <td style="padding:2px 8px; text-align:center"><input type="checkbox" class="step3-avg-missing-input" data-idx="${idx}" data-choice="${_esc(c.choiceText)}" ${c.missingFlag ? "checked" : ""}></td>
+    </tr>`).join("");
+
+  return `
+    <table style="border-collapse:collapse; font-size:.8rem; margin-top:10px">
+      <thead><tr>
+        <th style="padding:2px 8px; text-align:left">選択肢</th>
+        <th style="padding:2px 8px">元の点数</th>
+        <th style="padding:2px 8px">表示点</th>
+        <th style="padding:2px 8px">手動修正</th>
+        <th style="padding:2px 8px">最終的に使う点数</th>
+        <th style="padding:2px 8px">除外</th>
+        <th style="padding:2px 8px">欠損</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _renderAverageTargetSettings() {
+  const el = document.getElementById("step3-avg-target-settings");
+  if (!el) return;
+  const targets = AppState.step3AvgTargets;
+  if (!targets.length) {
+    el.innerHTML = `<div style="color:var(--color-text-muted); font-size:.82rem">対象設問を選択すると、スコアの設定が表示されます</div>`;
+    return;
+  }
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+
+  const STD_OPTIONS = [5, 7, 10, 100];
+  el.innerHTML = targets.map((t, idx) => {
+    const q = qMap[t.code];
+    const s = t.scaleSettings;
+    // displayMax に最も近い標準値を初期選択
+    const nearestOpt = STD_OPTIONS.reduce((a, b) =>
+      Math.abs(b - s.displayMax) < Math.abs(a - s.displayMax) ? b : a
+    );
+    const selOpt = v => v === nearestOpt ? " selected" : "";
+    const tableSection = t.choiceScores.length ? `
+      <details class="step3-filter-details" style="margin-top:8px">
+        <summary class="step3-filter-summary">点数表を確認・修正</summary>
+        <div style="overflow-x:auto">${_buildAvgScoreTableHtml(t, idx)}</div>
+      </details>` : "";
+
+    return `
+      <div class="card" style="margin-bottom:8px">
+        <div class="card-body" style="padding:10px 16px">
+          <div style="font-weight:600; font-size:.9rem; margin-bottom:8px">${_esc(q?.question_text ?? t.code)}</div>
+          <div style="font-size:.86rem">
+            何点満点で出力？
+            <select class="step3-avg-displaymax-select step3-config-select" data-idx="${idx}" style="width:auto; display:inline-block; margin-left:4px">
+              <option value="5"${selOpt(5)}>5点満点</option>
+              <option value="7"${selOpt(7)}>7点満点</option>
+              <option value="10"${selOpt(10)}>10点満点</option>
+              <option value="100"${selOpt(100)}>100点満点</option>
+            </select>
+          </div>
+          ${tableSection}
+        </div>
+      </div>`;
+  }).join("");
+
+  if (!el._avgInitialized) {
+    el._avgInitialized = true;
+
+    el.addEventListener("change", e => {
+      const idx = Number(e.target.dataset.idx);
+      if (Number.isNaN(idx)) return;
+      const targets = [...AppState.step3AvgTargets];
+      const t = {
+        ...targets[idx],
+        scaleSettings: { ...targets[idx].scaleSettings },
+        choiceScores: targets[idx].choiceScores.map(c => ({ ...c })),
+      };
+
+      if (e.target.classList.contains("step3-avg-displaymax-select")) {
+        t.scaleSettings.displayMax = parseFloat(e.target.value);
+        // choiceScores を再計算（手動修正は保持）
+        const qMap2 = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+        const choices = qMap2[t.code]?.choices ?? [];
+        if (t.choiceScores.length) {
+          t.choiceScores = _buildChoiceScores(choices, t.scaleSettings, t.choiceScores);
+        }
+      } else if (e.target.classList.contains("step3-avg-manual-input")) {
+        const c = t.choiceScores.find(c => c.choiceText === e.target.dataset.choice);
+        if (c) {
+          const v = e.target.value === "" ? null : parseFloat(e.target.value);
+          c.manualScore = v;
+          c.finalScore = v !== null ? v : c.convertedScore;
+        }
+      } else if (e.target.classList.contains("step3-avg-exclude-input")) {
+        const c = t.choiceScores.find(c => c.choiceText === e.target.dataset.choice);
+        if (c) c.excludeFlag = e.target.checked;
+      } else if (e.target.classList.contains("step3-avg-missing-input")) {
+        const c = t.choiceScores.find(c => c.choiceText === e.target.dataset.choice);
+        if (c) c.missingFlag = e.target.checked;
+      } else {
+        return;
+      }
+      targets[idx] = t;
+      setStep3AvgTargets(targets);
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// セクション0-G: 特定分析 パネル描画
+// ---------------------------------------------------------------------------
+
+let _attrAutoGuessedFor = null;
+
+function _renderAttributePanel() {
+  const candidates = _getAxisCandidates();
+
+  if (_attrAutoGuessedFor !== AppState.sessionToken) {
+    _attrAutoGuessedFor = AppState.sessionToken;
+    if (!AppState.step3AttrSimpleCodes.length) {
+      const guessed = _guessAttributeCandidates(candidates);
+      const codes = [...new Set(guessed.flatMap(g => g.codes))];
+      if (codes.length) setStep3AttrSimpleCodes(codes);
+    }
+  }
+
+  _buildGenericCheckboxes(
+    "step3-attr-simple-checkboxes", candidates, AppState.step3AttrSimpleCodes, setStep3AttrSimpleCodes,
+  );
+
+  _renderCrossPairPicker("step3-attr-pair-picker", "step3-attr-pairs-list", candidates);
+
+  const genBtn = document.getElementById("step3-attr-generate-btn");
+  if (genBtn && !genBtn._genInitialized) {
+    genBtn._genInitialized = true;
+    genBtn.addEventListener("click", () => _runAttributeAnalysis());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ファン度分析: 設問自動検出（新ファン度/旧ファン度）
+// ---------------------------------------------------------------------------
+// あいまい一致用キーワード（ユーザー指定の正本）。括弧内のブランド名は調査ごとに
+// 変化するため、キーワード自体にはブランド名を含めない。
+
+const _FAN_DETECT_KEYWORDS = {
+  new_favorability: ["についてどのように思いますか", "率直なご感想"],
+  new_support:      ["これからも応援し続けたい"],
+  old_favorability: ["現在", "に対してどのように思っていますか"],
+  old_stage:        ["あなたは今", "ファンになっていますか"],
+};
+
+/** 設問文から記号・空白・改行を除いた正規化テキストを返す（ブランド名挿入による表記揺れを吸収）。 */
+function _normalizeFanQuestionText(text) {
+  return (text ?? "")
+    .replace(/[「」『』【】（）()［］\[\]]/g, "")
+    .replace(/[\s　、。！？!?]/g, "");
+}
+
+/** roleキーワードに対する設問のあいまい一致スコア（マッチしたキーワード数）を返す。 */
+function _fanDetectScore(questionText, role) {
+  const normalized = _normalizeFanQuestionText(questionText);
+  return (_FAN_DETECT_KEYWORDS[role] ?? [])
+    .filter(kw => (questionText ?? "").includes(kw) || normalized.includes(_normalizeFanQuestionText(kw)))
+    .length;
+}
+
+/** roleに対する候補設問コードをスコア降順で返す。 */
+function _fanDetectCandidates(candidates, role) {
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  return candidates
+    .map(code => ({ code, score: _fanDetectScore(qMap[code]?.question_text ?? "", role) }))
+    .filter(c => c.score > 0)
+    .sort((a, b) => b.score - a.score);
+}
+
+function _fanBestCandidate(candidates, role) {
+  return _fanDetectCandidates(candidates, role)[0]?.code ?? "";
+}
+
+/** 自動判定: 設問文から新ファン度/旧ファン度どちらの可能性が高いかを推定する（検出不能なら""）。 */
+function _fanGuessType(candidates) {
+  const newFav = _fanDetectCandidates(candidates, "new_favorability");
+  const newSup = _fanDetectCandidates(candidates, "new_support");
+  const oldFav = _fanDetectCandidates(candidates, "old_favorability");
+  const oldStage = _fanDetectCandidates(candidates, "old_stage");
+
+  const newViable = newFav.length > 0 && newSup.length > 0;
+  const oldViable = oldFav.length > 0 && oldStage.length > 0;
+  if (!newViable && !oldViable) return "";
+
+  const newScore = (newFav[0]?.score ?? 0) + (newSup[0]?.score ?? 0);
+  const oldScore = (oldFav[0]?.score ?? 0) + (oldStage[0]?.score ?? 0);
+  if (newViable && oldViable) return newScore >= oldScore ? "new" : "old";
+  return newViable ? "new" : "old";
+}
+
+/** "auto"の場合は推定結果（検出不能時は"new"）に解決し、それ以外はそのまま返す。 */
+function _fanEffectiveType(candidates) {
+  if (AppState.step3FanDegreeType !== "auto") return AppState.step3FanDegreeType;
+  return _fanGuessType(candidates) || "new";
+}
+
+/** 判定方式の確定 or 変更時に、行・列設問を自動検出して反映する（カスタムは対象外）。 */
+function _fanAutoDetect(candidates) {
+  const type = _fanEffectiveType(candidates);
+  if (type === "old") {
+    setStep3FanRowCode(_fanBestCandidate(candidates, "old_favorability"));
+    setStep3FanColCode(_fanBestCandidate(candidates, "old_stage"));
+  } else if (type === "new") {
+    setStep3FanRowCode(_fanBestCandidate(candidates, "new_favorability"));
+    setStep3FanColCode(_fanBestCandidate(candidates, "new_support"));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ファン度分析: 判定マトリクスの初期値作成
+// ---------------------------------------------------------------------------
+
+// 正式なファン度ラベルはこの5種＋除外のみ。「非ファン」は表記揺れになるため使用しない（すべて「未ファン」に統一）。
+const FAN_DEGREE_LABEL_OPTIONS = ["コアファン", "ファン", "ライトファン", "未ファン", "除外"];
+
+/** 旧仕様の「非ファン」をどこから読み込んでも「未ファン」へ統一する（保存・集計・表示前の最終防衛線）。 */
+function _normalizeFanLabel(label) {
+  return label === "非ファン" ? "未ファン" : label;
+}
+
+const _FAN_OLD_FAVORABILITY_ORDER = [
+  "「愛がある」と言えるほど", "大好き", "好き", "まあまあ好き",
+  "好きでも嫌いでもない", "あまり好きではない", "正直言って好きではない",
+];
+const _FAN_OLD_STAGE_ORDER = [
+  "ファンではない", "ファンになりたて、これから", "これからもずっと継続したい",
+  "これまで以上に、夢中に", "もっと関わりたい、積極的に", "もはや人生の一部、未来を共につくりたい",
+];
+
+// 旧ファン度: 好意度(行)×ファンステージ(列)の初期判定ルール（ユーザー指定の正本）。
+// 好意度が「まあまあ好き」「好きでも嫌いでもない」「あまり好きではない」「正直言って
+// 好きではない」はいずれも列に関わらず未ファン（行ブランケット優先。「非ファン」は使わない）。
+// ファンステージが「ファンではない」は、明示ルールが無い行では未ファンにフォールバックする。
+const _FAN_OLD_RULE_TABLE = {
+  "「愛がある」と言えるほど": {
+    "ファンになりたて、これから": "ファン", "これからもずっと継続したい": "ファン",
+    "これまで以上に、夢中に": "コアファン", "もっと関わりたい、積極的に": "コアファン",
+    "もはや人生の一部、未来を共につくりたい": "コアファン",
+  },
+  "大好き": {
+    "ファンになりたて、これから": "ライトファン",
+    "これからもずっと継続したい": "ファン", "これまで以上に、夢中に": "ファン", "もっと関わりたい、積極的に": "ファン",
+    "もはや人生の一部、未来を共につくりたい": "コアファン",
+  },
+  "好き": {
+    "ファンになりたて、これから": "未ファン",
+    "これからもずっと継続したい": "ライトファン", "これまで以上に、夢中に": "ライトファン",
+    "もっと関わりたい、積極的に": "ファン", "もはや人生の一部、未来を共につくりたい": "ファン",
+  },
+};
+
+const _FAN_OLD_UNFAN_FAVORABILITY = new Set([
+  "まあまあ好き", "好きでも嫌いでもない", "あまり好きではない", "正直言って好きではない",
+]);
+
+function _fanOldDefaultLabel(rowVal, colVal) {
+  if (_FAN_OLD_UNFAN_FAVORABILITY.has(rowVal)) return "未ファン";
+  return _FAN_OLD_RULE_TABLE[rowVal]?.[colVal] ?? "未ファン";
+}
+
+/** 実際の選択肢配列を正準順リストへ位置合わせする（完全一致優先、フォールバックは並び順）。 */
+function _alignToCanonicalOrder(actual, canonicalOrder) {
+  return actual.map((text, i) => (canonicalOrder.includes(text) ? text : (canonicalOrder[i] ?? null)));
+}
+
+function _buildFanOldMatrix(rowChoices, colChoices) {
+  const rowCanon = _alignToCanonicalOrder(rowChoices, _FAN_OLD_FAVORABILITY_ORDER);
+  const colCanon = _alignToCanonicalOrder(colChoices, _FAN_OLD_STAGE_ORDER);
+  const cells = [];
+  rowChoices.forEach((rowVal, ri) => {
+    colChoices.forEach((colVal, ci) => {
+      cells.push({ rowValue: rowVal, colValue: colVal, label: _fanOldDefaultLabel(rowCanon[ri], colCanon[ci]) });
+    });
+  });
+  return cells;
+}
+
+// 新ファン度: 好意度×応援意向の最も好意的なセル（左上隅）を中心に、同心の正方形リングを
+// コアファン→ファン→ライトファンの順に広げるユーザー指定の初期マトリクス（参考画像の正本）。
+// rowRank/colRank は1=最も好意的。ring=0は1セル、ring=1は3セル、ring=2は5セルのL字帯になる。
+function _fanNewDefaultLabel(rowRank, colRank, nRow, nCol) {
+  // 好意度・応援意向のいずれかが下位2段（最も非好意的側）に該当する場合は無条件で未ファン。
+  if (nRow - rowRank <= 1 || nCol - colRank <= 1) return "未ファン";
+  const ring = Math.max(rowRank, colRank) - 1;
+  if (ring === 0) return "コアファン";
+  if (ring === 1) return "ファン";
+  if (ring === 2) return "ライトファン";
+  return "未ファン";
+}
+
+function _buildFanNewMatrix(rowChoices, colChoices) {
+  const nRow = rowChoices.length, nCol = colChoices.length;
+  const cells = [];
+  rowChoices.forEach((rowVal, ri) => {
+    colChoices.forEach((colVal, ci) => {
+      cells.push({ rowValue: rowVal, colValue: colVal, label: _fanNewDefaultLabel(ri + 1, ci + 1, nRow, nCol) });
+    });
+  });
+  return cells;
+}
+
+// カスタム: 軸の意味が不定のため、安全な中立値（未ファン）を初期値とし手動修正を促す。
+function _buildFanCustomMatrix(rowChoices, colChoices) {
+  const cells = [];
+  rowChoices.forEach(rowVal => {
+    colChoices.forEach(colVal => cells.push({ rowValue: rowVal, colValue: colVal, label: "未ファン" }));
+  });
+  return cells;
+}
+
+function _buildFanDefaultMatrix(fanDegreeType, rowChoices, colChoices) {
+  if (fanDegreeType === "old") return _buildFanOldMatrix(rowChoices, colChoices);
+  if (fanDegreeType === "custom") return _buildFanCustomMatrix(rowChoices, colChoices);
+  return _buildFanNewMatrix(rowChoices, colChoices);
+}
+
+// ---------------------------------------------------------------------------
+// ファン度分析: 判定マトリクス編集UI
+// ---------------------------------------------------------------------------
+
+function _fanMatrixOptionsHtml(selectedLabel) {
+  const blank = `<option value=""${selectedLabel ? "" : " selected"}>（未設定）</option>`;
+  const opts = FAN_DEGREE_LABEL_OPTIONS.map(lbl =>
+    `<option value="${_esc(lbl)}"${lbl === selectedLabel ? " selected" : ""}>${_esc(lbl)}</option>`
+  ).join("");
+  return blank + opts;
+}
+
+function _renderFanMatrixEditor(containerId, rowCode, colCode, matrix) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!rowCode || !colCode) {
+    el.innerHTML = `<div style="color:var(--color-text-muted); font-size:.82rem">縦軸・横軸の設問を選択するとマトリクスが表示されます</div>`;
+    return;
+  }
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  const rowChoices = (qMap[rowCode]?.choices ?? []).map(c => c.choice_text);
+  const colChoices = (qMap[colCode]?.choices ?? []).map(c => c.choice_text);
+  if (!rowChoices.length || !colChoices.length) {
+    el.innerHTML = `<div style="color:var(--color-text-muted); font-size:.82rem">選択肢が見つかりません</div>`;
+    return;
+  }
+
+  const lookup = new Map(matrix.map(c => [`${c.rowValue} ${c.colValue}`, _normalizeFanLabel(c.label)]));
+  const headerCells = colChoices.map(c => `<th class="step3-fan-matrix-th">${_esc(c)}</th>`).join("");
+  const bodyRows = rowChoices.map(rowVal => {
+    const cells = colChoices.map(colVal => {
+      const label = lookup.get(`${rowVal} ${colVal}`) ?? "";
+      const bg = FIXED_PALETTES.fan_label.colorFor(label) ?? "#FFFFFF";
+      return `<td class="step3-fan-matrix-td">
+        <select class="step3-fan-matrix-select" data-row="${_esc(rowVal)}" data-col="${_esc(colVal)}" style="background-color:${bg}">
+          ${_fanMatrixOptionsHtml(label)}
+        </select>
+      </td>`;
+    }).join("");
+    return `<tr><th class="step3-fan-matrix-th step3-fan-matrix-rowth">${_esc(rowVal)}</th>${cells}</tr>`;
+  }).join("");
+
+  el.innerHTML = `<div class="step3-fan-matrix-wrap"><table class="step3-fan-matrix-table">
+    <thead><tr><th class="step3-fan-matrix-corner"></th>${headerCells}</tr></thead>
+    <tbody>${bodyRows}</tbody>
+  </table></div>`;
+
+  if (!el._fanMatrixInitialized) {
+    el._fanMatrixInitialized = true;
+    el.addEventListener("change", e => {
+      const sel = e.target.closest(".step3-fan-matrix-select");
+      if (!sel) return;
+      const { row: rowVal, col: colVal } = sel.dataset;
+      const next = AppState.step3FanMatrix.map(c =>
+        (c.rowValue === rowVal && c.colValue === colVal) ? { ...c, label: sel.value } : c
+      );
+      setStep3FanMatrix(next);
+      sel.style.backgroundColor = FIXED_PALETTES.fan_label.colorFor(sel.value) ?? "#FFFFFF";
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ファン度分析: 分母（絞り込み）設定UI
+// ---------------------------------------------------------------------------
+
+function _renderFanDenominatorSection(candidates) {
+  const sel = document.getElementById("step3-fan-denominator-select");
+  if (sel) {
+    sel.value = AppState.step3FanDenominatorMode;
+    if (!sel._fanDenomInitialized) {
+      sel._fanDenomInitialized = true;
+      sel.addEventListener("change", () => setStep3FanDenominatorMode(sel.value));
+    }
+  }
+
+  const filterSection = document.getElementById("step3-fan-filter-section");
+  if (filterSection) filterSection.style.display = AppState.step3FanDenominatorMode === "filtered" ? "" : "none";
+
+  const filterColSel = document.getElementById("step3-fan-filter-column");
+  if (filterColSel) {
+    filterColSel.innerHTML = `<option value="">（絞り込み列を選択）</option>${_buildAxisSelectOptions(candidates, AppState.step3FanFilterColumn, false)}`;
+    if (!filterColSel._fanFilterColInitialized) {
+      filterColSel._fanFilterColInitialized = true;
+      filterColSel.addEventListener("change", () => setStep3FanFilterColumn(filterColSel.value));
+    }
+  }
+
+  const valuesEl = document.getElementById("step3-fan-filter-values");
+  if (valuesEl) {
+    const col = AppState.step3FanFilterColumn;
+    const values = getTargetValues(col);
+    const selected = new Set(AppState.step3FanFilterValues);
+    valuesEl.innerHTML = (!col || !values.length)
+      ? `<div style="color:var(--color-text-muted); font-size:.78rem">絞り込み列を選択してください</div>`
+      : values.map(v => `
+          <label class="step3-target-cb-item">
+            <input type="checkbox" value="${_esc(v)}" ${selected.has(v) ? "checked" : ""}>
+            <span>${_esc(v)}</span>
+          </label>`).join("");
+    if (!valuesEl._fanFilterValInitialized) {
+      valuesEl._fanFilterValInitialized = true;
+      valuesEl.addEventListener("change", e => {
+        const cb = e.target.closest("input[type=checkbox]");
+        if (!cb) return;
+        const cur = new Set(AppState.step3FanFilterValues);
+        cb.checked ? cur.add(cb.value) : cur.delete(cb.value);
+        setStep3FanFilterValues([...cur]);
+      });
+    }
+  }
+}
+
+let _fanAutoGuessedFor = null;
+let _fanMatrixBuiltFor = "";
+
+function _renderFanPanel() {
+  const allCandidates = _getAxisCandidates();
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  const candidates = allCandidates.filter(code => _SCALE_TYPES.has((qMap[code]?.type_code ?? "").toUpperCase()));
+
+  // 自動判定: セッションが変わった直後で行・列が未選択の場合のみ自動検出する
+  if (_fanAutoGuessedFor !== AppState.sessionToken) {
+    _fanAutoGuessedFor = AppState.sessionToken;
+    if (!AppState.step3FanRowCode && !AppState.step3FanColCode) {
+      _fanAutoDetect(candidates);
+    }
+  }
+
+  const typeSel = document.getElementById("step3-fan-type-select");
+  if (typeSel) {
+    typeSel.value = AppState.step3FanDegreeType;
+    if (!typeSel._fanTypeInitialized) {
+      typeSel._fanTypeInitialized = true;
+      typeSel.addEventListener("change", () => {
+        setStep3FanDegreeType(typeSel.value);
+        setStep3FanRowCode("");
+        setStep3FanColCode("");
+        _fanAutoDetect(candidates);
+      });
+    }
+  }
+
+  const effectiveType = _fanEffectiveType(candidates);
+
+  const hintEl = document.getElementById("step3-fan-detect-hint");
+  if (hintEl) {
+    if (AppState.step3FanDegreeType !== "auto") {
+      hintEl.textContent = "";
+    } else {
+      const guessed = _fanGuessType(candidates);
+      hintEl.textContent = guessed
+        ? `自動判定: ${guessed === "old" ? "旧ファン度（好意度×ファンステージ）" : "新ファン度（好意度×応援意向）"}として検出しました。設問は下のプルダウンで変更できます。`
+        : "自動検出できませんでした。判定方式または設問を手動で選択してください。";
+    }
+  }
+
+  const rowLabelEl = document.getElementById("step3-fan-row-label");
+  const colLabelEl = document.getElementById("step3-fan-col-label");
+  if (effectiveType === "old") {
+    if (rowLabelEl) rowLabelEl.textContent = "好意度設問";
+    if (colLabelEl) colLabelEl.textContent = "ファンステージ設問";
+  } else if (effectiveType === "custom") {
+    if (rowLabelEl) rowLabelEl.textContent = "縦軸に使う設問";
+    if (colLabelEl) colLabelEl.textContent = "横軸に使う設問";
+  } else {
+    if (rowLabelEl) rowLabelEl.textContent = "好意度設問";
+    if (colLabelEl) colLabelEl.textContent = "応援意向設問";
+  }
+
+  const rowSel = document.getElementById("step3-fan-row-select");
+  if (rowSel) {
+    rowSel.innerHTML = _buildAxisSelectOptions(candidates, AppState.step3FanRowCode, true, "（未選択）");
+    if (!rowSel._fanRowInitialized) {
+      rowSel._fanRowInitialized = true;
+      rowSel.addEventListener("change", () => setStep3FanRowCode(rowSel.value));
+    }
+  }
+  const colSel = document.getElementById("step3-fan-col-select");
+  if (colSel) {
+    colSel.innerHTML = _buildAxisSelectOptions(candidates, AppState.step3FanColCode, true, "（未選択）");
+    if (!colSel._fanColInitialized) {
+      colSel._fanColInitialized = true;
+      colSel.addEventListener("change", () => setStep3FanColCode(colSel.value));
+    }
+  }
+
+  // type/row/colの組が変わったときだけ初期マトリクスを作り直す（手動編集を保持するため）
+  const matrixKey = `${effectiveType}|${AppState.step3FanRowCode}|${AppState.step3FanColCode}`;
+  if (AppState.step3FanRowCode && AppState.step3FanColCode && _fanMatrixBuiltFor !== matrixKey) {
+    _fanMatrixBuiltFor = matrixKey;
+    const rowChoices = (qMap[AppState.step3FanRowCode]?.choices ?? []).map(c => c.choice_text);
+    const colChoices = (qMap[AppState.step3FanColCode]?.choices ?? []).map(c => c.choice_text);
+    setStep3FanMatrix(_buildFanDefaultMatrix(effectiveType, rowChoices, colChoices));
+  }
+  _renderFanMatrixEditor("step3-fan-matrix-editor", AppState.step3FanRowCode, AppState.step3FanColCode, AppState.step3FanMatrix);
+
+  _renderFanDenominatorSection(allCandidates);
+
+  const genBtn = document.getElementById("step3-fan-generate-btn");
+  if (genBtn && !genBtn._genInitialized) {
+    genBtn._genInitialized = true;
+    genBtn.addEventListener("click", () => _runFanAnalysis());
+  }
+}
+
+function _renderAveragePanel() {
+  const candidates = _getAxisCandidates();
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  const avgCandidates = candidates.filter(code => _SCALE_TYPES.has((qMap[code]?.type_code ?? "").toUpperCase()));
+
+  // 初回表示時のみ「幸せを感じますか」を含む設問を自動選択
+  if (!AppState.step3AvgTargets.length) {
+    const defaultCode = avgCandidates.find(code =>
+      (qMap[code]?.question_text ?? "").includes("幸せを感じますか")
+    );
+    if (defaultCode) setStep3AvgTargets([_buildAvgTargetEntry(defaultCode, qMap)]);
+  }
+
+  _buildGenericCheckboxes(
+    "step3-avg-target-checkboxes", avgCandidates, AppState.step3AvgTargets.map(t => t.code),
+    (newCodes) => {
+      const cur = AppState.step3AvgTargets;
+      const next = newCodes.map(code => cur.find(t => t.code === code) ?? _buildAvgTargetEntry(code, qMap));
+      setStep3AvgTargets(next);
+    },
+  );
+
+  _renderAverageTargetSettings();
+
+  const genBtn = document.getElementById("step3-avg-generate-btn");
+  if (genBtn && !genBtn._genInitialized) {
+    genBtn._genInitialized = true;
+    genBtn.addEventListener("click", () => _runAverageAnalysis());
+  }
+}
+
+// ---------------------------------------------------------------------------
+// セクション0-H: 特定分析 実行・結果切替
+// ---------------------------------------------------------------------------
+
+let _specialBlocks = [];
+let _fanLastResponse = null;  // 直前のファン度分析API応答全体（summary/matrix/respondent_rows等。エクスポート用に保持）
+let _currentSpecialModeTag = "";  // 現在表示中の特定分析の種別（"attribute_analysis" | "fan_analysis" | "average_analysis"）
+
+async function _runAttributeAnalysis() {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const simpleCodes = AppState.step3AttrSimpleCodes;
+  const pairs = AppState.step3AttrCrossPairs;
+  if (!simpleCodes.length && !pairs.length) {
+    showToast("単純集計の対象設問、またはクロス集計ペアを1つ以上指定してください");
+    return;
+  }
+  await _runSpecialAnalysis(
+    () => generateAttributeAnalysis(sessionToken, simpleCodes, pairs),
+    "attribute_analysis",
+  );
+}
+
+async function _runFanAnalysis() {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const rowCode = AppState.step3FanRowCode;
+  const colCode = AppState.step3FanColCode;
+  if (!rowCode || !colCode) { showToast("縦軸・横軸の設問を選択してください"); return; }
+  if (!AppState.step3FanMatrix.length) { showToast("判定マトリクスが未作成です"); return; }
+
+  const candidates = _getAxisCandidates();
+  const effectiveType = _fanEffectiveType(candidates);
+
+  await _runSpecialAnalysis(
+    () => generateFanAnalysis(
+      sessionToken, effectiveType, rowCode, colCode, AppState.step3FanMatrix,
+      AppState.step3FanDenominatorMode, AppState.step3FanFilterColumn, AppState.step3FanFilterValues,
+    ),
+    "fan_analysis",
+  );
+}
+
+async function _runAverageAnalysis() {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const targets = AppState.step3AvgTargets;
+  if (!targets.length) { showToast("対象設問を1つ以上選択してください"); return; }
+
+  // 点数表を自動作成（既存エントリは手動修正を維持）
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+  const filled = targets.map(t => {
+    if (t.choiceScores.length) return t;
+    const choices = qMap[t.code]?.choices ?? [];
+    return { ...t, choiceScores: _buildChoiceScores(choices, t.scaleSettings) };
+  });
+  setStep3AvgTargets(filled);
+
+  await _runSpecialAnalysis(
+    () => generateAverageAnalysis(sessionToken, filled),
+    "average_analysis",
+  );
+}
+
+async function _runSpecialAnalysis(apiCall, modeTag) {
+  const progressEl = document.getElementById("step3-progress");
+  const progressMsg = document.getElementById("step3-progress-msg");
+  if (progressEl) progressEl.style.display = "";
+  if (progressMsg) progressMsg.textContent = "⏳ 集計中…";
+  _destroyAllCharts();
+  _clearPendingChartRenders();
+  try {
+    const data = await apiCall();
+    await _displaySpecialBlocks(data, modeTag);
+    const currentMode = AppState.step3Mode;
+    if (["attribute", "fan", "average"].includes(currentMode)) {
+      _specialModeResultCache[currentMode] = { data, modeTag };
+    }
+  } catch (err) {
+    showToast(err.message ?? "分析の実行に失敗しました。");
+  } finally {
+    if (progressEl) progressEl.style.display = "none";
+  }
+}
+
+async function _displaySpecialBlocks(data, modeTag) {
+  const blocks = data.blocks ?? [];
+  const warnings = data.warnings ?? [];
+  const nav = document.getElementById("step3-special-blocks-nav");
+  const resultsEl = document.getElementById("step3-results");
+  const placeholder = document.getElementById("step3-placeholder");
+  if (!resultsEl) return;
+
+  warnings.forEach(w => showToast(w));
+
+  _fanLastResponse = modeTag === "fan_analysis" ? data : null;
+
+  if (!blocks.length) {
+    showToast("結果が生成されませんでした。設定を確認してください。");
+    if (nav) { nav.hidden = true; nav.innerHTML = ""; }
+    _renderFanSummaryPanel(null);
+    return;
+  }
+
+  _specialBlocks = blocks;
+  _currentSpecialModeTag = modeTag;
+  _renderFanSummaryPanel(_fanLastResponse);
+
+  // ファン度分析は常に全体集計1ブロックのみのため、切替不要な単一タブのナビは表示しない
+  if (nav && modeTag === "fan_analysis") {
+    nav.hidden = true;
+    nav.innerHTML = "";
+  } else if (nav) {
+    nav.hidden = false;
+    nav.innerHTML = `<div class="step3-mode-tabs">${
+      blocks.map((b, idx) =>
+        `<button type="button" class="step3-mode-tab${idx === 0 ? " active" : ""}" data-idx="${idx}">${_esc(b.block_label)}</button>`
+      ).join("")
+    }</div>`;
+    if (!nav._navInitialized) {
+      nav._navInitialized = true;
+      nav.addEventListener("click", e => {
+        const btn = e.target.closest(".step3-mode-tab");
+        if (!btn) return;
+        nav.querySelectorAll(".step3-mode-tab").forEach((b, i) => b.classList.toggle("active", String(i) === btn.dataset.idx));
+        _showSpecialBlock(Number(btn.dataset.idx));
+      });
+    }
+  }
+
+  if (placeholder) placeholder.style.display = "none";
+  await _showSpecialBlock(0);
+
+  // STEP4向け ChartResult 登録（全ブロック分）
+  const newChartResults = blocks.map((b, idx) => {
+    const r = b.results[0];
+    return {
+      id: `special:${modeTag}:${idx}:${r?.question_code ?? idx}`,
+      title: `${r?.question_text ?? b.block_label} × ${b.axis_question_text || b.block_label}`,
+      mode: modeTag,
+      question_code: r?.question_code ?? "",
+      question_text: r?.question_text ?? b.block_label,
+      type_code: r?.type_code ?? "SA",
+      axis_code: b.axis_question_code ?? "",
+      axis_label: b.axis_question_text ?? b.block_label,
+      axis_categories: b.axis_categories,
+      axis_totals: b.axis_totals,
+      rows: r?.rows ?? [],
+      created_at: new Date().toISOString(),
+    };
+  });
+  addChartResults(newChartResults);
+}
+
+// 平均点分析: 軸カテゴリの並び順（ブロック単位、表示専用の好みなのでプロジェクト保存はしない）
+let _avgAxisSort = {}; // { [blockLabel]: { order: "original"|"mean_desc"|"mean_asc"|"n_desc"|"manual", manualOrder: string[] } }
+
+const _AVG_SORT_LABELS = {
+  original:  "元の選択肢順",
+  mean_desc: "平均点が高い順",
+  mean_asc:  "平均点が低い順",
+  n_desc:    "N数が多い順",
+  manual:    "手動順",
+};
+
+function _sortAvgAxisStats(stats, order, manualOrder) {
+  if (order === "mean_desc") return [...stats].sort((a, b) => (b.mean ?? -Infinity) - (a.mean ?? -Infinity));
+  if (order === "mean_asc")  return [...stats].sort((a, b) => (a.mean ?? Infinity)  - (b.mean ?? Infinity));
+  if (order === "n_desc")    return [...stats].sort((a, b) => b.n_valid - a.n_valid);
+  if (order === "manual" && manualOrder?.length) {
+    const byCat = new Map(stats.map(s => [s.category, s]));
+    const ordered = manualOrder.filter(c => byCat.has(c)).map(c => byCat.get(c));
+    const rest = stats.filter(s => !manualOrder.includes(s.category));
+    return [...ordered, ...rest];
+  }
+  return stats; // "original"
+}
+
+/** 平均点分析: 統計量テーブル（属性値/n数/除外n数/平均点/標準偏差/中央値/最小値/最大値）+ 平均バーチャート。 */
+function _renderAverageStatsPanel(block) {
+  const el = document.getElementById("step3-special-stats");
+  if (!el) return;
+
+  if (!block.axis_stats?.length) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+  el.hidden = false;
+
+  const blockKey = block.block_label;
+  const sortState = _avgAxisSort[blockKey] ?? { order: "original", manualOrder: [] };
+  const sortedStats = _sortAvgAxisStats(block.axis_stats, sortState.order, sortState.manualOrder);
+  const isManual = sortState.order === "manual";
+  const isOverall = block.axis_categories?.length === 1 && block.axis_categories[0] === "全体";
+  const axisHeader = isOverall ? "属性値" : (block.axis_question_text || "属性値");
+
+  const code = block.results[0]?.question_code;
+  const target = (AppState.step3AvgTargets ?? []).find(t => t.code === code);
+  const displayMax = target?.scaleSettings?.displayMax;
+
+  const fmt = v => (v === null || v === undefined ? "-" : v.toFixed(1));
+  const rows = sortedStats.map((s, idx) => `
+    <tr>
+      ${isManual ? `
+      <td style="padding:4px 2px; white-space:nowrap">
+        <button type="button" class="report-choice-order-btn step3-avg-order-up" data-idx="${idx}" ${idx === 0 ? "disabled" : ""} title="上へ">↑</button>
+        <button type="button" class="report-choice-order-btn step3-avg-order-down" data-idx="${idx}" ${idx === sortedStats.length - 1 ? "disabled" : ""} title="下へ">↓</button>
+      </td>` : ""}
+      <td style="padding:4px 10px; font-size:.85rem">${_esc(s.category)}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${s.n_valid}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${s.n_excluded}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right; font-weight:600">${fmt(s.mean)}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${fmt(s.std)}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${fmt(s.median)}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${fmt(s.min)}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${fmt(s.max)}</td>
+    </tr>`).join("");
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-body">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px">
+          <span style="font-size:.82rem; color:var(--color-text-muted)">並び順：</span>
+          <select class="step3-config-select step3-avg-sort-select" style="max-width:200px; height:auto; min-height:unset; padding:5px 8px; font-size:.85rem">
+            ${Object.entries(_AVG_SORT_LABELS).map(([v, label]) =>
+              `<option value="${v}"${sortState.order === v ? " selected" : ""}>${_esc(label)}</option>`).join("")}
+          </select>
+        </div>
+        <table style="border-collapse:collapse; width:100%; margin-bottom:12px">
+          <thead><tr>
+            ${isManual ? `<th style="padding:4px 2px"></th>` : ""}
+            <th style="padding:4px 10px; text-align:left; font-size:.82rem">${_esc(axisHeader)}</th>
+            <th style="padding:4px 10px; font-size:.82rem">有効n数</th>
+            <th style="padding:4px 10px; font-size:.82rem">除外n数</th>
+            <th style="padding:4px 10px; font-size:.82rem">平均点</th>
+            <th style="padding:4px 10px; font-size:.82rem">標準偏差</th>
+            <th style="padding:4px 10px; font-size:.82rem">中央値</th>
+            <th style="padding:4px 10px; font-size:.82rem">最小値</th>
+            <th style="padding:4px 10px; font-size:.82rem">最大値</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="position:relative; height:240px"><canvas id="step3-avg-stats-canvas"></canvas></div>
+      </div>
+    </div>`;
+
+  el.querySelector(".step3-avg-sort-select")?.addEventListener("change", e => {
+    const order = e.target.value;
+    const manualOrder = order === "manual"
+      ? (sortState.manualOrder?.length ? sortState.manualOrder : sortedStats.map(s => s.category))
+      : sortState.manualOrder;
+    _avgAxisSort[blockKey] = { order, manualOrder };
+    _renderAverageStatsPanel(block);
+  });
+
+  if (isManual) {
+    const moveItem = (idx, dir) => {
+      const next = sortedStats.map(s => s.category);
+      const j = idx + dir;
+      if (j < 0 || j >= next.length) return;
+      [next[idx], next[j]] = [next[j], next[idx]];
+      _avgAxisSort[blockKey] = { order: "manual", manualOrder: next };
+      _renderAverageStatsPanel(block);
+    };
+    el.querySelectorAll(".step3-avg-order-up").forEach(btn =>
+      btn.addEventListener("click", () => moveItem(Number(btn.dataset.idx), -1)));
+    el.querySelectorAll(".step3-avg-order-down").forEach(btn =>
+      btn.addEventListener("click", () => moveItem(Number(btn.dataset.idx), 1)));
+  }
+
+  const canvas = document.getElementById("step3-avg-stats-canvas");
+  if (canvas) {
+    _charts.get("avg-stats-chart")?.destroy();
+    _charts.set("avg-stats-chart", new Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: sortedStats.map(s => s.category),
+        datasets: [{
+          label: "平均点",
+          data: sortedStats.map(s => s.mean),
+          backgroundColor: _getColorsForGraph(code ?? "avg", sortedStats.map(s => s.category)),
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          datalabels: {
+            display: true,
+            anchor: "end",
+            align: "top",
+            formatter: v => (v ?? 0).toFixed(1),
+            font: { size: 10 },
+            color: "#555",
+          },
+        },
+        scales: { y: { beginAtZero: true, max: displayMax } },
+      },
+    }));
+  }
+}
+
+/** ファン度分析: 集計サマリー（N数/構成比/累積%/コアファン率等）+ Excelエクスポートボタン。 */
+function _renderFanSummaryPanel(data) {
+  const el = document.getElementById("step3-fan-summary-panel");
+  if (!el) return;
+  if (!data) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+
+  const s = data.summary;
+  const denomLabel = {
+    all: "全回答者", valid: "有効回答者", excluding_undetermined: "判定不能を除く", filtered: "フィルタ後の回答者",
+  }[s.denominator_mode] ?? s.denominator_mode;
+
+  const rows = s.counts.map(c => {
+    const bg = FIXED_PALETTES.fan_label.colorFor(c.label) ?? "#FFFFFF";
+    return `<tr>
+      <td style="padding:4px 10px; font-size:.85rem"><span class="step3-fan-label-chip" style="background:${bg}">${_esc(c.label)}</span></td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${c.n}</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${c.pct.toFixed(1)}%</td>
+      <td style="padding:4px 10px; font-size:.85rem; text-align:right">${c.cum_pct.toFixed(1)}%</td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-body">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; flex-wrap:wrap; gap:8px">
+          <span class="card-title" style="margin:0">ファン度集計サマリー（分母: ${_esc(denomLabel)} n=${s.denominator_n}）</span>
+          <div style="display:flex; gap:8px">
+            <button type="button" id="step3-fan-save-axis-btn" class="btn btn-special-add btn-sm">通常分析で使う軸として追加</button>
+            <button type="button" id="step3-fan-export-btn" class="btn btn-secondary btn-sm">📥 Excel出力</button>
+          </div>
+        </div>
+        <table style="border-collapse:collapse; width:100%; margin-bottom:12px">
+          <thead><tr>
+            <th style="padding:4px 10px; text-align:left; font-size:.82rem">ファン度</th>
+            <th style="padding:4px 10px; font-size:.82rem">N</th>
+            <th style="padding:4px 10px; font-size:.82rem">%</th>
+            <th style="padding:4px 10px; font-size:.82rem">累積%</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="step3-fan-metrics">
+          <div class="step3-fan-metric"><span class="step3-fan-metric-label">コアファン率</span><span class="step3-fan-metric-value">${s.core_fan_rate.toFixed(1)}%</span></div>
+          <div class="step3-fan-metric"><span class="step3-fan-metric-label">ファン以上率</span><span class="step3-fan-metric-value">${s.fan_or_above_rate.toFixed(1)}%</span></div>
+          <div class="step3-fan-metric"><span class="step3-fan-metric-label">ライトファン以上率</span><span class="step3-fan-metric-value">${s.light_fan_or_above_rate.toFixed(1)}%</span></div>
+          <div class="step3-fan-metric"><span class="step3-fan-metric-label">判定不能数</span><span class="step3-fan-metric-value">${s.undetermined_n}</span></div>
+          <div class="step3-fan-metric"><span class="step3-fan-metric-label">除外数</span><span class="step3-fan-metric-value">${s.excluded_n}</span></div>
+        </div>
+      </div>
+    </div>`;
+
+  const exportBtn = document.getElementById("step3-fan-export-btn");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", async () => {
+      exportBtn.disabled = true;
+      try {
+        await exportFanAnalysis(_fanLastResponse);
+      } catch (err) {
+        showToast(err.message ?? "エクスポートに失敗しました。");
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+  }
+
+  const saveAxisBtn = document.getElementById("step3-fan-save-axis-btn");
+  if (saveAxisBtn) {
+    saveAxisBtn.addEventListener("click", () => _saveFanDegreeAsAxis(saveAxisBtn));
+  }
+}
+
+/**
+ * 直前のファン度判定結果（fan_degree_label + 各種フラグ）を、通常分析の集計軸・フィルタとして
+ * 使える派生属性として保存する。同じfan_degree_typeで既に保存済みの場合は上書き確認を出す。
+ */
+async function _saveFanDegreeAsAxis(btn, overwrite = false) {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const rowCode = AppState.step3FanRowCode;
+  const colCode = AppState.step3FanColCode;
+  if (!rowCode || !colCode || !AppState.step3FanMatrix.length) {
+    showToast("先にファン度分析を生成してください。");
+    return;
+  }
+  const effectiveType = _fanEffectiveType(_getAxisCandidates());
+
+  btn.disabled = true;
+  try {
+    const resp = await saveFanDegreeAsAxis(sessionToken, effectiveType, rowCode, colCode, AppState.step3FanMatrix, overwrite);
+    addDerivedAxisQuestions(resp.axis_questions);
+    showToast("ファン度を通常分析で使える軸として保存しました。通常分析の集計軸・フィルタで選択できます。");
+  } catch (err) {
+    if (err.status === 409) {
+      if (window.confirm("既にファン度の判定結果が保存されています。上書きしますか？")) {
+        btn.disabled = false;
+        await _saveFanDegreeAsAxis(btn, true);
+        return;
+      }
+    } else {
+      showToast(err.message ?? "保存に失敗しました。");
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function _saveAverageAsIndicator(target, btn, overwrite = false) {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const defaultName = (AppState.questions ?? []).find(q => q.question_code === target.code)?.question_text ?? target.code;
+  const indicatorName = window.prompt("通常分析での表示名を入力してください：", defaultName);
+  if (!indicatorName?.trim()) return;
+  btn.disabled = true;
+  try {
+    const resp = await saveAverageAsIndicator(sessionToken, target, indicatorName.trim(), overwrite);
+    addSavedIndicator(resp.indicator_question);
+    _renderNormalAnalysisAvgIndicatorSelectors();
+    showToast(`「${indicatorName.trim()}」を通常分析で使える指標として追加しました。`);
+  } catch (err) {
+    if (err.status === 409) {
+      if (window.confirm(`「${indicatorName.trim()}」は既に保存されています。上書きしますか？`)) {
+        btn.disabled = false;
+        await _saveAverageAsIndicator(target, btn, true);
+        return;
+      }
+    } else {
+      showToast(err.message ?? "平均点指標の保存に失敗しました。");
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function _saveAttributeAsAxisFromBlock(rowCode, colCode, rowText, colText, btn, overwrite = false) {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const defaultName = rowCode !== colCode ? `${rowText}×${colText}` : rowText;
+  const axisName = window.prompt("通常分析での軸名を入力してください：", defaultName);
+  if (!axisName?.trim()) return;
+  btn.disabled = true;
+  try {
+    const resp = await saveAttributeAsAxis(sessionToken, rowCode, colCode, axisName.trim(), overwrite);
+    addDerivedAxisQuestions(resp.axis_questions);
+    _renderBrandComparisonPanel();
+    _renderDeepDivePanel();
+    showToast(`「${axisName.trim()}」を通常分析で使える軸として追加しました。`);
+  } catch (err) {
+    if (err.status === 409) {
+      if (window.confirm(`「${axisName.trim()}」は既に保存されています。上書きしますか？`)) {
+        btn.disabled = false;
+        await _saveAttributeAsAxisFromBlock(rowCode, colCode, rowText, colText, btn, true);
+        return;
+      }
+    } else {
+      showToast(err.message ?? "属性軸の保存に失敗しました。");
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function _showSpecialBlock(idx) {
+  const block = _specialBlocks[idx];
+  if (!block) return;
+
+  const code = block.results[0]?.question_code;
+  if (code === "__fan_label__") {
+    const existing = AppState.step3QuestionSettings[code];
+    if (!existing || !existing.chartType) {
+      setStep3Setting(code, "chartType", "stacked100");
+    }
+  }
+
+  const cacheKey = `special:${idx}`;
+  _crosstabCache[cacheKey] = block;
+  _currentCacheKey = cacheKey;
+  _lastCrosstabData = block;
+  AppState.step3LastGeneratedAxisCode = block.axis_question_code || "";
+
+  _renderAverageStatsPanel(block);
+
+  const resultsEl = document.getElementById("step3-results");
+  if (resultsEl) {
+    await _renderResults(resultsEl, block);
+    if (block.axis_stats?.length) _wrapAsReferenceDistribution(resultsEl);
+  }
+
+  // 特定分析ごとの「通常分析へ追加」ボタンを結果の下に表示
+  _renderSpecialAddButton(block);
+}
+
+function _renderSpecialAddButton(block) {
+  const container = document.getElementById("step3-special-add-btn-area");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const modeTag = _currentSpecialModeTag;
+  const rowCode = block.results?.[0]?.question_code ?? "";
+  const colCode = block.axis_question_code ?? "";
+  const qMap = Object.fromEntries((AppState.questions ?? []).map(q => [q.question_code, q]));
+
+  if (modeTag === "average_analysis" && rowCode) {
+    const target = (AppState.step3AvgTargets ?? []).find(t => t.code === rowCode);
+    if (!target) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-special-add";
+    btn.textContent = "通常分析で使う指標として追加";
+    btn.addEventListener("click", () => _saveAverageAsIndicator(target, btn));
+    container.appendChild(btn);
+
+  } else if (modeTag === "attribute_analysis" && rowCode && colCode) {
+    const rowText = qMap[rowCode]?.question_text ?? rowCode;
+    const colText = qMap[colCode]?.question_text ?? colCode;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-special-add";
+    btn.textContent = "通常分析で使う軸として追加";
+    btn.addEventListener("click", () => _saveAttributeAsAxisFromBlock(rowCode, colCode, rowText, colText, btn));
+    container.appendChild(btn);
+  }
+}
+
+/**
+ * 平均点分析の主結果は軸別平均（_renderAverageStatsPanel）であり、選択肢分布クロス表は
+ * 補助情報に過ぎない。既存DOMノードをそのまま<details>内へ移動し、リスナーやChart.jsの
+ * canvasを保持したまま折りたたみ表示にする。
+ */
+function _wrapAsReferenceDistribution(container) {
+  if (!container.children.length) return;
+  const details = document.createElement("details");
+  details.className = "step3-filter-details";
+  const summary = document.createElement("summary");
+  summary.className = "step3-filter-summary";
+  summary.textContent = "参考：対象スコア設問の回答分布";
+  const inner = document.createElement("div");
+  inner.style.padding = "10px 12px";
+  while (container.firstChild) inner.appendChild(container.firstChild);
+  details.append(summary, inner);
+  container.appendChild(details);
 }
 
 // ---------------------------------------------------------------------------
@@ -1266,13 +2760,6 @@ async function _runStep3() {
     if (!filterColumn || !filterValues.length) { showToast("基本軸と対象を選択してください"); return; }
 
     // dive専用の追加フィルタは現在未実装（拡張余地あり）
-
-  } else { // question_comparison
-    axisCode = AppState.step3BasicAxisCode || "";
-    secAxisCode = "";
-    filterColumn = "";
-    filterValues = [];
-    if (!axisCode) { showToast("集計軸を選択してください（または「なし」のままで全体集計）"); }
   }
 
   // 旧stateを同期（キャッシュキーと ChartResult 生成のため）
@@ -1328,6 +2815,10 @@ async function _runCrosstab(setId, overrideCodes) {
     if (placeholder) placeholder.style.display = "none";
     await _renderResults(resultsEl, _crosstabCache[key]);
     _renderSidebar();
+    const _hitMode = AppState.step3Mode;
+    if (_hitMode === "brand_comparison" || _hitMode === "deep_dive") {
+      _normalModeResultCache[_hitMode] = { data: _crosstabCache[key], cacheKey: key };
+    }
     return;
   }
 
@@ -1340,7 +2831,8 @@ async function _runCrosstab(setId, overrideCodes) {
   try {
     const data = await generateCrosstab(
       AppState.sessionToken, axisCode, secAxisCode, targetCodes,
-      AppState.step3TargetFilterColumn, AppState.step3TargetFilterValues
+      AppState.step3TargetFilterColumn, AppState.step3TargetFilterValues,
+      AppState.step3AvgIndicatorCodes ?? [],
     );
     _crosstabCache[key] = data;
     _currentCacheKey = key;
@@ -1377,6 +2869,10 @@ async function _runCrosstab(setId, overrideCodes) {
     if (placeholder) placeholder.style.display = "none";
     await _renderResults(resultsEl, data);
     _renderSidebar();
+    const _missMode = AppState.step3Mode;
+    if (_missMode === "brand_comparison" || _missMode === "deep_dive") {
+      _normalModeResultCache[_missMode] = { data, cacheKey: key };
+    }
   } catch (err) {
     if (placeholder) placeholder.style.display = "none";
     resultsEl.innerHTML = `<div class="card"><div class="card-body" style="color:var(--color-danger,#e53e3e)">エラー: ${_esc(err.message)}</div></div>`;
@@ -1396,6 +2892,44 @@ async function _renderResults(container, data) {
   } else {
     await _renderSimpleResults(container, data);
   }
+  _renderAvgIndicatorResults(container, data);
+}
+
+function _renderAvgIndicatorResults(container, data) {
+  const indicatorResults = data.avg_indicator_results ?? [];
+  if (!indicatorResults.length) return;
+  const axisText = data.axis_question_text ?? "";
+  const categories = data.axis_categories ?? [];
+
+  const html = indicatorResults.map(ind => {
+    const rows = categories.map(cat => {
+      const stat = (ind.stats ?? []).find(s => s.category === cat);
+      if (!stat) return `<tr><td>${_esc(cat)}</td><td colspan="5" style="color:var(--color-text-muted)">—</td></tr>`;
+      const fmt = v => (v != null ? v.toFixed(2) : "—");
+      return `<tr>
+        <td>${_esc(cat)}</td>
+        <td>${stat.n_valid ?? "—"}</td>
+        <td>${fmt(stat.mean)}</td>
+        <td>${fmt(stat.std)}</td>
+        <td>${fmt(stat.median)}</td>
+        <td>${stat.min != null ? stat.min.toFixed(1) : "—"} / ${stat.max != null ? stat.max.toFixed(1) : "—"}</td>
+      </tr>`;
+    }).join("");
+
+    return `<div class="card" style="margin-top:12px">
+      <div class="card-body">
+        <div style="font-weight:600; margin-bottom:8px">【平均点指標】${_esc(ind.indicator_name)} × ${_esc(axisText)}</div>
+        <table class="avg-indicator-table">
+          <thead><tr>
+            <th>${_esc(axisText)}</th><th>有効N</th><th>平均</th><th>標準偏差</th><th>中央値</th><th>最小/最大</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).join("");
+
+  container.insertAdjacentHTML("beforeend", html);
 }
 
 function _updateAxisNcount(axisLabel, categories, totals, warningsHtml) {

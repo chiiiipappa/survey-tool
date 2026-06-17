@@ -1209,6 +1209,21 @@ export function initProjectHeader() {
         AppState.layoutFormat ?? "auto",
         AppState.responseFormat ?? "auto",
         AppState.surveyFormat ?? "unknown",
+        Object.fromEntries(AppState.step3AvgTargets.map(t => [t.code, t.scaleSettings])),
+        Object.fromEntries(AppState.step3AvgTargets.map(t => [t.code, t.choiceScores])),
+        {
+          fanDegreeType: AppState.step3FanDegreeType,
+          rowCode: AppState.step3FanRowCode,
+          colCode: AppState.step3FanColCode,
+          matrix: AppState.step3FanMatrix,
+          denominatorMode: AppState.step3FanDenominatorMode,
+          filterColumn: AppState.step3FanFilterColumn,
+          filterValues: AppState.step3FanFilterValues,
+        },
+        {
+          attrSimpleCodes: AppState.step3AttrSimpleCodes ?? [],
+          attrCrossPairs:  AppState.step3AttrCrossPairs  ?? [],
+        },
       );
       markClean(new Date());
       showToast("プロジェクトを保存しました。");
