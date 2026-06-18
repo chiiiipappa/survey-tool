@@ -699,6 +699,25 @@ class AverageSaveAsIndicatorResponse(BaseModel):
     saved_column: str
 
 
+class TriMatrixCell(BaseModel):
+    score: int   # 0〜10
+    label: str   # "高" | "中" | "低"
+
+
+class AverageSaveDerivedRequest(BaseModel):
+    session_token: str
+    question_code: str
+    base_name: str          # 例: "顧客幸福度" → raw="顧客幸福度点数", tri="顧客幸福度 3区分"
+    choice_scores: List[ScoreMappingEntry]
+    tri_matrix: List[TriMatrixCell]
+    overwrite: bool = False
+
+
+class AverageSaveDerivedResponse(BaseModel):
+    raw_question: QuestionItem
+    tri_question: QuestionItem
+
+
 # ---------------------------------------------------------------------------
 # STEP3 エクスポート用スキーマ
 # ---------------------------------------------------------------------------

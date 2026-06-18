@@ -37,6 +37,8 @@ from app.schemas import (
     AverageAnalysisRequest,
     AverageSaveAsIndicatorRequest,
     AverageSaveAsIndicatorResponse,
+    AverageSaveDerivedRequest,
+    AverageSaveDerivedResponse,
     AverageAxisStat,
     ChoiceItem,
     CrosstabResult,
@@ -616,6 +618,99 @@ async def save_average_as_indicator(body: AverageSaveAsIndicatorRequest) -> Aver
 
     logger.info("平均点指標保存: %s → %s, 表示名=%s", code, saved_col, body.indicator_name)
     return AverageSaveAsIndicatorResponse(indicator_question=indicator_q, saved_column=saved_col)
+
+
+# ---------------------------------------------------------------------------
+# 3-c. 平均点分析: 入力点数ラベル・3区分ラベルを DERIVED 派生軸として保存する
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/step3/special/average/save-as-derived",
+    response_model=AverageSaveDerivedResponse,
+    summary="特定分析: 平均点分析の入力点数ラベル・3区分ラベルを派生軸として保存",
+)
+async def save_average_as_derived(body: AverageSaveDerivedRequest) -> AverageSaveDerivedResponse:
+    df, questions, q_map, _ = _load_session(body.session_token)
+
+    code = body.question_code
+    q = q_map.get(code)
+    if q is None or code not in df.columns:
+        raise HTTPException(422, f"設問 '{code}' がデータに存在しません。")
+
+    raw_col = f"__avg_raw_{code}__"
+    tri_col = f"__avg_tri_{code}__"
+
+    step2_data = survey_cache.get_step2(body.session_token)
+    matched = set(step2_data.get("matched_columns", []))
+
+    if (raw_col in matched or tri_col in matched) and not body.overwrite:
+        raise HTTPException(409, f"'{body.base_name}' の派生項目は既に保存されています。上書きしますか？")
+
+    # choice_text → 入力点数文字列 のマッピング（rawScore を使用）
+    raw_map: dict[str, str] = {}
+    tri_lookup: dict[int, str] = {cell.score: cell.label for cell in body.tri_matrix}
+    tri_map: dict[str, str] = {}
+    raw_scores_sorted: list[int] = []
+
+    for entry in body.choice_scores:
+        if entry.raw_score is not None and not entry.missing_flag:
+            raw_int = int(entry.raw_score)
+            raw_map[entry.choice_text] = str(raw_int)
+            tri_map[entry.choice_text] = tri_lookup.get(raw_int, "")
+            raw_scores_sorted.append(raw_int)
+
+    raw_scores_sorted = sorted(set(raw_scores_sorted), reverse=True)  # 10, 9, ..., 0
+
+    df[raw_col] = df[code].astype(str).map(raw_map)
+    df[tri_col] = df[code].astype(str).map(tri_map)
+
+    new_path = save_parquet(body.session_token, df, "labeled_data")
+    step2_data["labeled_parquet_path"] = str(new_path)
+    matched.update([raw_col, tri_col])
+    step2_data["matched_columns"] = list(matched)
+    survey_cache.set_step2(body.session_token, step2_data)
+
+    raw_name = f"{body.base_name}点数"
+    tri_name = f"{body.base_name} 3区分"
+
+    raw_q = QuestionItem(
+        question_code=raw_col,
+        type_code="SA",
+        type_label="SA",
+        question_text=raw_name,
+        stub=raw_name,
+        choices=[ChoiceItem(choice_text=str(s)) for s in raw_scores_sorted],
+        row_index=101_100 + (abs(hash(code)) % 1000),
+        original_question="",
+        original_type="SA",
+        question_type="DERIVED",
+        auto_detected_type="DERIVED",
+    )
+
+    tri_q = QuestionItem(
+        question_code=tri_col,
+        type_code="SA",
+        type_label="SA",
+        question_text=tri_name,
+        stub=tri_name,
+        choices=[
+            ChoiceItem(choice_text="高"),
+            ChoiceItem(choice_text="中"),
+            ChoiceItem(choice_text="低"),
+        ],
+        row_index=101_200 + (abs(hash(code)) % 1000),
+        original_question="",
+        original_type="SA",
+        question_type="DERIVED",
+        auto_detected_type="DERIVED",
+    )
+
+    new_codes = {raw_col, tri_col}
+    updated_questions = [q for q in questions if q.question_code not in new_codes] + [raw_q, tri_q]
+    survey_cache.set(body.session_token, updated_questions, survey_cache.get_meta(body.session_token))
+
+    logger.info("平均点派生列保存: %s → raw=%s, tri=%s, 基本名=%s", code, raw_col, tri_col, body.base_name)
+    return AverageSaveDerivedResponse(raw_question=raw_q, tri_question=tri_q)
 
 
 # ---------------------------------------------------------------------------

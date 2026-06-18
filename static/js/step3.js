@@ -4,9 +4,9 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3SelectedQuestionCodes, setStep3AttrSimpleCodes, setStep3AttrCrossPairs, setStep3FanDegreeType, setStep3FanRowCode, setStep3FanColCode, setStep3FanMatrix, setStep3FanDenominatorMode, setStep3FanFilterColumn, setStep3FanFilterValues, addDerivedAxisQuestions, addSavedIndicator, setStep3AvgTargets, setStep3AvgIndicatorCodes, computeAutoColorMapping } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3SelectedQuestionCodes, setStep3AttrSimpleCodes, setStep3AttrCrossPairs, setStep3FanDegreeType, setStep3FanRowCode, setStep3FanColCode, setStep3FanMatrix, setStep3FanDenominatorMode, setStep3FanFilterColumn, setStep3FanFilterValues, addDerivedAxisQuestions, addSavedIndicator, setStep3AvgTargets, setStep3AvgIndicatorCodes, setStep3AvgTriMatrix, computeAutoColorMapping } from "./state.js";
 
-import { generateCrosstab, generateAttributeAnalysis, generateFanAnalysis, exportFanAnalysis, saveFanDegreeAsAxis, generateAverageAnalysis, saveAverageAsIndicator, saveAttributeAsAxis } from "./api.js";
+import { generateCrosstab, generateAttributeAnalysis, generateFanAnalysis, exportFanAnalysis, saveFanDegreeAsAxis, generateAverageAnalysis, saveAverageAsIndicator, saveAverageAsDerived, saveAttributeAsAxis } from "./api.js";
 import { yieldToMain, showToast } from "./app.js";
 import {
   exportSingleExcel, exportAllExcel,
@@ -306,6 +306,21 @@ const FIXED_PALETTES = {
       return null;
     },
   },
+  avg_tri_label: {
+    label: "3区分ラベル",
+    preview: ["#9D174D","#D9D9D9","#1E3A8A"],
+    canonicalValues: [
+      { label: "高", color: "#9D174D" },
+      { label: "中", color: "#D9D9D9" },
+      { label: "低", color: "#1E3A8A" },
+    ],
+    colorFor(label) {
+      if (label === "高") return "#9D174D";
+      if (label === "中") return "#D9D9D9";
+      if (label === "低") return "#1E3A8A";
+      return null;
+    },
+  },
   "__none__": {
     label: "なし（グレー）",
     preview: ["#676767"],
@@ -313,11 +328,13 @@ const FIXED_PALETTES = {
     colorFor: () => "#676767",
   },
 };
-const FIXED_PALETTE_ORDER = ["fan_label","gender","age_gender","age_a","age_b","age_c","scale_67","scale_1011"];
+const FIXED_PALETTE_ORDER = ["fan_label","avg_tri_label","gender","age_gender","age_a","age_b","age_c","scale_67","scale_1011"];
 
 function _detectFixedPaletteFromLabels(labels) {
   if (labels.some(l => /コアファン/.test(l)) && labels.some(l => /ライトファン/.test(l)))
     return "fan_label";
+  if (labels.some(l => l === "高") && labels.some(l => l === "中") && labels.some(l => l === "低"))
+    return "avg_tri_label";
   if (labels.some(l => /(男性|女性)\d+代/.test(l)) || labels.some(l => /\d+代(男性|女性)/.test(l)) ||
       labels.some(l => /(男性|女性)\d+[-~〜]\d+/.test(l)))
     return "age_gender";
@@ -1272,6 +1289,28 @@ function _buildAvgTargetEntry(code, qMap) {
   return { code, scaleSettings: _defaultScaleSettings(choices), choiceScores: [] };
 }
 
+// 0〜10点判定: rawScore に 0〜10 が含まれる 11 選択肢か
+function _isAvgTriTarget(choiceScores) {
+  const scores = choiceScores.map(c => c.rawScore).filter(v => v !== null && v !== undefined);
+  if (scores.length !== 11) return false;
+  return Math.min(...scores) === 0 && Math.max(...scores) === 10;
+}
+
+// デフォルト3区分マトリクス: 9-10=高, 7-8=中, 0-6=低
+function _buildDefaultAvgTriMatrix() {
+  return Array.from({ length: 11 }, (_, i) => {
+    const score = 10 - i;
+    const label = score >= 9 ? "高" : score >= 7 ? "中" : "低";
+    return { score, label };
+  });
+}
+
+function _avgTriOptionsHtml(selected) {
+  return ["高", "中", "低"].map(l =>
+    `<option value="${_esc(l)}"${l === selected ? " selected" : ""}>${_esc(l)}</option>`
+  ).join("");
+}
+
 function _buildAvgScoreTableHtml(t, idx) {
   const rows = t.choiceScores.map(c => `
     <tr${(c.excludeFlag || c.missingFlag) ? ' style="opacity:.55"' : ""}>
@@ -1324,6 +1363,38 @@ function _renderAverageTargetSettings() {
         <div style="overflow-x:auto">${_buildAvgScoreTableHtml(t, idx)}</div>
       </details>` : "";
 
+    // 3区分マトリクスセクション（0〜10点の11段階設問のみ表示）
+    let triSection = "";
+    if (t.choiceScores.length && _isAvgTriTarget(t.choiceScores)) {
+      if (!AppState.step3AvgTriMatrix[t.code]) {
+        setStep3AvgTriMatrix(t.code, _buildDefaultAvgTriMatrix());
+      }
+      const matrix = AppState.step3AvgTriMatrix[t.code] ?? _buildDefaultAvgTriMatrix();
+      const matrixRows = matrix.map(cell => {
+        const bg = FIXED_PALETTES.avg_tri_label.colorFor(cell.label) ?? "#FFFFFF";
+        return `<tr>
+          <td style="padding:2px 8px; font-size:.82rem; text-align:right; font-weight:600">${cell.score}点</td>
+          <td style="padding:2px 6px">
+            <select class="step3-avg-tri-select step3-config-select" data-code="${_esc(t.code)}" data-score="${cell.score}" style="background-color:${bg}; width:auto">
+              ${_avgTriOptionsHtml(cell.label)}
+            </select>
+          </td>
+        </tr>`;
+      }).join("");
+      triSection = `
+        <details class="step3-filter-details" style="margin-top:8px">
+          <summary class="step3-filter-summary">3区分マトリクスを設定</summary>
+          <div style="margin-top:6px; font-size:.78rem; color:var(--color-text-muted)">各点数を高・中・低に割り当てます（保存時に反映）</div>
+          <table style="border-collapse:collapse; margin-top:6px">
+            <thead><tr>
+              <th style="padding:2px 8px; text-align:right; font-size:.78rem">点数</th>
+              <th style="padding:2px 8px; font-size:.78rem">判定</th>
+            </tr></thead>
+            <tbody>${matrixRows}</tbody>
+          </table>
+        </details>`;
+    }
+
     return `
       <div class="card" style="margin-bottom:8px">
         <div class="card-body" style="padding:10px 16px">
@@ -1338,6 +1409,7 @@ function _renderAverageTargetSettings() {
             </select>
           </div>
           ${tableSection}
+          ${triSection}
         </div>
       </div>`;
   }).join("");
@@ -1376,6 +1448,16 @@ function _renderAverageTargetSettings() {
       } else if (e.target.classList.contains("step3-avg-missing-input")) {
         const c = t.choiceScores.find(c => c.choiceText === e.target.dataset.choice);
         if (c) c.missingFlag = e.target.checked;
+      } else if (e.target.classList.contains("step3-avg-tri-select")) {
+        // 3区分マトリクスの変更は独立して処理（targets の更新は不要）
+        const code = e.target.dataset.code;
+        const score = Number(e.target.dataset.score);
+        const newLabel = e.target.value;
+        const cur = AppState.step3AvgTriMatrix[code] ?? _buildDefaultAvgTriMatrix();
+        const next = cur.map(cell => cell.score === score ? { ...cell, label: newLabel } : cell);
+        setStep3AvgTriMatrix(code, next);
+        e.target.style.backgroundColor = FIXED_PALETTES.avg_tri_label.colorFor(newLabel) ?? "#FFFFFF";
+        return;
       } else {
         return;
       }
@@ -2274,6 +2356,33 @@ async function _saveAverageAsIndicator(target, btn, overwrite = false) {
   }
 }
 
+async function _saveAverageAsDerived(target, btn, overwrite = false) {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const defaultName = (AppState.questions ?? []).find(q => q.question_code === target.code)?.question_text ?? target.code;
+  const baseName = window.prompt("基本名を入力してください（例: 顧客幸福度）：", defaultName);
+  if (!baseName?.trim()) return;
+  const matrix = AppState.step3AvgTriMatrix[target.code] ?? _buildDefaultAvgTriMatrix();
+  btn.disabled = true;
+  try {
+    const resp = await saveAverageAsDerived(sessionToken, target.code, baseName.trim(), target.choiceScores, matrix, overwrite);
+    addDerivedAxisQuestions([resp.raw_question, resp.tri_question]);
+    showToast(`「${baseName.trim()}点数」「${baseName.trim()} 3区分」を通常分析で使える軸として追加しました。`);
+  } catch (err) {
+    if (err.status === 409) {
+      if (window.confirm(`「${baseName.trim()}」の派生項目は既に保存されています。上書きしますか？`)) {
+        btn.disabled = false;
+        await _saveAverageAsDerived(target, btn, true);
+        return;
+      }
+    } else {
+      showToast(err.message ?? "派生項目の保存に失敗しました。");
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function _saveAttributeAsAxisFromBlock(rowCode, colCode, rowText, colText, btn, overwrite = false) {
   const sessionToken = AppState.sessionToken;
   if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
@@ -2351,6 +2460,17 @@ function _renderSpecialAddButton(block) {
     btn.textContent = "通常分析で使う指標として追加";
     btn.addEventListener("click", () => _saveAverageAsIndicator(target, btn));
     container.appendChild(btn);
+
+    // 0〜10点の11段階評価設問の場合、入力点数ラベル・3区分ラベルの保存ボタンを追加
+    if (_isAvgTriTarget(target.choiceScores ?? [])) {
+      const triBtn = document.createElement("button");
+      triBtn.type = "button";
+      triBtn.className = "btn btn-special-add";
+      triBtn.style.marginLeft = "8px";
+      triBtn.textContent = "点数ラベル・3区分を保存";
+      triBtn.addEventListener("click", () => _saveAverageAsDerived(target, triBtn));
+      container.appendChild(triBtn);
+    }
 
   } else if (modeTag === "attribute_analysis" && rowCode && colCode) {
     const rowTypeCode = (qMap[rowCode]?.type_code ?? "").toUpperCase();

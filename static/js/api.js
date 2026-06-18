@@ -71,7 +71,7 @@ export async function getQuestionsJson(token) {
 }
 
 /** プロジェクト (.surveyproject) をダウンロードする。 */
-export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}, reportProject = {}, chartResults = [], layoutFormat = "auto", responseFormat = "auto", surveyFormat = "unknown", scoreSettings = {}, scoreMapping = {}, fanDegreeSettings = {}, attrSettings = {}) {
+export async function saveProject(token, projectName = "", step3QuestionSettings = {}, step1AxisColors = {}, userPalettes = {}, compositeSettings = {}, questionSets = [], step3CrosstabCache = {}, hiddenQuestionTypes = [], excludedQuestions = [], step3Views = {}, reportProject = {}, chartResults = [], layoutFormat = "auto", responseFormat = "auto", surveyFormat = "unknown", scoreSettings = {}, scoreMapping = {}, fanDegreeSettings = {}, attrSettings = {}, avgTriMatrix = {}) {
   const res = await fetch(`${BASE}/project/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -105,6 +105,7 @@ export async function saveProject(token, projectName = "", step3QuestionSettings
       score_mapping: scoreMapping,
       fan_degree_settings: fanDegreeSettings,
       attr_settings: attrSettings,
+      avg_tri_matrix: avgTriMatrix,
     }),
   });
   if (!res.ok) {
@@ -490,6 +491,37 @@ export async function saveAverageAsIndicator(sessionToken, target, indicatorName
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     const error = new Error(err.detail ?? "平均点指標の保存に失敗しました。");
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+/** 入力点数ラベル・3区分ラベルを DERIVED 派生軸として保存する。 */
+export async function saveAverageAsDerived(sessionToken, questionCode, baseName, choiceScores, triMatrix, overwrite = false) {
+  const res = await fetch(`${BASE}/step3/special/average/save-as-derived`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_token: sessionToken,
+      question_code: questionCode,
+      base_name: baseName,
+      choice_scores: choiceScores.map(c => ({
+        choice_text: c.choiceText,
+        raw_score: c.rawScore,
+        converted_score: c.convertedScore,
+        manual_score: c.manualScore,
+        final_score: c.finalScore,
+        exclude_flag: c.excludeFlag,
+        missing_flag: c.missingFlag,
+      })),
+      tri_matrix: triMatrix,
+      overwrite,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const error = new Error(err.detail ?? "派生項目の保存に失敗しました。");
     error.status = res.status;
     throw error;
   }

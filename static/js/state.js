@@ -59,6 +59,7 @@ function _applyAutoColorsIfUnset() {
   const questions = AppState.questions ?? [];
   if (!questions.length) return;
 
+  // グローバルフォールバック（step3QuestionSettings）への適用
   const next = { ...AppState.step3QuestionSettings };
   let changed = false;
   for (const q of questions) {
@@ -72,6 +73,34 @@ function _applyAutoColorsIfUnset() {
     }
   }
   if (changed) AppState.step3QuestionSettings = next;
+
+  // 各ビューの questionSettings にも自動カラーを適用。
+  // _s3QS は ?? でビューが優先されるため、ビューに entry があるとグローバルの
+  // オートカラーに届かない。ビュー側にも書き込むことで確実に反映する。
+  const views = AppState.step3Views ?? {};
+  if (!Object.keys(views).length) return;
+  let viewsChanged = false;
+  const nextViews = { ...views };
+  for (const [viewId, view] of Object.entries(views)) {
+    const viewQS = view.questionSettings ?? {};
+    let viewChanged = false;
+    const nextViewQS = { ...viewQS };
+    for (const q of questions) {
+      const code = q.question_code;
+      if (!code) continue;
+      if (nextViewQS[code]?.valueColorMapping?.length) continue; // 保存済みカラーはスキップ
+      const mapping = computeAutoColorMapping(q);
+      if (mapping) {
+        nextViewQS[code] = { ...(nextViewQS[code] ?? {}), valueColorMapping: mapping };
+        viewChanged = true;
+      }
+    }
+    if (viewChanged) {
+      nextViews[viewId] = { ...view, questionSettings: nextViewQS };
+      viewsChanged = true;
+    }
+  }
+  if (viewsChanged) AppState.step3Views = nextViews;
 }
 
 export const AppState = {
@@ -154,6 +183,7 @@ export const AppState = {
   step3AvgTargets: [],             // [{code, scaleSettings:{...}, choiceScores:[...]}]
   step3SavedIndicators: [],        // 通常分析で使う平均点指標 QuestionItem[]（question_type==="SCORE"）
   step3AvgIndicatorCodes: [],      // 通常分析で現在選択中の平均点指標コード string[]
+  step3AvgTriMatrix: {},           // { [question_code]: [{score, label}, ...] } — 3区分判定マトリクス
   // STEP3 集計ビュー
   step3Views: {},         // { [viewId]: ViewRecord } — viewId = `${axisCode}||${secAxisCode}`
   step3ActiveViewId: "",  // 現在アクティブなビューのID
@@ -584,6 +614,8 @@ export function setLoadedProject(resp) {
     AppState.step3FanFilterColumn    = fd.filterColumn ?? "";
     AppState.step3FanFilterValues    = fd.filterValues ?? [];
   }
+  // 平均点分析: 3区分判定マトリクスの復元
+  AppState.step3AvgTriMatrix = resp.layout?.avg_tri_matrix ?? {};
   // 属性分析: 単純集計対象・クロスペアの復元
   {
     const attr = resp.layout?.attr_settings ?? {};
@@ -726,6 +758,7 @@ export function resetState() {
   AppState.step3AvgTargets            = [];
   AppState.step3SavedIndicators       = [];
   AppState.step3AvgIndicatorCodes     = [];
+  AppState.step3AvgTriMatrix          = {};
   AppState.reportMode              = "comparison";
   AppState.reportTargetColumn      = "";
   AppState.reportTargetValues      = [];
@@ -928,6 +961,12 @@ export function setStep3AvgTargets(targets) {
 
 export function setStep3AvgIndicatorCodes(codes) {
   AppState.step3AvgIndicatorCodes = Array.isArray(codes) ? [...codes] : [];
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3AvgTriMatrix(code, matrix) {
+  AppState.step3AvgTriMatrix = { ...AppState.step3AvgTriMatrix, [code]: matrix };
   AppState.isDirty = true;
   _emit();
 }

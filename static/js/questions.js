@@ -1224,6 +1224,7 @@ export function initProjectHeader() {
           attrSimpleCodes: AppState.step3AttrSimpleCodes ?? [],
           attrCrossPairs:  AppState.step3AttrCrossPairs  ?? [],
         },
+        AppState.step3AvgTriMatrix ?? {},
       );
       markClean(new Date());
       showToast("プロジェクトを保存しました。");
