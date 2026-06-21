@@ -37,6 +37,21 @@ def _safe_float(val: float) -> float:
     return round(val, 1)
 
 
+def _norm_code(v) -> str:
+    """数値コードを正規化して文字列に変換する（float "10.0" → "10"）。"""
+    try:
+        return str(int(float(str(v))))
+    except (ValueError, TypeError):
+        return str(v)
+
+
+def _build_code_to_label(q) -> dict[str, str]:
+    """choice_index → choice_text のマッピングを構築する。"""
+    if not (q and q.choices):
+        return {}
+    return {_norm_code(c.choice_index): c.choice_text for c in q.choices}
+
+
 def _crosstab_sa(
     df: pd.DataFrame,
     q_col: str,
@@ -56,13 +71,18 @@ def _crosstab_sa(
     ct = ct.reindex(columns=axis_cats, fill_value=0)
 
     # STEP1の全選択肢を行として使用（_build_axis_cats と同一ロジック）
-    index_labels = list(ct.index.astype(str))
     if q and q.choices:
         choice_labels = [c.choice_text for c in q.choices]
+        # choice_index の数値コード → choice_text へリマップしてからreindex
+        code_to_label = _build_code_to_label(q)
+        ct.index = pd.Index([
+            code_to_label.get(_norm_code(idx), str(idx)) for idx in ct.index
+        ])
+        # 同一ラベルが複数行になった場合は集約
+        ct = ct.groupby(level=0).sum()
         s1_set = set(choice_labels)
-        remaining = [lbl for lbl in index_labels if lbl not in s1_set]
-        index_labels = choice_labels + remaining
-        ct = ct.reindex(index_labels, fill_value=0)
+        remaining = [lbl for lbl in ct.index if lbl not in s1_set]
+        ct = ct.reindex(choice_labels + remaining, fill_value=0)
 
     # N数（軸カテゴリーごと）
     col_totals = ct.sum(axis=0)
@@ -119,6 +139,7 @@ def _crosstab_total(
     q_code: str,
     type_code: str,
     bracket_cols: list[dict],
+    q=None,
 ) -> tuple[list[CrosstabRow], int]:
     """軸なし全体集計。(rows, total_n) を返す。"""
     tc = type_code.upper()
@@ -129,7 +150,19 @@ def _crosstab_total(
         if q_code not in df.columns:
             return [], n
         vc = df[q_code].value_counts()
-        for label, cnt in vc.items():
+        # choice_index → choice_text マッピングで数値コードをラベルに変換
+        code_to_label = _build_code_to_label(q)
+        # コードをラベルに変換してグループ集計
+        label_series = vc.index.map(lambda k: code_to_label.get(_norm_code(k), str(k)))
+        vc_mapped = vc.groupby(label_series).sum()
+        # STEP1の選択肢順に並べ替え
+        if q and q.choices:
+            choice_labels = [c.choice_text for c in q.choices]
+            s1_set = set(choice_labels)
+            remaining = [lbl for lbl in vc_mapped.index if lbl not in s1_set]
+            ordered_labels = [lbl for lbl in choice_labels if lbl in vc_mapped.index] + remaining
+            vc_mapped = vc_mapped.reindex(ordered_labels, fill_value=0)
+        for label, cnt in vc_mapped.items():
             pct = _safe_float(cnt / n * 100) if n > 0 else 0.0
             rows.append(CrosstabRow(label=str(label), counts=[int(cnt)], percents=[pct]))
 
@@ -500,7 +533,7 @@ async def run_crosstab(body: Step3CrosstabRequest) -> Step3CrosstabResponse:
             if tc in _SKIP_TYPES:
                 continue
             bcs = bracket_by_base.get(code, [])
-            rows, n = _crosstab_total(df, code, q.type_code, bcs)
+            rows, n = _crosstab_total(df, code, q.type_code, bcs, q)
             total_n = n
             if not rows:
                 continue

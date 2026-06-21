@@ -284,6 +284,10 @@ function _bindEditPanelEvents() {
   document.getElementById("edit-table-height-pct")?.addEventListener("input", (e) => {
     _patchChartSettings({ tableHeightPct: parseInt(e.target.value, 10) || 40 });
   });
+  document.getElementById("edit-table-cell-padding")?.addEventListener("input", (e) => {
+    const v = parseInt(e.target.value, 10);
+    _patchChartSettings({ tableCellPadding: isNaN(v) ? null : v });
+  });
 
   // 下部情報の表示切り替え
   document.getElementById("edit-show-footer")?.addEventListener("change", (e) => {
@@ -636,6 +640,8 @@ function _renderEditPanel(page) {
   if (twEl && twEl !== document.activeElement) twEl.value = String(cs.tableWidthPct ?? 35);
   const thEl = document.getElementById("edit-table-height-pct");
   if (thEl && thEl !== document.activeElement) thEl.value = String(cs.tableHeightPct ?? 40);
+  const tcpEl = document.getElementById("edit-table-cell-padding");
+  if (tcpEl && tcpEl !== document.activeElement) tcpEl.value = String(cs.tableCellPadding ?? "");
 
   // 下部情報の表示
   const showFooterEl = document.getElementById("edit-show-footer");
@@ -1147,16 +1153,26 @@ function _buildPageElement(page, idSuffix, cs) {
     return wrap;
   }
 
+  // top/bottom テーブルがある場合はグラフもflex比率で高さを分割
+  const tableH = cs.tableHeightPct ?? 40;
+  const chartH = 100 - tableH;
+  const hasTopBottom = !isBrandChart && !isSmallMultiple && tableHtml
+    && (tablePos === "top" || tablePos === "bottom");
+
   // チャートHTML（通常 / ブランド / スモールマルチプル）
+  const chartWrapForTopBottom = hasTopBottom
+    ? `<div class="report-chart-wrap" style="flex:${chartH};height:auto;min-height:0;margin-bottom:0"><canvas id="report-chart-${idSuffix}"></canvas></div>`
+    : singleChartWrap;
   const mainChartHtml = isBrandChart
     ? singleChartWrap
     : isSmallMultiple
       ? _buildSmallMultiplesHtml(page, idSuffix, chartStyle, cs)
-      : singleChartWrap;
+      : chartWrapForTopBottom;
 
   const topTable = (tablePos === "top" && tableHtml)
-    ? `<div class="report-table-wrap" style="flex-shrink:0">${tableHtml}</div>` : "";
-  const bottomTable = (tablePos === "bottom" && tableHtml) ? tableHtml : "";
+    ? `<div class="report-table-area" style="flex:${tableH};min-height:0;overflow-y:auto">${tableHtml}</div>` : "";
+  const bottomTable = (tablePos === "bottom" && tableHtml)
+    ? `<div class="report-table-area" style="flex:${tableH};min-height:0;overflow-y:auto">${tableHtml}</div>` : "";
 
   wrap.innerHTML = `${bandHtml}
     <div class="report-page-body">
@@ -1334,6 +1350,10 @@ function _buildTableHtml(page, cs) {
   const fs = cs.tableFontSize ?? 9;
   const showRowTotal = cs.showTableRowTotal;
   const showColTotal = cs.showTableColTotal;
+  const cellPad = cs.tableCellPadding;
+  const tableStyle = cellPad != null
+    ? `font-size:${fs}px;--report-cell-pad:${cellPad}px ${Math.round(cellPad * 2.5)}px`
+    : `font-size:${fs}px`;
 
   // セル値を文字列化するヘルパー
   const cellStr = (pct, cnt) => {
@@ -1396,7 +1416,7 @@ function _buildTableHtml(page, cs) {
 
     return `
       <div class="report-table-wrap">
-        <table class="report-table" style="font-size:${fs}px">
+        <table class="report-table" style="${tableStyle}">
           <thead><tr><th></th>${headerCells}</tr></thead>
           <tbody>${dataRows.join("")}${colTotalRow}</tbody>
         </table>

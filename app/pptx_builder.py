@@ -487,6 +487,7 @@ def _add_table_shape(slide, cr: dict, lc: dict, cc: dict, x, y, w, h) -> None:
     content_mode: str = lc.get("tableContentMode", "percent")
     dec_places: int = int(lc.get("tableDecimalPlaces", 1))
     font_size: int = int(lc.get("tableFontSize", 9))
+    cell_padding_pt: float | None = lc.get("tableCellPadding")
     # STEP4のlayoutConfig設定を優先、なければSTEP3のchartConfig設定（デフォルトFalse）
     has_total_col: bool = lc.get("showTableRowTotal", cc.get("showTotalCol", False))
     show_col_total: bool = lc.get("showTableColTotal", False)
@@ -578,6 +579,10 @@ def _add_table_shape(slide, cr: dict, lc: dict, cc: dict, x, y, w, h) -> None:
     # 罫線
     _set_table_borders(tbl, TABLE_BORDER_PT, TABLE_BORDER_COLOR)
 
+    # セル内余白（指定がある場合のみ上書き）
+    if cell_padding_pt is not None:
+        _set_table_cell_margins(tbl, float(cell_padding_pt))
+
 
 def _format_cell(pct: float, cnt: int, mode: str, dec: int) -> str:
     fmt = f"{{:.{dec}f}}%"
@@ -600,6 +605,22 @@ def _set_cell(tbl, row: int, col: int, text: str, font_size: int,
             run.font.name = FONT_NAME
             run.font.size = Pt(font_size)
             run.font.bold = bold
+
+
+def _set_table_cell_margins(tbl, pad_pt: float) -> None:
+    """全セルの内部余白を pt 単位で設定する（XML操作）。"""
+    from pptx.oxml.ns import qn as pqn
+    v_emu = int(Pt(pad_pt))
+    h_emu = int(Pt(pad_pt * 2.5))
+    for row_idx in range(len(tbl.rows)):
+        for col_idx in range(len(tbl.columns)):
+            cell = tbl.cell(row_idx, col_idx)
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            tcPr.set("marL", str(h_emu))
+            tcPr.set("marR", str(h_emu))
+            tcPr.set("marT", str(v_emu))
+            tcPr.set("marB", str(v_emu))
 
 
 def _set_table_borders(tbl, border_pt: float, color_hex: str) -> None:

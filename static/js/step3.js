@@ -1266,7 +1266,7 @@ function _convertScore(raw, scaleSettings) {
 function _defaultScaleSettings(choices) {
   const rawScores = choices.map(c => _extractRawScore(c.choice_text)).filter(v => v !== null);
   const dataMax = rawScores.length ? Math.max(...rawScores) : Math.max(choices.length - 1, 1);
-  return { dataMax, displayMax: dataMax, direction: "forward", dataMin: 0, displayMin: 0, calcMethod: "linear" };
+  return { dataMax, displayMax: 100, direction: "forward", dataMin: 0, displayMin: 0, calcMethod: "linear" };
 }
 
 function _buildChoiceScores(choices, scaleSettings, prevScores = []) {
@@ -1926,6 +1926,7 @@ function _renderAveragePanel() {
 let _specialBlocks = [];
 let _fanLastResponse = null;  // 直前のファン度分析API応答全体（summary/matrix/respondent_rows等。エクスポート用に保持）
 let _currentSpecialModeTag = "";  // 現在表示中の特定分析の種別（"attribute_analysis" | "fan_analysis" | "average_analysis"）
+let _currentSpecialBlockIdx = -1; // 現在表示中の特定分析ブロックのインデックス（ChartResult IDの照合に使用）
 
 async function _runAttributeAnalysis() {
   const sessionToken = AppState.sessionToken;
@@ -2424,6 +2425,7 @@ async function _showSpecialBlock(idx) {
   }
 
   const cacheKey = `special:${idx}`;
+  _currentSpecialBlockIdx = idx;
   _crosstabCache[cacheKey] = block;
   _currentCacheKey = cacheKey;
   _lastCrosstabData = block;
@@ -3128,6 +3130,7 @@ async function _renderSimpleResults(container, data) {
   const _filterCol = AppState.step3TargetFilterColumn;
   const _filterVals = AppState.step3TargetFilterValues;
   const filterKey = _filterCol ? `${_filterCol}:${[..._filterVals].sort().join(",")}` : "";
+  const _isSpecial = _SPECIAL_MODES.has(AppState.step3Mode) && !!_currentSpecialModeTag && _currentSpecialBlockIdx >= 0;
 
   // ヘッダー（一括変更バー + 一括エクスポートバー）を先に挿入してUIを即時表示
   container.innerHTML =
@@ -3229,7 +3232,7 @@ async function _renderSimpleResults(container, data) {
           <button class="btn btn-secondary btn-sm step3-export-csv-btn"   data-idx="${idx}" title="CSVとして保存">📄 CSV</button>
           <button class="btn btn-secondary btn-sm step3-export-png-btn"   data-idx="${idx}" title="PNGとして保存">🖼 PNG</button>
           <button class="btn step3-add-report-btn"
-                  data-cr-id="${_esc(`${result.question_code}||${axisCode}||${filterKey}`)}"
+                  data-cr-id="${_esc(_isSpecial ? `special:${_currentSpecialModeTag}:${_currentSpecialBlockIdx}:${result.question_code}` : `${result.question_code}||${axisCode}||${filterKey}`)}"
                   style="background:var(--color-primary,#3B82F6);color:#fff;font-weight:700;padding:5px 22px;font-size:.9rem;letter-spacing:.03em;box-shadow:0 2px 6px rgba(59,130,246,.35)"
                   title="この設問をレポートに追加">＋ レポートに追加</button>
         </div>

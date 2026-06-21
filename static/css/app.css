@@ -2,9 +2,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --color-primary:      #DF0515;
-  --color-primary-dark: #B8010F;
-  --color-primary-light: #FDECEA;
+  --color-primary:      #1A6FD4;
+  --color-primary-dark: #1457A8;
+  --color-primary-light: #EAF2FF;
   --color-surface:      #ffffff;
   --color-surface-alt:  #F8F8F8;
   --color-surface-2:    #F8F8F8;
@@ -166,7 +166,7 @@ a:hover { text-decoration: underline; }
 }
 .drop-zone:hover, .drop-zone.dragover {
   border-color: var(--color-primary);
-  background: #FDECEA;
+  background: #EAF2FF;
 }
 .drop-zone .drop-icon { font-size: 2.5rem; margin-bottom: 12px; }
 .drop-zone p { color: var(--color-text-muted); font-size: .875rem; line-height: 1.6; }
@@ -715,16 +715,16 @@ pre.json-pre {
 .fa-ms-option { padding: 8px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
 .fa-ms-option:hover  { background: var(--color-surface-2, #F0F0F0); }
 .fa-ms-option.fa-ms-selected { background: var(--color-surface-2, #F0F0F0); font-weight: 600; }
-.fa-ms-check { font-size: 11px; width: 14px; text-align: center; flex-shrink: 0; color: var(--color-primary, #DF0515); }
+.fa-ms-check { font-size: 11px; width: 14px; text-align: center; flex-shrink: 0; color: var(--color-primary, #1A6FD4); }
 .fa-ms-option-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fa-ms-option-empty { padding: 10px 12px; font-size: 13px; color: var(--color-text-muted); }
-.fa-ms-tag { display: inline-flex; align-items: center; gap: 3px; background: var(--color-primary-light, #FDECEA); color: var(--color-primary, #DF0515); border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: 500; white-space: nowrap; max-width: 200px; }
+.fa-ms-tag { display: inline-flex; align-items: center; gap: 3px; background: var(--color-primary-light, #EAF2FF); color: var(--color-primary, #1A6FD4); border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: 500; white-space: nowrap; max-width: 200px; }
 .fa-ms-tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fa-ms-tag-remove { background: none; border: none; cursor: pointer; padding: 0 1px; font-size: 14px; line-height: 1; color: inherit; opacity: .7; flex-shrink: 0; }
 .fa-ms-tag-remove:hover { opacity: 1; }
 .fa-attr-cb-list { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 8px 0; min-height: 32px; align-items: center; }
 .fa-attr-cb-item { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; user-select: none; }
-.fa-attr-cb-item input[type="checkbox"] { accent-color: var(--color-primary, #DF0515); width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
+.fa-attr-cb-item input[type="checkbox"] { accent-color: var(--color-primary, #1A6FD4); width: 14px; height: 14px; cursor: pointer; flex-shrink: 0; }
 
 /* FA 案内エリア */
 .fa-guidance { padding: 32px 16px; text-align: center; color: var(--color-text-muted); background: var(--color-bg, #F8F8F8); border-radius: var(--radius); border: 1px dashed var(--color-border); }
@@ -744,7 +744,7 @@ pre.json-pre {
 .step3-tab-btn { flex: 0 0 auto; padding: 6px 16px; font-size: .82rem; border: none; border-right: 1px solid var(--color-border); background: transparent; color: var(--color-text-muted); cursor: pointer; transition: background .12s, color .12s; }
 .step3-tab-btn:last-child { border-right: none; }
 .step3-tab-btn:hover { background: var(--color-surface, #fff); color: var(--color-text); }
-.step3-tab-btn.active { background: var(--color-surface, #fff); color: var(--color-primary, #DF0515); font-weight: 600; border-bottom: 2px solid var(--color-primary, #DF0515); margin-bottom: -1px; }
+.step3-tab-btn.active { background: var(--color-surface, #fff); color: var(--color-primary, #1A6FD4); font-weight: 600; border-bottom: 2px solid var(--color-primary, #1A6FD4); margin-bottom: -1px; }
 .step3-tab-panel { padding: 0; overflow-x: auto; }
 
 /* グラフ設定コントロールバー */
@@ -1129,9 +1129,9 @@ pre.json-pre {
   background: var(--color-primary-light, #EFF6FF);
 }
 .step3-composite-mode-btn.active {
-  background: var(--color-primary, #DF0515);
+  background: var(--color-primary, #1A6FD4);
   color: #fff;
-  border-color: var(--color-primary, #DF0515);
+  border-color: var(--color-primary, #1A6FD4);
 }
 
 /* 一括変更フォーム */
@@ -1164,7 +1164,7 @@ pre.json-pre {
   font-weight: 700;
   padding: 4px 10px;
   background: var(--color-surface-2, #F8F8F8);
-  border-left: 3px solid var(--color-primary, #DF0515);
+  border-left: 3px solid var(--color-primary, #1A6FD4);
   margin-bottom: 4px;
   border-radius: 0 4px 4px 0;
 }
@@ -1236,11 +1236,11 @@ pre.json-pre {
   user-select: none;
 }
 .step3-set-radio-label:hover {
-  border-color: var(--color-primary, #DF0515);
+  border-color: var(--color-primary, #1A6FD4);
 }
 .step3-set-radio-label.active {
   background: var(--color-primary-light, #EFF6FF);
-  border-color: var(--color-primary, #DF0515);
+  border-color: var(--color-primary, #1A6FD4);
   font-weight: 600;
 }
 .step3-set-count {
@@ -1254,7 +1254,7 @@ pre.json-pre {
   padding: 1px 7px;
   border-radius: 10px;
   background: var(--color-primary-light, #EFF6FF);
-  color: var(--color-primary, #DF0515);
+  color: var(--color-primary, #1A6FD4);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1268,12 +1268,12 @@ pre.json-pre {
   transition: background .15s, border-color .15s, color .15s;
 }
 .step3-generated-set-btn:hover {
-  border-color: var(--color-primary, #DF0515);
+  border-color: var(--color-primary, #1A6FD4);
 }
 .step3-generated-set-btn.active {
-  background: var(--color-primary, #DF0515);
+  background: var(--color-primary, #1A6FD4);
   color: #fff;
-  border-color: var(--color-primary, #DF0515);
+  border-color: var(--color-primary, #1A6FD4);
 }
 .step3-placeholder {
   color: var(--color-text-muted, #718096);
@@ -1379,8 +1379,8 @@ pre.json-pre {
 }
 .step1-set-q-chip.selected {
   background: var(--color-primary-light, #EFF6FF);
-  border-color: var(--color-primary, #DF0515);
-  color: var(--color-primary, #DF0515);
+  border-color: var(--color-primary, #1A6FD4);
+  color: var(--color-primary, #1A6FD4);
 }
 
 /* ===== 分析セット管理モーダル（リデザイン）===== */
@@ -1987,9 +1987,9 @@ details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { tra
   margin: 0 auto;
 }
 
-/* ヘッダー帯: 比較 → 赤→青グラデーション */
+/* ヘッダー帯: 比較 → 青グラデーション */
 .report-band-comparison {
-  background: linear-gradient(135deg, #DF0515 0%, #0071BC 100%);
+  background: linear-gradient(135deg, #1A6FD4 0%, #0D3F7A 100%);
   padding: 4px 20px 4px;
   color: #fff;
   min-height: 18px;
@@ -2107,7 +2107,7 @@ details.step3-nav-parent-details[open] > .step3-nav-parent-summary::before { tra
 }
 
 .report-table th, .report-table td {
-  padding: 4px 10px;
+  padding: var(--report-cell-pad, 4px 10px);
   border: 1px solid var(--color-border);
   text-align: right;
   white-space: nowrap;

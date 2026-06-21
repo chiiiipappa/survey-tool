@@ -1074,7 +1074,7 @@ function _defaultLayoutConfig() {
     labelAnchor: "center", labelAlign: "center",
     showTable: false, tableContentMode: "percent",
     showTableRowTotal: false, showTableColTotal: false,
-    tableFontSize: 9, tableDecimalPlaces: 1,
+    tableFontSize: 9, tableDecimalPlaces: 1, tableCellPadding: null,
     rowChoiceOrder: null,  // null=STEP1順、string[]=手動並び替え順
   };
 }
