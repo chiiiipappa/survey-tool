@@ -104,6 +104,28 @@ Mac の場合：
   start_mac.command を右クリック→「開く」→「開く」で起動できます。
 
 ----------------------------------------------------
+ターミナルから起動する方法（セキュリティでブロックされた場合）
+----------------------------------------------------
+
+ダブルクリックで起動できない場合は、ターミナルから以下の手順で起動できます。
+
+【Mac の場合】
+  1. ターミナルを開く（Launchpad →「ターミナル」で検索）
+  2. 以下を入力して解凍フォルダに移動：
+       cd ~/Downloads/survey-tool-mac
+     ※ 解凍先が異なる場合はパスを変更してください
+  3. 以下のコマンドを実行：
+       bash start_mac.command
+
+【Windows の場合】
+  1. コマンドプロンプトを開く（スタートメニュー →「cmd」で検索 → Enter）
+  2. 以下を入力して解凍フォルダに移動：
+       cd C:\\Users\\(ユーザー名)\\Downloads\\survey-tool-windows
+     ※ 解凍先が異なる場合はパスを変更してください
+  3. 以下のコマンドを実行：
+       start_windows.bat
+
+----------------------------------------------------
 注意事項
 ----------------------------------------------------
 
@@ -156,10 +178,16 @@ def _make_release_readme(has_zip: bool, has_app: bool) -> str:
             "■ Windows の方",
             "  survey-tool-windows.zip を展開し、",
             "  start_windows.bat をダブルクリックしてください。",
+            "  ブロックされた場合：コマンドプロンプト（cmd）を開いて実行：",
+            "    cd C:\\Users\\(ユーザー名)\\Downloads\\survey-tool-windows",
+            "    start_windows.bat",
             "",
             "■ Mac の方",
             "  survey-tool-mac.zip を展開し、",
             "  start_mac.command を右クリック→「開く」→「開く」で起動してください。",
+            "  ブロックされた場合：ターミナルを開いて実行：",
+            "    cd ~/Downloads/survey-tool-mac",
+            "    bash start_mac.command",
             "",
             "※ ZIP版の起動には Python（3.10以上）が必要です。",
             "   https://www.python.org/",
