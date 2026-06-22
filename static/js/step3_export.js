@@ -9,7 +9,6 @@ import {
   sortedRows,
   getSettings,
   getColorsForGraph,
-  getColorSeriesLabels,
   getLastCrosstabData,
   getCharts,
 } from "./step3.js";
@@ -37,10 +36,11 @@ function _buildExportPayload(questionIdx) {
 
   const questions = targets.map(result => {
     const s = getSettings(result.question_code, result.type_code);
-    const colorLabels = getColorSeriesLabels(result, s, axis_categories);
-    const colors = getColorsForGraph(result.question_code, colorLabels);
     const sorted = sortedRows(result.rows, s.sortOrder);
     const filtered = sorted.filter(r => !(s.hiddenChoices ?? []).includes(r.label));
+    // Excelシートの系列は行（選択肢）単位なので選択肢ラベルで色解決する
+    // 分割モードでもFlat Excel は同じ構造のため常にrow labelsを使う
+    const colors = getColorsForGraph(result.question_code, filtered.map(r => r.label));
 
     return {
       question_code:   result.question_code,

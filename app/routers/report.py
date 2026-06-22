@@ -231,7 +231,7 @@ async def generate_report(body: ReportGenerateRequest) -> ReportGenerateResponse
                                 if q_code not in df_full.columns:
                                     warnings.append(f"列 '{q_code}' がデータに存在しないためスキップしました。")
                                     continue
-                                raw_rows = _crosstab_sa(df_full, q_code, body.target_column, axis_cats)
+                                raw_rows = _crosstab_sa(df_full, q_code, body.target_column, axis_cats, q=q_map.get(q_code))
                             elif tc in _CROSSTAB_MA_TYPES:
                                 bcs = bracket_by_base.get(q_code, [])
                                 raw_rows = _crosstab_ma(df_full, bcs, body.target_column, axis_cats)
@@ -297,7 +297,7 @@ async def generate_report(body: ReportGenerateRequest) -> ReportGenerateResponse
                             if tc in _CROSSTAB_SA_TYPES:
                                 if q_code not in df_filt.columns:
                                     continue
-                                raw = _crosstab_sa(df_filt, q_code, axis_code, ax_cats)
+                                raw = _crosstab_sa(df_filt, q_code, axis_code, ax_cats, q=q_map.get(q_code))
                             elif tc in _CROSSTAB_MA_TYPES:
                                 bcs = bracket_by_base.get(q_code, [])
                                 raw = _crosstab_ma(df_filt, bcs, axis_code, ax_cats)
@@ -315,7 +315,7 @@ async def generate_report(body: ReportGenerateRequest) -> ReportGenerateResponse
                         ax_cats = _build_axis_cats(df_full, axis_code, axis_q)
                         ax_totals = [int((df_full[axis_code] == cat).sum()) for cat in ax_cats]
                         if tc in _CROSSTAB_SA_TYPES and q_code in df_full.columns:
-                            raw = _crosstab_sa(df_full, q_code, axis_code, ax_cats)
+                            raw = _crosstab_sa(df_full, q_code, axis_code, ax_cats, q=q_map.get(q_code))
                         elif tc in _CROSSTAB_MA_TYPES:
                             raw = _crosstab_ma(df_full, bracket_by_base.get(q_code, []), axis_code, ax_cats)
                         else:
@@ -396,7 +396,7 @@ async def generate_report(body: ReportGenerateRequest) -> ReportGenerateResponse
                         if q_code not in df_work.columns:
                             warnings.append(f"列 '{q_code}' がデータに存在しないためスキップしました。")
                             continue
-                        raw = _crosstab_sa(df_work, q_code, axis_code, ax_cats)
+                        raw = _crosstab_sa(df_work, q_code, axis_code, ax_cats, q=q_map.get(q_code))
                     elif tc in _CROSSTAB_MA_TYPES:
                         bcs = bracket_by_base.get(q_code, [])
                         raw = _crosstab_ma(df_work, bcs, axis_code, ax_cats)

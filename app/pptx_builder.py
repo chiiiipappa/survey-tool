@@ -686,6 +686,7 @@ def _resolve_colors(cc: dict, labels: list[str]) -> list[str]:
         if isinstance(e, dict) and "label" in e
     }
     overridden: dict = cs.get("overriddenSeriesColors") or {}
+    resolved_color_map: dict = cs.get("resolvedColorMap") or {}
     # selectedPalette キーが存在してかつ None = 明示的グレーパレット
     is_gray_palette = "selectedPalette" in cs and cs.get("selectedPalette") is None
 
@@ -694,6 +695,8 @@ def _resolve_colors(cc: dict, labels: list[str]) -> list[str]:
     for label in labels:
         if label in overridden:                                    # 手動上書き（最優先）
             colors.append(overridden[label])
+        elif label in resolved_color_map:                          # STEP3確定色
+            colors.append(resolved_color_map[label])
         elif label == "その他":
             colors.append("#aaaaaa")
         elif label == "全体":

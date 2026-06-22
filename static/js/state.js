@@ -233,6 +233,7 @@ function _ensureView(axisCode, secAxisCode) {
         createdAt: new Date().toISOString(),
       },
     };
+    _applyAutoColorsIfUnset();
   }
   AppState.step3ActiveViewId = viewId;
   return viewId;
@@ -1060,6 +1061,7 @@ function _buildChartConfig(cr, s3) {
       ...(s3.selectedPalette !== undefined ? { selectedPalette: s3.selectedPalette } : {}),
       valueColorMapping:      s3.valueColorMapping      ?? null,
       overriddenSeriesColors: { ...(s3.overriddenSeriesColors ?? {}) },
+      resolvedColorMap:       s3.resolvedColorMap        ?? null,
     },
   };
 }
@@ -1349,13 +1351,15 @@ export function toggleSplitGraphVisibility(dsIndex, chartResultId) {
 }
 
 // 旧フロー（report.js _onGenerate 経由）互換 — raw s3 settings で動作
-export function addChartResultsAsReportPages(chartResults) {
+// colorMapFn: (cr) => {label: hex} を返す任意コールバック（report.js から渡す）
+export function addChartResultsAsReportPages(chartResults, colorMapFn = null) {
   const _s3View = AppState.step3Views[AppState.step3ActiveViewId];
   const _s3QS = qCode =>
     _s3View?.questionSettings?.[qCode] ?? AppState.step3QuestionSettings?.[qCode] ?? {};
   const newPages = (chartResults ?? []).map(cr => {
     const s3raw = _s3QS(cr.question_code);
-    return _buildReportPage(cr, s3raw);
+    const resolvedColorMap = colorMapFn ? colorMapFn(cr) : null;
+    return _buildReportPage(cr, resolvedColorMap ? { ...s3raw, resolvedColorMap } : s3raw);
   });
   const allPages = [...AppState.reportProject.pages, ...newPages];
   const lastId = newPages.length > 0 ? newPages[newPages.length - 1].id : AppState.reportProject.activePageId;

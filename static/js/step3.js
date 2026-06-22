@@ -306,6 +306,12 @@ const FIXED_PALETTES = {
       return null;
     },
   },
+  category_8: {
+    label: "8分類パレット",
+    preview: ["#3B0603","#782535","#AA355D","#DF5088","#ED80B8","#F3B0E7","#FAE2FD","#D9D9D9"],
+    generatedColors: ["#3B0603","#782535","#AA355D","#DF5088","#ED80B8","#F3B0E7","#FAE2FD","#D9D9D9"],
+    colorFor: () => null,
+  },
   avg_tri_label: {
     label: "3区分ラベル",
     preview: ["#9D174D","#D9D9D9","#1E3A8A"],
@@ -328,7 +334,7 @@ const FIXED_PALETTES = {
     colorFor: () => "#676767",
   },
 };
-const FIXED_PALETTE_ORDER = ["fan_label","avg_tri_label","gender","age_gender","age_a","age_b","age_c","scale_67","scale_1011"];
+const FIXED_PALETTE_ORDER = ["fan_label","avg_tri_label","gender","age_gender","age_a","age_b","age_c","scale_67","scale_1011","category_8"];
 
 function _detectFixedPaletteFromLabels(labels) {
   if (labels.some(l => /コアファン/.test(l)) && labels.some(l => /ライトファン/.test(l)))
@@ -1496,6 +1502,12 @@ function _renderAttributePanel() {
     genBtn._genInitialized = true;
     genBtn.addEventListener("click", () => _runAttributeAnalysis());
   }
+
+  const rrBtn = document.getElementById("step3-attr-roundrobin-btn");
+  if (rrBtn && !rrBtn._rrInitialized) {
+    rrBtn._rrInitialized = true;
+    rrBtn.addEventListener("click", () => _runAttributeRoundRobin());
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1936,6 +1948,26 @@ async function _runAttributeAnalysis() {
   if (!simpleCodes.length && !pairs.length) {
     showToast("単純集計の対象設問、またはクロス集計ペアを1つ以上指定してください");
     return;
+  }
+  await _runSpecialAnalysis(
+    () => generateAttributeAnalysis(sessionToken, simpleCodes, pairs),
+    "attribute_analysis",
+  );
+}
+
+async function _runAttributeRoundRobin() {
+  const sessionToken = AppState.sessionToken;
+  if (!sessionToken) { showToast("セッションが切れています。ページを再読み込みしてください。"); return; }
+  const simpleCodes = AppState.step3AttrSimpleCodes;
+  if (simpleCodes.length < 2) {
+    showToast("総当たり生成には単純集計対象設問が2つ以上必要です");
+    return;
+  }
+  const pairs = [];
+  for (let i = 0; i < simpleCodes.length; i++) {
+    for (let j = i + 1; j < simpleCodes.length; j++) {
+      pairs.push({ rowCode: simpleCodes[i], colCode: simpleCodes[j] });
+    }
   }
   await _runSpecialAnalysis(
     () => generateAttributeAnalysis(sessionToken, simpleCodes, pairs),
@@ -2801,6 +2833,21 @@ function _renderSidebar() {
 }
 
 // ---------------------------------------------------------------------------
+// STEP3 → STEP4 カラーマップ事前計算
+// ---------------------------------------------------------------------------
+
+function _buildResolvedColorMap(cr) {
+  const axisLabels = cr.axis_categories ?? [];
+  const rowLabels  = (cr.rows ?? []).map(r => r.label);
+  const axisColors = _getColorsForGraph(cr.question_code, axisLabels);
+  const rowColors  = _getColorsForGraph(cr.question_code, rowLabels);
+  const map = {};
+  axisLabels.forEach((l, i) => { map[l] = axisColors[i]; });
+  rowLabels.forEach((l, i)  => { if (!(l in map)) map[l] = rowColors[i]; });
+  return map;
+}
+
+// ---------------------------------------------------------------------------
 // レポート追加 重複確認モーダル
 // ---------------------------------------------------------------------------
 
@@ -2908,35 +2955,22 @@ async function _runStep3() {
     filterColumn = basicAxis;
     filterValues = AppState.step3DeepDiveTarget ? [AppState.step3DeepDiveTarget] : [];
 
-    if (!filterColumn || !filterValues.length) {
+    if (!basicAxis) {
+      showToast("基本軸を選択してください");
+      return;
+    }
+    if (!filterValues.length) {
       showToast("深掘り対象を選択してください");
       return;
     }
-
-    if (selectedCodes.length) {
-      // 集計セットあり: 既存挙動
-      axisCode      = compAxis;
-      secAxisCode   = "";
-      overrideCodes = selectedCodes;
-      if (!axisCode) { showToast("比較軸を選択してください"); return; }
-    } else {
-      // 集計セットなし: 軸を集計対象として使用
-      if (!basicAxis && !compAxis) {
-        showToast("集計セット、基本軸、比較軸のいずれかを選択してください");
-        return;
-      }
-      if (compAxis) {
-        // 比較軸で全設問を集計（対象フィルタ付き）
-        axisCode      = compAxis;
-        secAxisCode   = "";
-        overrideCodes = [];
-      } else {
-        // 基本軸のみ → 全体集計（対象フィルタ付き）
-        axisCode      = "";
-        secAxisCode   = "";
-        overrideCodes = [];
-      }
+    if (!selectedCodes.length) {
+      showToast("集計対象設問を選択してください");
+      return;
     }
+
+    axisCode      = compAxis || "";  // 比較軸は任意（なければ全体集計）
+    secAxisCode   = "";
+    overrideCodes = selectedCodes;   // 選択した設問のみ集計
   }
 
   // 旧stateを同期（キャッシュキーと ChartResult 生成のため）
@@ -3917,8 +3951,8 @@ function _onResultsClick(e) {
     const crId = addReportBtn.dataset.crId;
     const cr = (AppState.chartResults ?? []).find(r => r.id === crId);
     if (!cr) { showToast("集計結果が見つかりません。先にグラフ生成を実行してください。", true); return; }
-    // type_code 依存のデフォルト込みで設定を取得
-    const s3 = _getSettings(cr.question_code, cr.type_code);
+    // type_code 依存のデフォルト込みで設定を取得（STEP3確定色マップを付与）
+    const s3 = { ..._getSettings(cr.question_code, cr.type_code), resolvedColorMap: _buildResolvedColorMap(cr) };
     const existing = findDuplicateReportPage(cr.id);
     if (existing) {
       _showDuplicateModal(cr, s3, existing);

@@ -576,10 +576,15 @@
                   <option value="">（基本軸を先に選択）</option>
                 </select>
               </div>
+              <div class="step3-config-row" style="margin-top:12px">
+                <label class="step3-config-label">集計対象設問 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">深掘り対象内で集計したい設問を選択してください。複数選択も可能です。</span></label>
+                <div id="step3-dive-question-checkboxes" class="step3-question-cb-list"></div>
+              </div>
+              <hr style="margin:16px 0; border:none; border-top:1px solid var(--color-border)">
               <div class="step3-config-row">
-                <label class="step3-config-label">比較軸 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">２軸目を追加したい場合に選択</span></label>
+                <label class="step3-config-label">比較軸<span style="font-weight:400; color:var(--color-text-muted)">（任意）</span> <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">２軸目を追加したい場合に選択</span></label>
                 <select id="step3-dive-comparison-axis-select" class="step3-config-select">
-                  <option value="">（未選択）</option>
+                  <option value="">（なし）</option>
                 </select>
               </div>
               <details id="step3-filter-details-dive" class="step3-filter-details">
@@ -596,10 +601,6 @@
                   </div>
                 </div>
               </details>
-              <div class="step3-config-row" style="margin-top:12px">
-                <label class="step3-config-label">集計対象設問 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">マトリクス設問を一気に生成するのに便利です。</span></label>
-                <div id="step3-dive-question-checkboxes" class="step3-question-cb-list"></div>
-              </div>
               <div style="margin-top:16px; text-align:right">
                 <button id="step3-dive-generate-btn" class="btn btn-primary">生成</button>
               </div>
@@ -624,6 +625,7 @@
                 <div id="step3-attr-pairs-list" style="margin-top:8px"></div>
               </div>
               <div style="margin-top:16px; text-align:right">
+                <button id="step3-attr-roundrobin-btn" class="btn btn-secondary" style="margin-right:8px">総当たり生成</button>
                 <button id="step3-attr-generate-btn" class="btn btn-primary">生成</button>
               </div>
             </div>

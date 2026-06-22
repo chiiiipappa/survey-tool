@@ -13,6 +13,7 @@ import {
 } from "./state.js";
 import { showToast } from "./app.js";
 import { exportReportPptx } from "./api.js";
+import { getColorsForGraph } from "./step3.js";
 
 // Chart.js インスタンス管理
 const _charts = new Map();
@@ -80,7 +81,7 @@ function _defaultChartSettings() {
     // 選択肢フィルタ
     hiddenChoices: [],
     // 集計表設定
-    tablePosition: "none",    // "none" | "bottom" | "top" | "right" | "left" | "separate"
+    tablePosition: "separate",    // "none" | "bottom" | "top" | "right" | "left" | "separate"
     tableWidthPct: 35,        // right/left配置時の集計表幅 (%)
     tableHeightPct: 40,       // top/bottom配置時の集計表高さ (%)
     tableContentMode: "percent",  // "percent" | "count" | "both"
@@ -933,11 +934,16 @@ function _syncColorsFromStep3(pageId) {
   const step3QS = view?.questionSettings?.[qCode]
                 ?? AppState.step3QuestionSettings?.[qCode]
                 ?? {};
+  const crId = page.aggregationConfig?.chartResultId;
+  const cr = AppState.chartResults?.find(r => r.id === crId)
+           ?? AppState.chartResults?.find(r => r.question_code === qCode);
+  const resolvedColorMap = cr ? _buildResolvedColorMap(cr) : null;
   _patchChartSettings({
     colorSettings: {
       selectedPalette: step3QS.selectedPalette ?? null,
       valueColorMapping: step3QS.valueColorMapping ?? null,
       overriddenSeriesColors: {},
+      ...(resolvedColorMap ? { resolvedColorMap } : {}),
     },
   });
   showToast("③のカラー設定を反映しました。");
@@ -974,7 +980,7 @@ function _onGenerate() {
     return;
   }
 
-  addChartResultsAsReportPages(selected);
+  addChartResultsAsReportPages(selected, _buildResolvedColorMap);
   setReportMainMode("preview");
 }
 
@@ -1015,12 +1021,25 @@ const CHART_COLORS = [
   "#1ABC9C", "#E67E22", "#E74C3C", "#2980B9", "#27AE60",
 ];
 
+function _buildResolvedColorMap(cr) {
+  const axisLabels = cr.axis_categories ?? [];
+  const rowLabels  = (cr.rows ?? []).map(r => r.label);
+  const axisColors = getColorsForGraph(cr.question_code, axisLabels);
+  const rowColors  = getColorsForGraph(cr.question_code, rowLabels);
+  const map = {};
+  axisLabels.forEach((l, i) => { map[l] = axisColors[i]; });
+  rowLabels.forEach((l, i)  => { if (!(l in map)) map[l] = rowColors[i]; });
+  return map;
+}
+
 function _resolveColorsForPage(cs, labels) {
   const co = cs?.colorSettings ?? {};
   // selectedPalette キーが存在してかつ null = 明示的グレーパレット（STEP3のグレー設定）
   const isGrayPalette = "selectedPalette" in co && co.selectedPalette === null;
+  const rcm = co.resolvedColorMap ?? null;
   return labels.map((label, i) => {
     if (co.overriddenSeriesColors?.[label]) return co.overriddenSeriesColors[label];
+    if (rcm?.[label]) return rcm[label];
     if (label === "その他") return "#aaaaaa";
     if (label === "全体" && labels.length > 1) return "#555555";
     const vm = Array.isArray(co.valueColorMapping)
@@ -1138,9 +1157,8 @@ function _buildPageElement(page, idSuffix, cs) {
   const canSideBySide = !isBrandChart && !isSmallMultiple && tableHtml;
   if (canSideBySide && (tablePos === "right" || tablePos === "left")) {
     const tableW = cs.tableWidthPct ?? 35;
-    const chartW = 100 - tableW;
-    const chartPart = `<div class="report-chart-wrap" style="flex:${chartW};height:auto;min-height:0;margin-bottom:0"><canvas id="report-chart-${idSuffix}"></canvas></div>`;
-    const tablePart = `<div class="report-table-wrap" style="flex:${tableW};overflow-y:auto;min-height:0;margin-bottom:0">${tableHtml}</div>`;
+    const chartPart = `<div class="report-chart-wrap" style="flex:1;min-width:0;height:auto;min-height:0;margin-bottom:0"><canvas id="report-chart-${idSuffix}"></canvas></div>`;
+    const tablePart = `<div class="report-table-wrap" style="flex:0 0 ${tableW}%;min-width:0;overflow-x:auto;overflow-y:auto;min-height:0;margin-bottom:0">${tableHtml}</div>`;
     const [leftPart, rightPart] = tablePos === "right" ? [chartPart, tablePart] : [tablePart, chartPart];
     wrap.innerHTML = `${bandHtml}
       <div class="report-page-body">
@@ -1155,13 +1173,12 @@ function _buildPageElement(page, idSuffix, cs) {
 
   // top/bottom テーブルがある場合はグラフもflex比率で高さを分割
   const tableH = cs.tableHeightPct ?? 40;
-  const chartH = 100 - tableH;
   const hasTopBottom = !isBrandChart && !isSmallMultiple && tableHtml
     && (tablePos === "top" || tablePos === "bottom");
 
   // チャートHTML（通常 / ブランド / スモールマルチプル）
   const chartWrapForTopBottom = hasTopBottom
-    ? `<div class="report-chart-wrap" style="flex:${chartH};height:auto;min-height:0;margin-bottom:0"><canvas id="report-chart-${idSuffix}"></canvas></div>`
+    ? `<div class="report-chart-wrap" style="flex:1;min-height:0;height:auto;margin-bottom:0"><canvas id="report-chart-${idSuffix}"></canvas></div>`
     : singleChartWrap;
   const mainChartHtml = isBrandChart
     ? singleChartWrap
@@ -1170,9 +1187,9 @@ function _buildPageElement(page, idSuffix, cs) {
       : chartWrapForTopBottom;
 
   const topTable = (tablePos === "top" && tableHtml)
-    ? `<div class="report-table-area" style="flex:${tableH};min-height:0;overflow-y:auto">${tableHtml}</div>` : "";
+    ? `<div class="report-table-area" style="flex:0 0 ${tableH}%;min-height:0;overflow-y:auto">${tableHtml}</div>` : "";
   const bottomTable = (tablePos === "bottom" && tableHtml)
-    ? `<div class="report-table-area" style="flex:${tableH};min-height:0;overflow-y:auto">${tableHtml}</div>` : "";
+    ? `<div class="report-table-area" style="flex:0 0 ${tableH}%;min-height:0;overflow-y:auto">${tableHtml}</div>` : "";
 
   wrap.innerHTML = `${bandHtml}
     <div class="report-page-body">
@@ -1352,8 +1369,8 @@ function _buildTableHtml(page, cs) {
   const showColTotal = cs.showTableColTotal;
   const cellPad = cs.tableCellPadding;
   const tableStyle = cellPad != null
-    ? `font-size:${fs}px;--report-cell-pad:${cellPad}px ${Math.round(cellPad * 2.5)}px`
-    : `font-size:${fs}px`;
+    ? `font-size:${fs}px;--report-cell-fs:${fs}px;--report-cell-pad:${cellPad}px ${Math.round(cellPad * 2.5)}px`
+    : `font-size:${fs}px;--report-cell-fs:${fs}px`;
 
   // セル値を文字列化するヘルパー
   const cellStr = (pct, cnt) => {
@@ -1474,7 +1491,7 @@ function _buildTableHtml(page, cs) {
 
   return `
     <div class="report-table-wrap">
-      <table class="report-table" style="font-size:${fs}px">
+      <table class="report-table" style="${tableStyle}">
         <thead><tr><th></th>${headerCells}</tr></thead>
         <tbody>${dataRows.join("")}${colTotalRow}</tbody>
       </table>
@@ -1529,15 +1546,16 @@ function _renderPageChart(page, idSuffix, cs) {
       : _buildSplitByComparisonDatasetsR4(page);
     const virtualDatasets = _sliceVirtual(allVirtual, cs);
     const sharedMax = _calcSharedMaxR4(virtualDatasets);
-    const allLabels = splitMode === "by_axis"
-      ? (page.axis_categories ?? [])
-      : (page.rows ?? []).map(r => r.label);
-    const paletteLabels = _sliceLabels(allLabels, cs);
-    const palette = _resolveColorsForPage(cs, paletteLabels);
+    // 選択肢カラーを解決（by_axis: 全サブチャート共通の配列, by_comparison: 1色/サブチャート）
+    const choiceColors = _resolveColorsForPage(cs, (page.rows ?? []).map(r => r.label));
+    const choiceColorMap = Object.fromEntries((page.rows ?? []).map((r, i) => [r.label, choiceColors[i]]));
     virtualDatasets.forEach((ds, dsIdx) => {
       const canvas = document.getElementById(`report-chart-${idSuffix}-${dsIdx}`);
       if (!canvas) return;
-      _buildSplitSubChartR4(canvas, `${idSuffix}-${dsIdx}`, ds, cs, palette[dsIdx] ?? "#3B82F6", sharedMax);
+      const color = splitMode === "by_axis"
+        ? choiceColors                                   // 配列: 選択肢ごとに色分け
+        : (choiceColorMap[ds.target_value] ?? "#3B82F6"); // 1色: 選択肢ラベル引き当て
+      _buildSplitSubChartR4(canvas, `${idSuffix}-${dsIdx}`, ds, cs, color, sharedMax);
     });
   } else if (opts.forceSmall || (hasComparison && !opts.brandHbar && !opts.brandVbar)) {
     const datasetsToRender = isSplitMode
@@ -1547,15 +1565,18 @@ function _renderPageChart(page, idSuffix, cs) {
         )
       : (page.comparison_datasets ?? []);
     const sharedMax = isSplitMode ? _calcSharedMaxR4(datasetsToRender) : null;
-    const paletteLabels = isSplitMode
-      ? (splitMode === "by_axis" ? (page.axis_categories ?? []) : (page.rows ?? []).map(r => r.label))
+    const choiceColors = isSplitMode ? _resolveColorsForPage(cs, (page.rows ?? []).map(r => r.label)) : null;
+    const choiceColorMap = choiceColors
+      ? Object.fromEntries((page.rows ?? []).map((r, i) => [r.label, choiceColors[i]]))
       : null;
-    const palette = paletteLabels ? _resolveColorsForPage(cs, paletteLabels) : null;
     datasetsToRender.forEach((ds, dsIdx) => {
       const canvas = document.getElementById(`report-chart-${idSuffix}-${dsIdx}`);
       if (!canvas) return;
       if (isSplitMode) {
-        _buildSplitSubChartR4(canvas, `${idSuffix}-${dsIdx}`, ds, cs, palette[dsIdx] ?? "#3B82F6", sharedMax);
+        const color = splitMode === "by_axis"
+          ? choiceColors
+          : (choiceColorMap[ds.target_value] ?? "#3B82F6");
+        _buildSplitSubChartR4(canvas, `${idSuffix}-${dsIdx}`, ds, cs, color, sharedMax);
       } else {
         _buildBarChart(canvas, `${idSuffix}-${dsIdx}`, ds.rows, ds.axis_categories, ds.axis_totals, cs, opts);
       }
