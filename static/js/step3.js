@@ -2053,10 +2053,11 @@ async function _displaySpecialBlocks(data, modeTag) {
   if (placeholder) placeholder.style.display = "none";
   await _showSpecialBlock(0);
 
-  // STEP4向け ChartResult 登録（全ブロック分）
-  const newChartResults = blocks.map((b, idx) => {
-    const r = b.results[0];
-    return {
+  // STEP4向け ChartResult 登録（ブロック内の全結果分）
+  // 単純集計ブロックは b.results に複数設問を含むため flatMap で展開する
+  const newChartResults = blocks.flatMap((b, idx) => {
+    const results = b.results?.length ? b.results : [null];
+    return results.map(r => ({
       id: `special:${modeTag}:${idx}:${r?.question_code ?? idx}`,
       title: `${r?.question_text ?? b.block_label} × ${b.axis_question_text || b.block_label}`,
       mode: modeTag,
@@ -2069,7 +2070,7 @@ async function _displaySpecialBlocks(data, modeTag) {
       axis_totals: b.axis_totals,
       rows: r?.rows ?? [],
       created_at: new Date().toISOString(),
-    };
+    }));
   });
   addChartResults(newChartResults);
 }

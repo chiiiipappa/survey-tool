@@ -31,10 +31,26 @@ _SKIP_TYPES = {"FA", "OA", "OE", "FT", "FN", "XL", "F"}
 
 
 def _safe_float(val: float) -> float:
-    """NaN / Inf を 0.0 に変換する。"""
+    """NaN / Inf を 0.0 に変換する（丸めは行わない）。"""
     if math.isnan(val) or math.isinf(val):
         return 0.0
-    return round(val, 1)
+    return float(val)
+
+
+def _adjust_pcts(raw_values: list[float]) -> list[float]:
+    """最大剰余法で小数第1位に丸めた合計を厳密に100.0にする。"""
+    if not raw_values:
+        return raw_values
+    total = sum(raw_values)
+    if total == 0:
+        return [0.0] * len(raw_values)
+    floored = [math.floor(v * 10) / 10 for v in raw_values]
+    remainders = [(v * 10 - math.floor(v * 10), i) for i, v in enumerate(raw_values)]
+    deficit = round(100.0 - sum(floored), 10)
+    n_add = round(deficit * 10)
+    for _, idx in sorted(remainders, reverse=True)[:max(0, n_add)]:
+        floored[idx] = round(floored[idx] + 0.1, 1)
+    return [round(v, 1) for v in floored]
 
 
 def _norm_code(v) -> str:
@@ -87,14 +103,23 @@ def _crosstab_sa(
     # N数（軸カテゴリーごと）
     col_totals = ct.sum(axis=0)
 
-    rows: list[CrosstabRow] = []
+    raw_rows: list[tuple[str, list[int], list[float]]] = []
     for label, row in ct.iterrows():
         counts = [int(row[cat]) for cat in axis_cats]
-        percents = [
+        percents_raw = [
             _safe_float(c / col_totals[cat] * 100) if col_totals[cat] > 0 else 0.0
             for c, cat in zip(counts, axis_cats)
         ]
-        rows.append(CrosstabRow(label=str(label), counts=counts, percents=percents))
+        raw_rows.append((str(label), counts, percents_raw))
+
+    n_cols = len(axis_cats)
+    for col_idx in range(n_cols):
+        col_raw = [r[2][col_idx] for r in raw_rows]
+        col_adjusted = _adjust_pcts(col_raw)
+        for row_idx, val in enumerate(col_adjusted):
+            raw_rows[row_idx][2][col_idx] = val
+
+    rows = [CrosstabRow(label=lbl, counts=cnts, percents=pcts) for lbl, cnts, pcts in raw_rows]
 
     return rows
 
@@ -109,7 +134,7 @@ def _crosstab_ma(
     sub = df[df[axis_col].isin(axis_cats)]
     col_totals = sub[axis_col].value_counts().reindex(axis_cats, fill_value=0)
 
-    rows: list[CrosstabRow] = []
+    raw_rows: list[tuple[str, list[int], list[float]]] = []
     for bc in bracket_cols:
         display_col = bc["display_header"]
         if display_col not in df.columns:
@@ -121,15 +146,20 @@ def _crosstab_ma(
         grp = answered.groupby(sub[axis_col]).sum().reindex(axis_cats, fill_value=0)
 
         counts = [int(grp[cat]) for cat in axis_cats]
-        percents = [
+        percents_raw = [
             _safe_float(c / col_totals[cat] * 100) if col_totals[cat] > 0 else 0.0
             for c, cat in zip(counts, axis_cats)
         ]
-        rows.append(CrosstabRow(
-            label=bc["choice_label"],
-            counts=counts,
-            percents=percents,
-        ))
+        raw_rows.append((bc["choice_label"], counts, percents_raw))
+
+    n_cols = len(axis_cats)
+    for col_idx in range(n_cols):
+        col_raw = [r[2][col_idx] for r in raw_rows]
+        col_adjusted = _adjust_pcts(col_raw)
+        for row_idx, val in enumerate(col_adjusted):
+            raw_rows[row_idx][2][col_idx] = val
+
+    rows = [CrosstabRow(label=lbl, counts=cnts, percents=pcts) for lbl, cnts, pcts in raw_rows]
 
     return rows
 
@@ -162,19 +192,29 @@ def _crosstab_total(
             remaining = [lbl for lbl in vc_mapped.index if lbl not in s1_set]
             ordered_labels = [lbl for lbl in choice_labels if lbl in vc_mapped.index] + remaining
             vc_mapped = vc_mapped.reindex(ordered_labels, fill_value=0)
+        raw_rows: list[tuple[str, list[int], list[float]]] = []
         for label, cnt in vc_mapped.items():
-            pct = _safe_float(cnt / n * 100) if n > 0 else 0.0
-            rows.append(CrosstabRow(label=str(label), counts=[int(cnt)], percents=[pct]))
+            pct_raw = _safe_float(cnt / n * 100) if n > 0 else 0.0
+            raw_rows.append((str(label), [int(cnt)], [pct_raw]))
+        adjusted = _adjust_pcts([r[2][0] for r in raw_rows])
+        for row_idx, val in enumerate(adjusted):
+            raw_rows[row_idx][2][0] = val
+        rows.extend(CrosstabRow(label=lbl, counts=cnts, percents=pcts) for lbl, cnts, pcts in raw_rows)
 
     elif tc in _CROSSTAB_MA_TYPES:
+        raw_rows: list[tuple[str, list[int], list[float]]] = []
         for bc in bracket_cols:
             dcol = bc["display_header"]
             if dcol not in df.columns:
                 continue
             val_str = df[dcol].fillna("").astype(str).str.strip()
             cnt = int((~val_str.isin(["", "-"])).sum())
-            pct = _safe_float(cnt / n * 100) if n > 0 else 0.0
-            rows.append(CrosstabRow(label=bc["choice_label"], counts=[cnt], percents=[pct]))
+            pct_raw = _safe_float(cnt / n * 100) if n > 0 else 0.0
+            raw_rows.append((bc["choice_label"], [cnt], [pct_raw]))
+        adjusted = _adjust_pcts([r[2][0] for r in raw_rows])
+        for row_idx, val in enumerate(adjusted):
+            raw_rows[row_idx][2][0] = val
+        rows.extend(CrosstabRow(label=lbl, counts=cnts, percents=pcts) for lbl, cnts, pcts in raw_rows)
 
     return rows, n
 
@@ -297,23 +337,32 @@ def _crosstab_sa_bracket_axis(
     if not values:
         return []
 
-    rows: list[CrosstabRow] = []
+    raw_rows: list[tuple[str, list[int], list[float]]] = []
     for val in values:
         target_mask = df[q_col].astype(str) == val
         counts: list[int] = []
-        percents: list[float] = []
+        percents_raw: list[float] = []
         for bc, total in zip(bcs_axis, axis_totals):
             dcol = bc["display_header"]
             if dcol not in df.columns:
                 counts.append(0)
-                percents.append(0.0)
+                percents_raw.append(0.0)
                 continue
             sel_mask = ~df[dcol].fillna("").astype(str).str.strip().isin(["", "-"])
             c = int((target_mask & sel_mask).sum())
-            p = _safe_float(c / total * 100) if total > 0 else 0.0
+            p_raw = _safe_float(c / total * 100) if total > 0 else 0.0
             counts.append(c)
-            percents.append(p)
-        rows.append(CrosstabRow(label=str(val), counts=counts, percents=percents))
+            percents_raw.append(p_raw)
+        raw_rows.append((str(val), counts, percents_raw))
+
+    n_cols = len(axis_cats)
+    for col_idx in range(n_cols):
+        col_raw = [r[2][col_idx] for r in raw_rows]
+        col_adjusted = _adjust_pcts(col_raw)
+        for row_idx, val in enumerate(col_adjusted):
+            raw_rows[row_idx][2][col_idx] = val
+
+    rows = [CrosstabRow(label=lbl, counts=cnts, percents=pcts) for lbl, cnts, pcts in raw_rows]
     return rows
 
 
@@ -325,26 +374,35 @@ def _crosstab_ma_bracket_axis(
     axis_totals: list[int],
 ) -> list[CrosstabRow]:
     """MA設問のクロス集計（bracket MA が集計軸の場合）。"""
-    rows: list[CrosstabRow] = []
+    raw_rows: list[tuple[str, list[int], list[float]]] = []
     for bc_target in bcs_target:
         dcol_t = bc_target["display_header"]
         if dcol_t not in df.columns:
             continue
         target_mask = ~df[dcol_t].fillna("").astype(str).str.strip().isin(["", "-"])
         counts: list[int] = []
-        percents: list[float] = []
+        percents_raw: list[float] = []
         for bc_axis, total in zip(bcs_axis, axis_totals):
             dcol_a = bc_axis["display_header"]
             if dcol_a not in df.columns:
                 counts.append(0)
-                percents.append(0.0)
+                percents_raw.append(0.0)
                 continue
             sel_mask = ~df[dcol_a].fillna("").astype(str).str.strip().isin(["", "-"])
             c = int((target_mask & sel_mask).sum())
-            p = _safe_float(c / total * 100) if total > 0 else 0.0
+            p_raw = _safe_float(c / total * 100) if total > 0 else 0.0
             counts.append(c)
-            percents.append(p)
-        rows.append(CrosstabRow(label=bc_target["choice_label"], counts=counts, percents=percents))
+            percents_raw.append(p_raw)
+        raw_rows.append((bc_target["choice_label"], counts, percents_raw))
+
+    n_cols = len(axis_cats)
+    for col_idx in range(n_cols):
+        col_raw = [r[2][col_idx] for r in raw_rows]
+        col_adjusted = _adjust_pcts(col_raw)
+        for row_idx, val in enumerate(col_adjusted):
+            raw_rows[row_idx][2][col_idx] = val
+
+    rows = [CrosstabRow(label=lbl, counts=cnts, percents=pcts) for lbl, cnts, pcts in raw_rows]
     return rows
 
 

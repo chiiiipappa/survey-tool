@@ -546,38 +546,16 @@
                   <option value="">（未選択）</option>
                 </select>
               </div>
-              <div class="step3-config-row">
-                <label class="step3-config-label">比較軸 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">２軸目を追加したい場合に選択</span></label>
-                <select id="step3-comparison-axis-select" class="step3-config-select">
-                  <option value="">（なし）</option>
-                </select>
-              </div>
-              <details id="step3-filter-details-brand" class="step3-filter-details">
-                <summary class="step3-filter-summary">
-                  絞り込み条件
-                  <span id="step3-filter-badge-brand" class="step3-filter-badge" hidden>絞り込み中</span>
-                </summary>
-                <div class="step3-filter-inner">
-                  <select id="step3-target-column" class="step3-config-select" style="margin-bottom:4px">
-                    <option value="">（絞り込みなし — 全回答者）</option>
-                  </select>
-                  <div id="step3-target-values-section" style="display:none; margin-top:8px">
-                    <div class="step3-config-sublabel">
-                      絞り込み値
-                      <span id="step3-target-values-count" style="font-weight:400; font-size:.78rem; color:var(--color-text-muted)"></span>
-                    </div>
-                    <div class="step3-target-ctrl-bar">
-                      <button id="step3-target-all-btn" class="btn btn-secondary btn-sm">全選択</button>
-                      <button id="step3-target-none-btn" class="btn btn-secondary btn-sm">全解除</button>
-                      <input type="text" id="step3-target-value-search" class="step3-target-search" placeholder="検索…" autocomplete="off">
-                    </div>
-                    <div id="step3-target-values-list" class="step3-target-cb-list"></div>
-                  </div>
-                </div>
-              </details>
               <div class="step3-config-row" style="margin-top:12px">
                 <label class="step3-config-label">集計対象設問 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">マトリクス設問を一気に生成するのに便利です。</span></label>
                 <div id="step3-question-checkboxes" class="step3-question-cb-list"></div>
+              </div>
+              <hr style="margin:16px 0; border:none; border-top:1px solid var(--color-border)">
+              <div class="step3-config-row">
+                <label class="step3-config-label">比較軸<span style="font-weight:400; color:var(--color-text-muted)">（任意）</span> <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">２軸目を追加したい場合に選択</span></label>
+                <select id="step3-comparison-axis-select" class="step3-config-select">
+                  <option value="">（なし）</option>
+                </select>
               </div>
               <div style="margin-top:16px; text-align:right">
                 <button id="step3-generate-btn" class="btn btn-primary">グラフ生成</button>
