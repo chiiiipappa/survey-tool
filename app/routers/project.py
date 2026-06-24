@@ -36,6 +36,7 @@ class ProjectSaveRequest(BaseModel):
     step3_basic_axis_code: str = ""
     step3_comparison_axis_code: str = ""
     step3_deep_dive_target: str = ""
+    step3_deep_dive_targets: list = Field(default_factory=list)
     step3_secondary_axis_code: str = ""
     step3_composite_display_mode: str = "split"
     step3_color_priority: str = "axis1"
@@ -103,6 +104,7 @@ async def save_project(body: ProjectSaveRequest) -> StreamingResponse:
             "step3_basic_axis_code": body.step3_basic_axis_code,
             "step3_comparison_axis_code": body.step3_comparison_axis_code,
             "step3_deep_dive_target": body.step3_deep_dive_target,
+            "step3_deep_dive_targets": body.step3_deep_dive_targets,
             "step3_secondary_axis_code": body.step3_secondary_axis_code,
             "step3_composite_display_mode": body.step3_composite_display_mode,
             "step3_color_priority": body.step3_color_priority,
@@ -238,6 +240,7 @@ async def load_project(file: UploadFile = File(...)) -> dict:
                     "step3_basic_axis_code": layout.get("step3_basic_axis_code", ""),
                     "step3_comparison_axis_code": layout.get("step3_comparison_axis_code", ""),
                     "step3_deep_dive_target": layout.get("step3_deep_dive_target", ""),
+                    "step3_deep_dive_targets": layout.get("step3_deep_dive_targets", []),
                     "step3_secondary_axis_code": layout.get("step3_secondary_axis_code", ""),
                     "step3_composite_display_mode": layout.get("step3_composite_display_mode", "split"),
                     "step3_color_priority": layout.get("step3_color_priority", "axis1"),
@@ -376,6 +379,7 @@ async def load_project(file: UploadFile = File(...)) -> dict:
         "step3_basic_axis_code": project_data.get("step3_basic_axis_code", ""),
         "step3_comparison_axis_code": project_data.get("step3_comparison_axis_code", ""),
         "step3_deep_dive_target": project_data.get("step3_deep_dive_target", ""),
+        "step3_deep_dive_targets": project_data.get("step3_deep_dive_targets", []),
         "step3_composite_display_mode": project_data.get("step3_composite_display_mode", "split"),
         "step3_color_priority": project_data.get("step3_color_priority", "axis1"),
         "step3_min_sample_size": project_data.get("step3_min_sample_size", 0),

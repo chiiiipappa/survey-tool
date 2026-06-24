@@ -571,10 +571,10 @@
                 </select>
               </div>
               <div class="step3-config-row">
-                <label class="step3-config-label">対象</label>
-                <select id="step3-dive-target-select" class="step3-config-select" disabled>
-                  <option value="">（基本軸を先に選択）</option>
-                </select>
+                <label class="step3-config-label">対象 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">複数選択可・未選択で全対象</span></label>
+                <div id="step3-dive-target-list" class="step3-target-cb-list">
+                  <span style="color:var(--color-text-muted); font-size:.85rem">（基本軸を先に選択）</span>
+                </div>
               </div>
               <div class="step3-config-row" style="margin-top:12px">
                 <label class="step3-config-label">集計対象設問 <span style="font-size:.75rem; font-weight:400; color:var(--color-text-muted)">深掘り対象内で集計したい設問を選択してください。複数選択も可能です。</span></label>
@@ -997,13 +997,17 @@
                     <option value="left">左（表左・グラフ右）</option>
                     <option value="separate">別スライド（PPTのみ）</option>
                   </select>
-                  <div class="report-edit-inline" style="margin-top:4px">
-                    <label class="report-edit-label-sm">表の幅（右/左配置）</label>
-                    <input type="number" id="edit-table-width-pct" min="20" max="55" step="5" value="35" class="report-edit-number-sm">%
+                  <div class="report-edit-field" style="margin-top:4px">
+                    <label class="report-edit-label">表の幅（右/左配置）
+                      <span id="edit-table-width-pct-val" class="report-edit-label-sm">35%</span>
+                    </label>
+                    <input type="range" id="edit-table-width-pct" min="15" max="60" step="5" value="35" class="report-edit-range">
                   </div>
-                  <div class="report-edit-inline" style="margin-top:4px">
-                    <label class="report-edit-label-sm">表の高さ（上/下配置）</label>
-                    <input type="number" id="edit-table-height-pct" min="20" max="55" step="5" value="40" class="report-edit-number-sm">%
+                  <div class="report-edit-field" style="margin-top:4px">
+                    <label class="report-edit-label">表の高さ（上/下配置）
+                      <span id="edit-table-height-pct-val" class="report-edit-label-sm">40%</span>
+                    </label>
+                    <input type="range" id="edit-table-height-pct" min="15" max="65" step="5" value="40" class="report-edit-range">
                   </div>
                   <div class="report-edit-inline" style="margin-top:4px">
                     <label class="report-edit-label-sm">表示内容</label>
@@ -1023,6 +1027,12 @@
                     <label class="report-edit-toggle-row">
                       <input type="checkbox" id="edit-show-col-total">
                       <span>合計行（列合計）</span>
+                    </label>
+                  </div>
+                  <div class="report-edit-inline">
+                    <label class="report-edit-toggle-row">
+                      <input type="checkbox" id="edit-table-transpose">
+                      <span>行列入替</span>
                     </label>
                   </div>
                   <div class="report-edit-inline" style="margin-top:4px">

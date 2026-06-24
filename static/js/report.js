@@ -278,12 +278,18 @@ function _bindEditPanelEvents() {
     _patchChartSettings({ tablePosition: v, showTable: v !== "none" });
   });
 
-  // 集計表のサイズ
+  // 集計表のサイズ（スライダー）
   document.getElementById("edit-table-width-pct")?.addEventListener("input", (e) => {
-    _patchChartSettings({ tableWidthPct: parseInt(e.target.value, 10) || 35 });
+    const v = parseInt(e.target.value, 10) || 35;
+    const valEl = document.getElementById("edit-table-width-pct-val");
+    if (valEl) valEl.textContent = `${v}%`;
+    _patchChartSettings({ tableWidthPct: v });
   });
   document.getElementById("edit-table-height-pct")?.addEventListener("input", (e) => {
-    _patchChartSettings({ tableHeightPct: parseInt(e.target.value, 10) || 40 });
+    const v = parseInt(e.target.value, 10) || 40;
+    const valEl = document.getElementById("edit-table-height-pct-val");
+    if (valEl) valEl.textContent = `${v}%`;
+    _patchChartSettings({ tableHeightPct: v });
   });
   document.getElementById("edit-table-cell-padding")?.addEventListener("input", (e) => {
     const v = parseInt(e.target.value, 10);
@@ -340,6 +346,11 @@ function _bindEditPanelEvents() {
   });
   document.getElementById("edit-show-col-total")?.addEventListener("change", (e) => {
     _patchChartSettings({ showTableColTotal: e.target.checked });
+  });
+
+  // 集計表: 行列入替
+  document.getElementById("edit-table-transpose")?.addEventListener("change", (e) => {
+    _patchChartSettings({ transpose: e.target.checked });
   });
 
   // 集計表: フォントサイズ
@@ -636,11 +647,19 @@ function _renderEditPanel(page) {
   const tablePosEl = document.getElementById("edit-table-position");
   if (tablePosEl) tablePosEl.value = _getEffectiveTablePosition(cs);
 
-  // 集計表のサイズ
+  // 集計表のサイズ（スライダー）
   const twEl = document.getElementById("edit-table-width-pct");
-  if (twEl && twEl !== document.activeElement) twEl.value = String(cs.tableWidthPct ?? 35);
+  if (twEl && twEl !== document.activeElement) {
+    twEl.value = String(cs.tableWidthPct ?? 35);
+    const twValEl = document.getElementById("edit-table-width-pct-val");
+    if (twValEl) twValEl.textContent = `${cs.tableWidthPct ?? 35}%`;
+  }
   const thEl = document.getElementById("edit-table-height-pct");
-  if (thEl && thEl !== document.activeElement) thEl.value = String(cs.tableHeightPct ?? 40);
+  if (thEl && thEl !== document.activeElement) {
+    thEl.value = String(cs.tableHeightPct ?? 40);
+    const thValEl = document.getElementById("edit-table-height-pct-val");
+    if (thValEl) thValEl.textContent = `${cs.tableHeightPct ?? 40}%`;
+  }
   const tcpEl = document.getElementById("edit-table-cell-padding");
   if (tcpEl && tcpEl !== document.activeElement) tcpEl.value = String(cs.tableCellPadding ?? "");
 
@@ -655,6 +674,8 @@ function _renderEditPanel(page) {
   if (rowTotalEl) rowTotalEl.checked = cs.showTableRowTotal;
   const colTotalEl = document.getElementById("edit-show-col-total");
   if (colTotalEl) colTotalEl.checked = cs.showTableColTotal;
+  const transposeEl = document.getElementById("edit-table-transpose");
+  if (transposeEl) transposeEl.checked = cs.transpose ?? false;
   const tableFsEl = document.getElementById("edit-table-font-size");
   if (tableFsEl && tableFsEl !== document.activeElement) tableFsEl.value = String(cs.tableFontSize ?? 9);
 
@@ -1394,9 +1415,9 @@ function _buildTableHtml(page, cs) {
     const datasets = page.comparison_datasets;
     const targetLabels = datasets.map(ds => ds.target_value);
 
-    // ヘッダー行：空 + target_value ラベル群 + (合計列ヘッダー)
-    const headerCells = targetLabels.map(t => `<th>${_esc(t)}</th>`).join("") +
-      (showRowTotal ? `<th class="report-table-total">合計</th>` : "");
+    // ヘッダー行：空 + (合計列ヘッダー) + target_value ラベル群
+    const totalTh = showRowTotal ? `<th class="report-table-total">合計</th>` : "";
+    const headerCells = totalTh + targetLabels.map(t => `<th>${_esc(t)}</th>`).join("");
 
     // データ行
     const dataRows = allRows.map((row) => {
@@ -1406,7 +1427,7 @@ function _buildTableHtml(page, cs) {
         const cnt = dsRow?.counts?.[0] ?? 0;
         return `<td>${cellStr(pct, cnt)}</td>`;
       }).join("");
-      // 合計列
+      // 合計列（ラベルの右隣）
       const rowTotalHtml = showRowTotal
         ? (() => {
             const totalCnt = datasets.reduce((sum, ds) => {
@@ -1418,17 +1439,17 @@ function _buildTableHtml(page, cs) {
             return `<td class="report-table-total">${cellStr(totalPct, totalCnt)}</td>`;
           })()
         : "";
-      return `<tr><td>${_esc(row.label)}</td>${cells}${rowTotalHtml}</tr>`;
+      return `<tr><td>${_esc(row.label)}</td>${rowTotalHtml}${cells}</tr>`;
     });
 
     // 合計行
     const colTotalRow = showColTotal
-      ? `<tr class="report-table-total-row"><td>合計</td>${datasets.map((ds) => {
+      ? `<tr class="report-table-total-row"><td>合計</td>${showRowTotal ? `<td class="report-table-total">—</td>` : ""}${datasets.map((ds) => {
           const totalCnt = ds.rows.reduce((s, r) => s + (r.counts?.[0] ?? 0), 0);
           const n = ds.axis_totals?.[0] ?? 0;
           const totalPct = n > 0 ? totalCnt / n * 100 : 0;
           return `<td class="report-table-total">${cellStr(totalPct, totalCnt)}</td>`;
-        }).join("")}${showRowTotal ? `<td class="report-table-total">—</td>` : ""}</tr>`
+        }).join("")}</tr>`
       : "";
 
     return `
@@ -1460,14 +1481,14 @@ function _buildTableHtml(page, cs) {
 
   if (!axisCats.length || !rows.length) return "";
 
-  const headerCells = axisCats.map(c => `<th>${_esc(c)}</th>`).join("") +
-    (showRowTotal ? `<th class="report-table-total">合計</th>` : "");
+  const rowTotalTh = showRowTotal ? `<th class="report-table-total">合計</th>` : "";
+  const headerCells = rowTotalTh + axisCats.map(c => `<th>${_esc(c)}</th>`).join("");
 
   const dataRows = rows.map(r => {
     const cells = r.percents.map((p, i) =>
       `<td>${cellStr(p, r.counts?.[i])}</td>`
     ).join("");
-    // 合計列
+    // 合計列（ラベルの右隣）
     const rowTotalHtml = showRowTotal
       ? (() => {
           const totalCnt = (r.counts ?? []).reduce((a, b) => a + b, 0);
@@ -1476,17 +1497,17 @@ function _buildTableHtml(page, cs) {
           return `<td class="report-table-total">${cellStr(totalPct, totalCnt)}</td>`;
         })()
       : "";
-    return `<tr><td>${_esc(r.label)}</td>${cells}${rowTotalHtml}</tr>`;
+    return `<tr><td>${_esc(r.label)}</td>${rowTotalHtml}${cells}</tr>`;
   });
 
   // 合計行
   const colTotalRow = showColTotal
-    ? `<tr class="report-table-total-row"><td>合計</td>${axisCats.map((_, i) => {
+    ? `<tr class="report-table-total-row"><td>合計</td>${showRowTotal ? `<td class="report-table-total">—</td>` : ""}${axisCats.map((_, i) => {
         const cnt = rows.reduce((s, r) => s + (r.counts?.[i] ?? 0), 0);
         const n = axisTotals?.[i] ?? 0;
         const pct = n > 0 ? cnt / n * 100 : 0;
         return `<td class="report-table-total">${cellStr(pct, cnt)}</td>`;
-      }).join("")}${showRowTotal ? `<td class="report-table-total">—</td>` : ""}</tr>`
+      }).join("")}</tr>`
     : "";
 
   return `

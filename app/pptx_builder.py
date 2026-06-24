@@ -368,7 +368,19 @@ def _add_chart_area(slide, cr: dict, cc: dict, mode: str, x, y, w, h) -> None:
                    "axis_categories":    ds.get("axis_categories", []),
                    "axis_totals":        ds.get("axis_totals", []),
                    "comparison_datasets": None}
-        _add_chart_shape(slide, mini_cr, cc, "vbar",
+        # by_comparison: サブチャート全系列を選択肢の1色で統一
+        # STEP3/STEP4 では ds.target_value（選択肢ラベル）の色が全バーに適用される
+        if split_mode == "by_comparison":
+            choice_label = ds.get("target_value", "")
+            choice_color = _resolve_colors(cc, [choice_label])[0] if choice_label else CHART_COLORS[i % len(CHART_COLORS)]
+            axis_cats_for_ds = ds.get("axis_categories", [])
+            mini_cc = {**cc, "colorSettings": {
+                **(cc.get("colorSettings") or {}),
+                "overriddenSeriesColors": {cat: choice_color for cat in axis_cats_for_ds},
+            }}
+        else:
+            mini_cc = cc
+        _add_chart_shape(slide, mini_cr, mini_cc, "vbar",
                          x + col_w * col, y + row_h * row, col_w, row_h)
 
 

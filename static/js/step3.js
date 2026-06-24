@@ -4,7 +4,7 @@
  * 設問ごとに棒グラフ向き・%ラベル・ソート・折りたたみ・除外を設定可能。
  * 設定は AppState.step3QuestionSettings に保持してプロジェクト保存対象。
  */
-import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3SelectedQuestionCodes, setStep3AttrSimpleCodes, setStep3AttrCrossPairs, setStep3FanDegreeType, setStep3FanRowCode, setStep3FanColCode, setStep3FanMatrix, setStep3FanDenominatorMode, setStep3FanFilterColumn, setStep3FanFilterValues, addDerivedAxisQuestions, addSavedIndicator, setStep3AvgTargets, setStep3AvgIndicatorCodes, setStep3AvgTriMatrix, computeAutoColorMapping } from "./state.js";
+import { AppState, setStep3ActiveAxis, setStep3SecondaryAxis, setStep3CompositeDisplayMode, setStep3ColorPriority, setStep3MinSampleSize, setStep3Setting, setStep3SettingsBulk, setStep1FixedPalette, clearQuestionColorState, clearQuestionColorStateBulk, addUserPalette, setStep3ActiveSetId, setStep3ActiveViewId, setStep3TargetFilterColumn, setStep3TargetFilterValues, getTargetValues, addChartResults, addChartResultsAsReportPages, addReportPageFromStep3, overwriteReportPageFromStep3, findDuplicateReportPage, setActivePanel, setStep3Mode, setStep3BasicAxis, setStep3ComparisonAxis, setStep3DeepDiveTarget, setStep3DeepDiveTargets, setStep3SelectedQuestionCodes, setStep3AttrSimpleCodes, setStep3AttrCrossPairs, setStep3FanDegreeType, setStep3FanRowCode, setStep3FanColCode, setStep3FanMatrix, setStep3FanDenominatorMode, setStep3FanFilterColumn, setStep3FanFilterValues, addDerivedAxisQuestions, addSavedIndicator, setStep3AvgTargets, setStep3AvgIndicatorCodes, setStep3AvgTriMatrix, computeAutoColorMapping } from "./state.js";
 
 import { generateCrosstab, generateAttributeAnalysis, generateFanAnalysis, exportFanAnalysis, saveFanDegreeAsAxis, generateAverageAnalysis, saveAverageAsIndicator, saveAverageAsDerived, saveAttributeAsAxis } from "./api.js";
 import { yieldToMain, showToast } from "./app.js";
@@ -830,24 +830,29 @@ function _renderDeepDivePanel() {
       basicSel.addEventListener("change", () => {
         setStep3BasicAxis(basicSel.value);
         setStep3DeepDiveTarget("");
+        setStep3DeepDiveTargets([]);
       });
     }
   }
 
-  // 対象（基本軸の選択肢）
-  const targetSel = document.getElementById("step3-dive-target-select");
-  if (targetSel) {
+  // 対象（基本軸の選択肢 — チェックボックス複数選択）
+  const targetList = document.getElementById("step3-dive-target-list");
+  if (targetList) {
     const basicCode = AppState.step3BasicAxisCode;
     const choices = basicCode ? getTargetValues(basicCode) : [];
-    targetSel.disabled = !basicCode;
-    targetSel.innerHTML = basicCode
-      ? [`<option value="">（対象を選択）</option>`,
-         ...choices.map(v => `<option value="${_esc(v)}"${v === AppState.step3DeepDiveTarget ? " selected" : ""}>${_esc(v)}</option>`)
-        ].join("")
-      : `<option value="">（基本軸を先に選択）</option>`;
-    if (!targetSel._diveTargetInitialized) {
-      targetSel._diveTargetInitialized = true;
-      targetSel.addEventListener("change", () => setStep3DeepDiveTarget(targetSel.value));
+    const selectedTargets = AppState.step3DeepDiveTargets ?? [];
+    if (!basicCode) {
+      targetList.innerHTML = `<span style="color:var(--color-text-muted); font-size:.85rem">（基本軸を先に選択）</span>`;
+    } else {
+      targetList.innerHTML = choices.map(v =>
+        `<label class="step3-target-cb-item"><input type="checkbox" value="${_esc(v)}"${selectedTargets.includes(v) ? " checked" : ""}><span>${_esc(v)}</span></label>`
+      ).join("");
+      targetList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener("change", () => {
+          const checked = [...targetList.querySelectorAll('input[type="checkbox"]:checked')].map(el => el.value);
+          setStep3DeepDiveTargets(checked);
+        });
+      });
     }
   }
 
@@ -2953,14 +2958,11 @@ async function _runStep3() {
 
   } else if (mode === "deep_dive") {
     filterColumn = basicAxis;
-    filterValues = AppState.step3DeepDiveTarget ? [AppState.step3DeepDiveTarget] : [];
+    const diveTargets = AppState.step3DeepDiveTargets ?? [];
+    filterValues = diveTargets.length > 0 ? diveTargets : [];  // 空 = 全対象
 
     if (!basicAxis) {
       showToast("基本軸を選択してください");
-      return;
-    }
-    if (!filterValues.length) {
-      showToast("深掘り対象を選択してください");
       return;
     }
     if (!selectedCodes.length) {
@@ -3712,8 +3714,16 @@ function _onResultsChange(e) {
   // 集計方法ラジオ
   const aggRadio = e.target.closest(".step3-agg-radio");
   if (aggRadio?.checked) {
+    const idx = parseInt(aggRadio.dataset.idx, 10);
     setStep3Setting(aggRadio.dataset.q, "aggMode", aggRadio.value);
-    _rerenderQuestionFull(parseInt(aggRadio.dataset.idx, 10));
+    _rerenderQuestionFull(idx);
+    // ％表タブを自動でアクティブに（N表を見ていても%の変化を確認できるよう）
+    const pctId = `step3-tab-pct-${idx}`;
+    const tabArea = document.getElementById(pctId)?.closest(".step3-tab-area");
+    if (tabArea) {
+      tabArea.querySelectorAll(".step3-tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tabTarget === pctId));
+      tabArea.querySelectorAll(".step3-tab-panel").forEach(p => { p.hidden = p.id !== pctId; });
+    }
     return;
   }
 
@@ -3856,6 +3866,17 @@ function _onResultsClick(e) {
     tabBtn.classList.add("active");
     const target = document.getElementById(tabBtn.dataset.tabTarget);
     if (target) target.hidden = false;
+    return;
+  }
+
+  // 集計表 行列入替
+  const tableTransposeBtn = e.target.closest(".step3-table-transpose-btn");
+  if (tableTransposeBtn) {
+    const q   = tableTransposeBtn.dataset.q;
+    const idx = parseInt(tableTransposeBtn.dataset.idx, 10);
+    const cur = _getSettings(q, "").tableTranspose ?? _getSettings(q, "").transpose ?? false;
+    setStep3Setting(q, "tableTranspose", !cur);
+    _rerenderQuestionFull(idx);
     return;
   }
 
@@ -4046,7 +4067,7 @@ function _rerenderQuestionFull(idx) {
     ...result,
     rows: _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), settings.sortOrder),
   };
-  const tp = settings.transpose ?? false;
+  const tp = settings.tableTranspose ?? settings.transpose ?? false;
   // stacked100 は常に構成比モードで表示
   const effectiveAggMode = settings.chartType === "stacked100" ? "composition" : (settings.aggMode ?? "col_pct");
   const pctPanel = document.getElementById(`step3-tab-pct-${idx}`);
@@ -4952,7 +4973,7 @@ function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
     ...result,
     rows: _sortedRows(result.rows.filter(r => !hidden.includes(r.label)), settings.sortOrder),
   };
-  const tp  = settings.transpose ?? false;
+  const tp  = settings.tableTranspose ?? settings.transpose ?? false;
   const stc = settings.showTotalCol ?? true;
   const aggMode = settings.chartType === "stacked100" ? "composition" : (settings.aggMode ?? "col_pct");
 
@@ -4960,6 +4981,11 @@ function _buildTabbedTable(result, axisCategories, axisTotals, idx, settings) {
     <div class="step3-tab-bar">
       <button class="step3-tab-btn active" data-tab-target="${pctId}">％表</button>
       <button class="step3-tab-btn"        data-tab-target="${nId}">N表</button>
+      <button class="btn btn-secondary btn-sm step3-table-transpose-btn"
+              data-q="${_esc(result.question_code)}" data-idx="${idx}"
+              style="margin-left:auto; font-size:.78rem; padding:2px 10px">
+        ${tp ? "▼ 通常" : "↔ 行列入替"}
+      </button>
     </div>
     <div id="${pctId}" class="step3-tab-panel">
       ${_buildPctTable(sorted, axisCategories, axisTotals, tp, aggMode, stc)}
@@ -5133,7 +5159,8 @@ function _getSettings(questionCode, typeCode) {
     sortOrder:     s.sortOrder     ?? "original",
     collapsed:     s.collapsed     ?? false,
     excluded:      s.excluded      ?? false,
-    transpose:     s.transpose     ?? false,
+    transpose:      s.transpose      ?? false,
+    tableTranspose: s.tableTranspose ?? false,
     customColors:           s.customColors           ?? null,
     selectedPalette:        s.selectedPalette        ?? null,
     overriddenSeriesColors: s.overriddenSeriesColors ?? {},

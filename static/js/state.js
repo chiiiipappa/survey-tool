@@ -166,7 +166,8 @@ export const AppState = {
   step3Mode: "brand_comparison",           // "brand_comparison" | "deep_dive" | "attribute" | "fan" | "average"
   step3BasicAxisCode: "",                   // 基本軸 question_code
   step3ComparisonAxisCode: "",              // 比較軸 question_code (optional)
-  step3DeepDiveTarget: "",                  // 特定対象深掘りの対象値
+  step3DeepDiveTarget: "",                  // 特定対象深掘りの対象値（後方互換・非推奨）
+  step3DeepDiveTargets: [],                 // 特定対象深掘りの対象値（複数選択）
   step3SelectedQuestionCodes: [],           // 集計対象設問（明示選択分）
   // STEP3 特定分析: 属性分析
   step3AttrSimpleCodes: [],        // 単純集計対象の属性設問コード
@@ -528,6 +529,7 @@ export function setLoadedProject(resp) {
   AppState.step3BasicAxisCode    = resp.layout?.step3_basic_axis_code    ?? "";
   AppState.step3ComparisonAxisCode = resp.layout?.step3_comparison_axis_code ?? "";
   AppState.step3DeepDiveTarget   = resp.layout?.step3_deep_dive_target   ?? "";
+  AppState.step3DeepDiveTargets  = resp.layout?.step3_deep_dive_targets  ?? (AppState.step3DeepDiveTarget ? [AppState.step3DeepDiveTarget] : []);
   AppState.step3CompositeDisplayMode = resp.layout?.step3_composite_display_mode ?? "split";
   AppState.step3ColorPriority        = resp.layout?.step3_color_priority ?? "axis1";
   AppState.step3MinSampleSize        = resp.layout?.step3_min_sample_size ?? 0;
@@ -746,6 +748,7 @@ export function resetState() {
   AppState.step3BasicAxisCode         = "";
   AppState.step3ComparisonAxisCode    = "";
   AppState.step3DeepDiveTarget        = "";
+  AppState.step3DeepDiveTargets       = [];
   AppState.step3SelectedQuestionCodes = [];
   AppState.step3AttrSimpleCodes       = [];
   AppState.step3AttrCrossPairs        = [];
@@ -813,6 +816,12 @@ export function setStep3ComparisonAxis(code) {
 
 export function setStep3DeepDiveTarget(value) {
   AppState.step3DeepDiveTarget = value ?? "";
+  AppState.isDirty = true;
+  _emit();
+}
+
+export function setStep3DeepDiveTargets(values) {
+  AppState.step3DeepDiveTargets = Array.isArray(values) ? values : [];
   AppState.isDirty = true;
   _emit();
 }
